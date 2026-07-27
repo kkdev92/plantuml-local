@@ -1,0 +1,133 @@
+{
+  "name": "plantuml-local",
+  "displayName": "PlantUML Local",
+  "description": "%extension.description%",
+  "version": "0.1.0",
+  "publisher": "kkdev92",
+  "author": {
+    "name": "kkdev92",
+    "url": "https://github.com/kkdev92"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/kkdev92/plantuml-local#readme",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kkdev92/plantuml-local"
+  },
+  "bugs": {
+    "url": "https://github.com/kkdev92/plantuml-local/issues"
+  },
+  "engines": {
+    "vscode": "^1.96.0",
+    "node": ">=20.0.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Visualization",
+    "Other"
+  ],
+  "keywords": [
+    "plantuml",
+    "uml",
+    "diagram",
+    "markdown",
+    "preview",
+    "offline",
+    "sequence-diagram",
+    "wasm"
+  ],
+  "icon": "images/icon.png",
+  "galleryBanner": {
+    "color": "#1b1b1b",
+    "theme": "dark"
+  },
+  "main": "./dist/extension.js",
+  "l10n": "./l10n",
+  "activationEvents": [
+    "onLanguage:markdown"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": true,
+      "description": "Diagrams are rendered locally in a sandboxed worker; the extension reads no files and performs no network requests."
+    },
+    "virtualWorkspaces": true
+  },
+  "contributes": {
+    "markdown.markdownItPlugins": true,
+    "markdown.previewStyles": [
+      "./media/plantuml.css"
+    ],
+    "commands": [
+      {
+        "command": "plantumlLocal.clearCache",
+        "title": "%command.clearCache.title%",
+        "category": "PlantUML Local"
+      }
+    ],
+    "configuration": {
+      "title": "PlantUML Local",
+      "properties": {
+        "plantumlLocal.theme": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "light",
+            "dark"
+          ],
+          "default": "auto",
+          "description": "%config.theme.description%"
+        },
+        "plantumlLocal.logLevel": {
+          "type": "string",
+          "enum": [
+            "trace",
+            "debug",
+            "info",
+            "warn",
+            "error"
+          ],
+          "default": "info",
+          "description": "%config.logLevel.description%"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run bundle:prod",
+    "bundle": "node scripts/build.mjs",
+    "bundle:prod": "node scripts/build.mjs --production",
+    "bundle:watch": "node scripts/build.mjs --watch",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src",
+    "lint:fix": "eslint src --fix",
+    "test": "npm run test:unit && npm run test:integration",
+    "test:unit": "vitest run --project unit",
+    "test:integration": "npm run bundle && vitest run --project integration",
+    "test:coverage": "vitest run --project unit --coverage",
+    "package": "vsce package --no-dependencies --out plantuml-local.vsix",
+    "verify:vsix": "node scripts/verify-vsix.mjs",
+    "install-local": "npm run package && code --install-extension plantuml-local.vsix --force",
+    "uninstall-local": "code --uninstall-extension kkdev92.plantuml-local",
+    "clean": "rimraf dist coverage .vsix-verify-temp"
+  },
+  "dependencies": {
+    "@kkdev92/vscode-ext-kit": "^0.4.0",
+    "@plantuml/core": "^1.2026.6",
+    "happy-dom": "^20.11.1"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.0",
+    "@types/markdown-it": "^14.1.2",
+    "@types/node": "^22.0.0",
+    "@types/vscode": "~1.96.0",
+    "@vitest/coverage-v8": "^4.0.17",
+    "@vscode/vsce": "^3.7.1",
+    "esbuild": "^0.28.1",
+    "eslint": "^10.7.0",
+    "rimraf": "^6.1.2",
+    "typescript": "~5.9.3",
+    "typescript-eslint": "^8.61.0",
+    "vitest": "^4.0.17"
+  }
+}

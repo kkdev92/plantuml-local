@@ -1,0 +1,69 @@
+/* Styles injected into the Markdown preview. The diagram itself is left
+   untouched; only placement, loading and failure states are styled. */
+
+.plantuml-diagram {
+	margin: 1rem 0;
+	/* Wide diagrams scroll horizontally instead of being squeezed. */
+	overflow-x: auto;
+	text-align: center;
+}
+
+.plantuml-diagram svg {
+	max-width: 100%;
+	height: auto;
+}
+
+/* PlantUML draws its own background for some diagram types but not others
+   (use-case diagrams get a #1B1B1B backdrop in dark mode; sequence diagrams
+   draw white strokes on nothing). The backdrop therefore follows the palette
+   the diagram was RENDERED with — not the page theme. Deciding by page theme
+   erases the text whenever plantumlLocal.theme is pinned to light or dark. */
+.plantuml-diagram--light svg {
+	background-color: #ffffff;
+	border-radius: 4px;
+	padding: 8px;
+}
+
+/* Matches the background colour PlantUML uses for dark renders, so diagrams
+   that do draw their own backdrop show no seam. */
+.plantuml-diagram--dark svg {
+	background-color: #1b1b1b;
+	border-radius: 4px;
+	padding: 8px;
+}
+
+.plantuml-loading {
+	min-height: 6rem;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	border: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.35));
+	border-radius: 4px;
+	color: var(--vscode-descriptionForeground, #888);
+	font-size: 0.9em;
+}
+
+.plantuml-error {
+	margin: 1rem 0;
+	padding: 0.75rem 1rem;
+	border: 1px solid var(--vscode-inputValidation-errorBorder, #be1100);
+	border-radius: 4px;
+	background-color: var(--vscode-inputValidation-errorBackground, rgba(190, 17, 0, 0.1));
+}
+
+.plantuml-error pre {
+	margin: 0.5rem 0 0;
+	white-space: pre-wrap;
+	font-size: 0.9em;
+}
+
+.plantuml-error .plantuml-source {
+	opacity: 0.75;
+}
+
+@media print {
+	.plantuml-diagram {
+		overflow-x: visible;
+		break-inside: avoid;
+	}
+}

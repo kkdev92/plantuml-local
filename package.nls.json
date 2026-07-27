@@ -1,0 +1,6 @@
+{
+  "extension.description": "Render ```plantuml code blocks in the built-in Markdown preview. No Java, no server, no network — diagrams never leave your machine.",
+  "command.clearCache.title": "Clear Render Cache and Re-render",
+  "config.theme.description": "Diagram colour palette. \"auto\" follows the VS Code colour theme.",
+  "config.logLevel.description": "Log level for the PlantUML Local output channel."
+}

@@ -1,0 +1,61 @@
+# Security Policy
+
+## Supported Versions
+
+| Version | Supported          |
+| ------- | ------------------ |
+| 0.1.x   | :white_check_mark: |
+
+## Reporting a Vulnerability
+
+1. **Do NOT** create a public GitHub issue.
+2. Use GitHub's **"Report a vulnerability"** feature in the Security tab of this repository.
+
+Reports are looked at on a best-effort basis; please allow a reasonable disclosure window.
+
+## Security Model
+
+This extension's core promise is that **diagram source never leaves the machine**. The measures below back that up.
+
+### No network I/O
+
+- The rendering engine (`@plantuml/core`), the Graphviz WebAssembly and all runtime assets ship inside the VSIX and are loaded from disk.
+- **Network APIs are disabled inside the render worker**: `fetch`, `XMLHttpRequest`, `WebSocket` and `EventSource` are replaced with throwing stubs before the engine loads (`src/worker/network-guard.ts`). The engine bundle contains one real `XMLHttpRequest` call site (the browser build's URL-include loader); with the guard in place, reaching it fails the render instead of making a request.
+- Neither bundle contains a rendering-service URL; `scripts/verify-vsix.mjs` checks every package for `plantuml.com/plantuml` / `kroki.io` references and CI runs it on each build.
+- There is no telemetry of any kind.
+
+### Rendering is isolated in a worker thread
+
+The engine requires `window` / `document` globals. They are created inside a `worker_threads` worker, never on the extension host's `globalThis`, so no other extension's environment detection is affected, and a crashing render cannot take the extension host down.
+
+### The preview receives only sanitised, static SVG
+
+The Markdown preview webview runs none of this extension's code — no `previewScripts` are contributed. Before an SVG leaves the worker it is parsed as `image/svg+xml` and stripped of:
+
+- script-bearing elements (`<script>`, `<foreignObject>`, `<iframe>`, `<embed>`, `<object>`)
+- event handler attributes (`on*`) — on every element including the root `<svg>`
+- `href` / `xlink:href` / `src` values that are not in-document fragment references (`#…`) — this covers `javascript:` and `data:` URIs, and the `<a href>` / `<image href>` output of PlantUML's `[[url]]` hyperlink and `<img:url>` creole syntax
+
+Error messages and user source shown in error boxes are HTML-escaped.
+
+### Remote references are rejected up front
+
+`!include https://…` and `!theme … from https://…` never reach the engine; the block renders an explanatory message instead. Local-file includes are not supported by the browser build of the engine and fail harmlessly.
+
+### Untrusted and virtual workspaces
+
+The extension declares support for untrusted and virtual workspaces: it reads no workspace files, spawns no processes, and executes nothing from the workspace. The only input it processes is the text of ` ```plantuml ` fences, inside a worker, with the output sanitised as above.
+
+### Supply chain notes
+
+- `@plantuml/core` is pinned to `^1.2026.6` — the first MIT-licensed release — and its two engine files are copied verbatim into the package (no CDN at build or run time).
+- happy-dom ships a self-signed TLS certificate (private key included) for HTTPS emulation in its fetch stack. This extension never uses that stack; the build replaces the certificate module with an empty stub, and `verify-vsix` fails the build if key material reappears in the bundle.
+
+### Denial-of-service containment
+
+Rendering pathological input is CPU-bound inside the worker, and renders are serialised, so a hung render would wedge the queue. Each render has a 30-second ceiling; on timeout the request fails, the worker is terminated and a fresh one serves the next request. The preview and the extension host stay responsive throughout.
+
+## Known Limitations
+
+- The engine itself is a large compiled artifact (TeaVM output); we treat it as trusted upstream code and pin its version.
+- A hostile document can still waste CPU in 30-second increments (one worker thread at a time); it cannot block the editor or escape the worker.

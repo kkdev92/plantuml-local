@@ -1,0 +1,7 @@
+{
+  "Rendering diagram…": "図を描画しています…",
+  "Failed to render diagram": "図を描画できませんでした",
+  "The PlantUML source is empty.": "PlantUML のソースが空です。",
+  "URL-based external references (!include, !theme) are not supported.": "URL による外部参照 (!include や !theme) には対応していません。",
+  "PlantUML render cache cleared.": "PlantUML の描画キャッシュを捨てました。"
+}
