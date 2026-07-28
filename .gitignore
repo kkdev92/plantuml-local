@@ -1,6 +1,7 @@
 node_modules/
 dist/
 coverage/
+work/
 .vsix-verify-temp/
 *.vsix
 *.log
