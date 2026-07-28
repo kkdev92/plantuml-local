@@ -4,6 +4,7 @@ test/**
 scripts/**
 node_modules/**
 coverage/**
+work/**
 .vsix-verify-temp/**
 
 # Development configuration

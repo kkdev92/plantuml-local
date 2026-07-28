@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-07-28
+
+### Changed
+
+- Migrated to `@kkdev92/vscode-ext-kit` 1.1.0 (from 0.4.0), which is a
+  ground-up redesign and not backwards compatible with 0.x.
+  - The output channel is now a native `LogOutputChannel`: timestamps, level
+    colours, the Output panel's level dropdown and
+    `Developer: Set Log Level` all work. **`plantumlLocal.logLevel` is now
+    applied on top of the panel's own level selector** — raising the setting
+    alone no longer guarantees that `trace`/`debug` lines are visible.
+  - Settings are read through a validated schema, so a hand-edited
+    `settings.json` falls back to the declared default instead of reaching
+    the renderer as an unchecked value.
+  - `plantumlLocal.theme` changes are now observed per key rather than by
+    filtering whole-configuration events.
+- Development now requires Node.js 22 or newer, matching the kit and
+  replacing Node 20 (end of life 2026-04-30). The shipped bundle still
+  targets the Node 20 runtime of the VS Code 1.96 extension host, so the
+  supported VS Code range is unchanged.
+
 ## [0.1.0] - 2026-07-27
 
 First public release.
@@ -37,5 +58,6 @@ First public release.
 - happy-dom's bundled self-signed TLS certificate (unused fetch machinery) is
   stripped from the worker bundle at build time.
 
-[Unreleased]: https://github.com/kkdev92/plantuml-local/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/kkdev92/plantuml-local/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/kkdev92/plantuml-local/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/kkdev92/plantuml-local/releases/tag/v0.1.0

@@ -2,7 +2,7 @@
   "name": "plantuml-local",
   "displayName": "PlantUML Local",
   "description": "%extension.description%",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "kkdev92",
   "author": {
     "name": "kkdev92",
@@ -19,7 +19,7 @@
   },
   "engines": {
     "vscode": "^1.96.0",
-    "node": ">=20.0.0"
+    "node": ">=22.0.0"
   },
   "categories": [
     "Programming Languages",
@@ -112,7 +112,7 @@
     "clean": "rimraf dist coverage .vsix-verify-temp"
   },
   "dependencies": {
-    "@kkdev92/vscode-ext-kit": "^0.4.0",
+    "@kkdev92/vscode-ext-kit": "^1.1.0",
     "@plantuml/core": "^1.2026.6",
     "happy-dom": "^20.11.1"
   },

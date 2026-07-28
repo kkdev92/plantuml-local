@@ -4,18 +4,37 @@
  * @kkdev92/vscode-ext-kit are provided.
  */
 
+/**
+ * Shape of `vscode.LogOutputChannel`. The kit's logger defaults to
+ * `channelMode: 'log'`, so it creates the channel with `{ log: true }` and
+ * calls the per-level methods instead of `appendLine`.
+ */
+export interface LogOutputChannelStub {
+  trace: (message: string) => void;
+  debug: (message: string) => void;
+  info: (message: string) => void;
+  warn: (message: string) => void;
+  error: (message: string) => void;
+  appendLine: (message: string) => void;
+  show: (preserveFocus?: boolean) => void;
+  dispose: () => void;
+}
+
 export interface VscodeStub {
   ColorThemeKind: Record<'Light' | 'Dark' | 'HighContrast' | 'HighContrastLight', number>;
   window: {
     activeColorTheme: { kind: number };
-    createOutputChannel: (name: string) => unknown;
+    createOutputChannel: (name: string, options?: { log?: boolean }) => LogOutputChannelStub;
     showInformationMessage: (...args: unknown[]) => Promise<undefined>;
     showWarningMessage: (...args: unknown[]) => Promise<undefined>;
     showErrorMessage: (...args: unknown[]) => Promise<undefined>;
     onDidChangeActiveColorTheme: (listener: () => void) => { dispose(): void };
   };
   workspace: {
-    getConfiguration: (prefix?: string) => {
+    getConfiguration: (
+      section?: string,
+      scope?: unknown
+    ) => {
       get: <T>(key: string, fallback?: T) => T | undefined;
       update: () => Promise<void>;
     };
@@ -50,6 +69,11 @@ export function createVscodeStub(): VscodeStub {
         return theme;
       },
       createOutputChannel: () => ({
+        trace: () => undefined,
+        debug: () => undefined,
+        info: () => undefined,
+        warn: () => undefined,
+        error: () => undefined,
         appendLine: () => undefined,
         show: () => undefined,
         dispose: () => undefined,

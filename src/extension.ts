@@ -1,13 +1,13 @@
 import {
-  createLogger,
+  createExtensionKit,
   debounce,
+  defineConfigSchema,
   escapeHtml,
-  getSetting,
-  registerCommands,
+  field,
+  l10n,
+  s,
   showInfo,
-  t,
 } from '@kkdev92/vscode-ext-kit';
-import type { LogLevel } from '@kkdev92/vscode-ext-kit';
 import type MarkdownIt from 'markdown-it';
 import * as vscode from 'vscode';
 
@@ -21,10 +21,18 @@ import { RendererClient, defaultWorkerPath } from './render/client';
  * src/worker; this file stays declarative.
  */
 
-type ThemeSetting = 'auto' | 'light' | 'dark';
+/**
+ * Typed mirror of `contributes.configuration`. Every read is validated
+ * against the schema, so a hand-edited or stale `settings.json` falls back
+ * to the declared default instead of reaching the renderer as garbage.
+ */
+const config = defineConfigSchema(EXTENSION_ID, {
+  [CONFIG.THEME]: field(s.enum('auto', 'light', 'dark'), 'auto'),
+  [CONFIG.LOG_LEVEL]: field(s.enum('trace', 'debug', 'info', 'warn', 'error'), 'info'),
+});
 
 function isDark(): boolean {
-  const setting = getSetting<ThemeSetting>(EXTENSION_ID, CONFIG.THEME, 'auto');
+  const setting = config.get(CONFIG.THEME);
   if (setting === 'light') {
     return false;
   }
@@ -39,21 +47,25 @@ function isDark(): boolean {
 export function activate(context: vscode.ExtensionContext): {
   extendMarkdownIt(md: MarkdownIt): MarkdownIt;
 } {
-  const logger = createLogger(EXTENSION_NAME, {
-    level: getSetting<LogLevel>(EXTENSION_ID, CONFIG.LOG_LEVEL, 'info'),
-    configSection: `${EXTENSION_ID}.${CONFIG.LOG_LEVEL}`,
+  // The kit owns the logger plus a disposable scope, and registers itself
+  // in context.subscriptions — everything below is torn down with it.
+  const kit = createExtensionKit<typeof COMMANDS.CLEAR_CACHE>(context, EXTENSION_NAME, {
+    logger: { level: config.get(CONFIG.LOG_LEVEL) },
   });
-  context.subscriptions.push(logger);
+  const { logger } = kit;
 
   const renderer = new RendererClient(defaultWorkerPath(), logger);
-  context.subscriptions.push({ dispose: () => { renderer.dispose(); } });
 
   // Rendering five diagrams on one page settles five promises in quick
   // succession; coalesce them into a single preview refresh.
   const requestRefresh = debounce(() => {
     void vscode.commands.executeCommand('markdown.preview.refresh');
   }, REFRESH_DEBOUNCE_MS);
-  context.subscriptions.push({ dispose: () => { requestRefresh.cancel(); } });
+
+  kit.disposables.push(
+    { dispose: () => { renderer.dispose(); } },
+    { dispose: () => { requestRefresh.cancel(); } }
+  );
 
   const plugin = createPlantUmlPlugin({
     isDark,
@@ -62,31 +74,34 @@ export function activate(context: vscode.ExtensionContext): {
     escapeHtml,
     log: logger,
     labels: {
-      loading: t('Rendering diagram…'),
-      failedTitle: t('Failed to render diagram'),
-      emptySource: t('The PlantUML source is empty.'),
-      remoteReference: t('URL-based external references (!include, !theme) are not supported.'),
+      loading: l10n.t('Rendering diagram…'),
+      failedTitle: l10n.t('Failed to render diagram'),
+      emptySource: l10n.t('The PlantUML source is empty.'),
+      remoteReference: l10n.t('URL-based external references (!include, !theme) are not supported.'),
     },
   });
 
-  registerCommands(context, logger, {
+  kit.registerCommands({
     [COMMANDS.CLEAR_CACHE]: async () => {
       plugin.clearCache();
       logger.info('Render cache cleared');
-      await showInfo(t('PlantUML render cache cleared.'));
+      await showInfo(l10n.t('PlantUML render cache cleared.'));
     },
   });
 
-  context.subscriptions.push(
+  kit.disposables.push(
     // Re-render with the matching palette when the colour theme flips.
     vscode.window.onDidChangeActiveColorTheme(() => {
       logger.debug('Colour theme changed; re-rendering diagrams');
       plugin.clearCache();
     }),
-    vscode.workspace.onDidChangeConfiguration((event) => {
-      if (event.affectsConfiguration(`${EXTENSION_ID}.${CONFIG.THEME}`)) {
-        plugin.clearCache();
-      }
+    config.onDidChange(CONFIG.THEME, () => {
+      plugin.clearCache();
+    }),
+    // The level arrives schema-validated, unlike the logger's own
+    // `configSection` re-read.
+    config.onDidChange(CONFIG.LOG_LEVEL, (level) => {
+      logger.setLevel(level);
     })
   );
 
