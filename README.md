@@ -206,7 +206,7 @@ For the full threat model and for vulnerability reporting, see
 
 ## Platform Requirements
 
-- VS Code 1.96 or later
+- VS Code 1.101 or later
 - Windows, macOS or Linux, on x64 or ARM64
 
 That's it — no Java runtime, no Graphviz install, no external tools.
