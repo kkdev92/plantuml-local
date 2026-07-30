@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The minimum supported VS Code version is now 1.101** (from 1.96). VS Code
+  1.101 is the first release whose extension host runs Node 22 — it moved to
+  Electron 35, which bundles Node 22.15, while 1.96 through 1.100 shipped
+  Node 20. `engines.node` has declared `>=22.0.0` since 0.2.0, so until now
+  that requirement was not actually satisfied by the oldest supported host.
+  The bundle target moves from `node20` to `node22` accordingly.
+
+  VS Code 1.101 was released in June 2025. Installations older than that keep
+  working on 0.2.1; they simply stop receiving updates.
+
 ## [0.2.1] - 2026-07-31
 
 ### Added

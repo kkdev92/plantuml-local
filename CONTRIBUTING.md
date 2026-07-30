@@ -11,7 +11,7 @@ This project follows the [Contributor Covenant](CODE_OF_CONDUCT.md). By particip
 ### Prerequisites
 
 - Node.js ≥ 22 (matches `engines.node` and CI)
-- VS Code ≥ 1.96
+- VS Code ≥ 1.101
 - No Java, no Graphviz, no Docker — the whole point of this project.
 
 ### Development Setup

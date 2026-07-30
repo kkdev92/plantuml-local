@@ -65,7 +65,7 @@ const happyDomCertStub = {
 const shared = {
   bundle: true,
   platform: 'node',
-  target: 'node20',
+  target: 'node22',
   format: 'cjs',
   sourcemap: !production,
   minify: production,
