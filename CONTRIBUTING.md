@@ -10,7 +10,7 @@ This project follows the [Contributor Covenant](CODE_OF_CONDUCT.md). By particip
 
 ### Prerequisites
 
-- Node.js ≥ 20
+- Node.js ≥ 22 (matches `engines.node` and CI)
 - VS Code ≥ 1.96
 - No Java, no Graphviz, no Docker — the whole point of this project.
 
@@ -80,6 +80,8 @@ Use [Conventional Commits](https://www.conventionalcommits.org/): `feat:`, `fix:
 - One logical change per PR.
 - Describe what changed and why; link related issues.
 - Update README / CHANGELOG when behaviour changes.
+- If you add, remove or upgrade a dependency that ships inside the VSIX, update
+  [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and `third-party/` to match.
 
 ## Reporting Issues
 

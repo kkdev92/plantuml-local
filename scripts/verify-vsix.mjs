@@ -1,13 +1,15 @@
 /**
  * VSIX verification.
  *
- * Extracts the packaged VSIX and checks three things:
+ * Extracts the packaged VSIX and checks four things:
  *
  * 1. Everything the extension needs at runtime is present
  *    (bundles, engine files, stylesheet, l10n, manifest assets).
  * 2. Nothing that must not ship is present
  *    (sources, tests, node_modules, source maps, private keys).
- * 3. The packaged worker actually renders — a Japanese sequence diagram
+ * 3. Third-party licence notices ship with the bundled code — the MIT and
+ *    EPL licences of what we bundle require it.
+ * 4. The packaged worker actually renders — a Japanese sequence diagram
  *    is rendered from the extracted VSIX, which proves the engine files
  *    and the worker bundle fit together without Java or network access.
  *
@@ -30,6 +32,7 @@ const REQUIRED = [
   'extension/readme.md',
   'extension/LICENSE.txt',
   'extension/changelog.md',
+  'extension/THIRD_PARTY_NOTICES.md',
   'extension/dist/extension.js',
   'extension/dist/worker.js',
   'extension/dist/engine/plantuml.js',
@@ -106,6 +109,32 @@ function checkFiles() {
   }
 }
 
+/**
+ * Every licence text in third-party/ must reach the VSIX, and
+ * THIRD_PARTY_NOTICES.md must reference it. Adding a bundled dependency
+ * without its notice fails the build here rather than after publishing.
+ */
+function checkThirdPartyNotices() {
+  const sourceDir = join(projectRoot, 'third-party');
+  const licences = readdirSync(sourceDir).filter((f) => f.endsWith('.txt'));
+
+  if (licences.length === 0) {
+    fail('third-party/ contains no licence texts');
+    return;
+  }
+
+  const notices = readFileSync(join(extractDir, 'extension/THIRD_PARTY_NOTICES.md'), 'utf8');
+
+  for (const file of licences) {
+    if (!existsSync(join(extractDir, 'extension/third-party', file))) {
+      fail(`missing from VSIX: third-party/${file}`);
+    } else if (!notices.includes(file)) {
+      fail(`THIRD_PARTY_NOTICES.md does not reference third-party/${file}`);
+    }
+  }
+  ok(`third-party licence texts ship and are referenced (${String(licences.length)} files)`);
+}
+
 function checkNoSecrets() {
   const worker = readFileSync(join(extractDir, 'extension/dist/worker.js'), 'utf8');
   if (worker.includes('BEGIN PRIVATE KEY') || worker.includes('BEGIN CERTIFICATE')) {
@@ -171,6 +200,7 @@ const vsixPath = findVsix();
 console.log(`Verifying ${vsixPath}`);
 extract(vsixPath);
 checkFiles();
+checkThirdPartyNotices();
 checkNoSecrets();
 checkNoExternalRenderers();
 await renderSmoke();

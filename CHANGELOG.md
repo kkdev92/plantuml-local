@@ -7,8 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `THIRD_PARTY_NOTICES.md` and `third-party/`, collecting the copyright and
+  licence texts of every component bundled in the VSIX (PlantUML, Viz.js,
+  Graphviz, Expat, happy-dom and its dependencies, and the extension kit).
+  `verify-vsix` now fails the build if a licence text is missing from the
+  package or unreferenced by the notices file.
+
 ### Changed
 
+- Documentation only: README and `SECURITY.md` now describe the local-rendering
+  and network behaviour as design and implementation rather than as absolute
+  guarantees, add a `Known Limitations` section, and state explicitly that the
+  render worker is an isolation boundary rather than a security sandbox. No
+  behaviour changes.
+- `SECURITY.md` supported-versions table now tracks the latest release instead
+  of naming `0.1.x`.
 - Development now uses TypeScript 6.0 (from 5.9). Build tooling only — esbuild
   does the transpiling, so the shipped bundles are unaffected.
 
