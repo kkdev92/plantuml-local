@@ -49,7 +49,7 @@
   "capabilities": {
     "untrustedWorkspaces": {
       "supported": true,
-      "description": "Diagrams are rendered locally in a sandboxed worker; the extension reads no files and performs no network requests."
+      "description": "Diagrams are rendered locally in a worker thread; the extension reads no workspace files and makes no network requests."
     },
     "virtualWorkspaces": true
   },

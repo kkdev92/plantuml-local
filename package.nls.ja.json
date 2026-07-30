@@ -1,5 +1,5 @@
 {
-  "extension.description": "組み込みの Markdown プレビューで ```plantuml コードブロックを図にします。Java もサーバもネットワークも不要で、図のソースは手元の環境から出ません。",
+  "extension.description": "組み込みの Markdown プレビューで ```plantuml コードブロックを図にします。Java もサーバもネットワーク接続も不要。図のソースは手元の環境で描画します。",
   "command.clearCache.title": "描画キャッシュを捨てて描き直す",
   "config.theme.description": "図の配色。\"auto\" は VS Code のテーマに追随します。",
   "config.logLevel.description": "出力パネル (PlantUML Local) に出すログの水準。出力パネル側のレベル選択も併せて効きます。"
