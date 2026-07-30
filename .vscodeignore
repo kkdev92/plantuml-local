@@ -17,6 +17,8 @@ vitest.config.ts
 package-lock.json
 
 # Docs that live on GitHub, not in the package (README/LICENSE/CHANGELOG ship automatically)
+# THIRD_PARTY_NOTICES.md and third-party/ must NOT be added here: the licences of
+# the code we bundle require their notices to travel with the VSIX.
 CONTRIBUTING.md
 SECURITY.md
 CODE_OF_CONDUCT.md
