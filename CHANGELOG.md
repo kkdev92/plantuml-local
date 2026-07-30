@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-07-31
+
 ### Added
 
 - `THIRD_PARTY_NOTICES.md` and `third-party/`, collecting the copyright and
@@ -78,6 +80,7 @@ First public release.
 - happy-dom's bundled self-signed TLS certificate (unused fetch machinery) is
   stripped from the worker bundle at build time.
 
-[Unreleased]: https://github.com/kkdev92/plantuml-local/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/kkdev92/plantuml-local/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/kkdev92/plantuml-local/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/kkdev92/plantuml-local/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/kkdev92/plantuml-local/releases/tag/v0.1.0
