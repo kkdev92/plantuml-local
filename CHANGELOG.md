@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-08-08
+
+Rebuilt on `@kkdev92/vscode-ext-kit` 3.x. Rendering, sanitisation, the worker
+queue and the markdown-it plugin are untouched — what changed is how the
+extension starts and stops. Diagrams render exactly as they did.
+
+### Breaking
+
+- **VS Code 1.125 or later is now required**, up from 1.101. The framework's
+  minimum cascades here. Installations on older versions keep 0.3.0 and stop
+  receiving updates.
+- **`plantumlLocal.logLevel` is a floor, not the only filter.** The output
+  channel is a `LogOutputChannel` now, and VS Code decides what one of those
+  shows — an extension cannot raise its own channel's level. The setting can
+  still make the log quieter. To see `debug`, run _Developer: Set Log Level_ and
+  pick **PlantUML Local**; that is a per-channel level and it persists across
+  restarts. In exchange the channel gains per-level colouring and the panel's
+  own filter.
+- **The output channel is named "PlantUML Local"** — unchanged in text, but it
+  is a log channel rather than a plain one, so it appears with the log channels
+  in the Output dropdown.
+
+### Changed
+
+- Activation is one declaration, validated before VS Code is touched: a
+  duplicate id or a missing dependency now fails at import rather than
+  half-registering at runtime. The render worker and the debounced preview
+  refresh are owned by the framework and released on its single cleanup path,
+  in reverse order, within a shutdown budget.
+- `extendMarkdownIt` is declared rather than assembled by hand. `activate` is
+  asynchronous as a result — VS Code awaits it before reading the contribution,
+  which is what `markdown-language-features` has always done.
+
 ## [0.3.0] - 2026-07-31
 
 ### Changed
@@ -95,6 +128,7 @@ First public release.
   stripped from the worker bundle at build time.
 
 [Unreleased]: https://github.com/kkdev92/plantuml-local/compare/v0.3.0...HEAD
+[0.4.0]: https://github.com/kkdev92/plantuml-local/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/kkdev92/plantuml-local/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/kkdev92/plantuml-local/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/kkdev92/plantuml-local/compare/v0.1.0...v0.2.0

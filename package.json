@@ -2,7 +2,7 @@
   "name": "plantuml-local",
   "displayName": "PlantUML Local",
   "description": "%extension.description%",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "publisher": "kkdev92",
   "author": {
     "name": "kkdev92",
