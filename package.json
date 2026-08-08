@@ -2,7 +2,7 @@
   "name": "plantuml-local",
   "displayName": "PlantUML Local",
   "description": "%extension.description%",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "publisher": "kkdev92",
   "author": {
     "name": "kkdev92",
@@ -18,8 +18,8 @@
     "url": "https://github.com/kkdev92/plantuml-local/issues"
   },
   "engines": {
-    "vscode": "^1.101.0",
-    "node": ">=22.0.0"
+    "vscode": "^1.125.0",
+    "node": ">=22.12.0"
   },
   "categories": [
     "Programming Languages",
@@ -112,7 +112,7 @@
     "clean": "rimraf dist coverage .vsix-verify-temp"
   },
   "dependencies": {
-    "@kkdev92/vscode-ext-kit": "^1.1.0",
+    "@kkdev92/vscode-ext-kit": "^3.0.0-alpha.3",
     "@plantuml/core": "^1.2026.6",
     "happy-dom": "^20.11.1"
   },
@@ -120,7 +120,7 @@
     "@eslint/js": "^10.0.0",
     "@types/markdown-it": "^14.1.2",
     "@types/node": "^22.0.0",
-    "@types/vscode": "~1.101.0",
+    "@types/vscode": "~1.125.0",
     "@vitest/coverage-v8": "^4.0.17",
     "@vscode/vsce": "^3.7.1",
     "esbuild": "^0.28.1",

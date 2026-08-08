@@ -153,7 +153,7 @@ from the Command Palette.
 | Setting | Default | Description |
 | --- | --- | --- |
 | `plantumlLocal.theme` | `auto` | Diagram palette. `auto` follows the VS Code theme; `light` / `dark` pin it |
-| `plantumlLocal.logLevel` | `info` | Log level for the *PlantUML Local* output channel |
+| `plantumlLocal.logLevel` | `info` | Floor for the *PlantUML Local* output channel. VS Code's own channel level applies first — see [Troubleshooting](#troubleshooting) |
 
 ---
 
@@ -206,10 +206,13 @@ For the full threat model and for vulnerability reporting, see
 
 ## Platform Requirements
 
-- VS Code 1.101 or later
+- **VS Code 1.125 or later**
 - Windows, macOS or Linux, on x64 or ARM64
 
 That's it — no Java runtime, no Graphviz install, no external tools.
+
+> **Upgrading from 0.3.x?** The minimum moved from 1.101 to 1.125. Older
+> installations keep the version they have and stop receiving updates.
 
 CI runs the test suite on Windows, macOS and Linux (x64 on Windows and Linux,
 ARM64 on macOS). The extension is plain JavaScript and WebAssembly, so other
@@ -223,6 +226,7 @@ combinations are expected to work; please open an issue if one does not.
 - **A red syntax-error box appears**: The message comes from the PlantUML engine — only that diagram is affected, and the rest of the page still renders
 - **Colours look wrong after switching themes**: Backgrounds follow the palette the diagram was *rendered* with. If you pinned `plantumlLocal.theme`, that palette wins by design
 - **Layout differs from plantuml.com**: Text is measured with approximate metrics in the Node renderer, so box widths, line wrapping and element placement can differ slightly
+- **Setting `logLevel: debug` shows nothing new**: The channel is a `LogOutputChannel` now, and VS Code decides what one of those shows — an extension cannot raise its own channel's level. Run **Developer: Set Log Level** and pick *PlantUML Local*; that choice is per channel and survives a restart. `plantumlLocal.logLevel` is a floor on top of it, so it can only make the log quieter
 
 ---
 
@@ -244,7 +248,7 @@ Helpful things when reporting bugs:
 
 - OS / architecture / VS Code version
 - The smallest PlantUML source that reproduces the issue
-- Output from *Output → PlantUML Local* at `logLevel: debug`
+- Output from *Output → PlantUML Local*, with the level set to Debug via **Developer: Set Log Level**
 
 Security-related reports should follow [SECURITY.md](SECURITY.md).
 Really appreciate you using PlantUML Local 💛

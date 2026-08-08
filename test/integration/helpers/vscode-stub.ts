@@ -1,7 +1,12 @@
 /**
- * Minimal `vscode` module stub for loading dist/extension.js outside VS
- * Code. Only the APIs actually touched by the extension and by
- * @kkdev92/vscode-ext-kit are provided.
+ * Minimal `vscode` module stub for loading dist/extension.js outside VS Code.
+ *
+ * Only what the extension and @kkdev92/vscode-ext-kit actually touch. Some of it
+ * is here for the framework rather than for this extension: runtime preflight
+ * reads `env.uiKind`, `workspace.isTrusted` and the folder list at activation,
+ * and the enum objects exist because capability adapters are constructed then
+ * too. None of them is called — an extension that renders diagrams opens no
+ * quick pick and creates no tree view.
  */
 
 /**
@@ -22,6 +27,14 @@ export interface LogOutputChannelStub {
 
 export interface VscodeStub {
   ColorThemeKind: Record<'Light' | 'Dark' | 'HighContrast' | 'HighContrastLight', number>;
+  UIKind: Record<'Desktop' | 'Web', number>;
+  ProgressLocation: Record<'SourceControl' | 'Window' | 'Notification', number>;
+  StatusBarAlignment: Record<'Left' | 'Right', number>;
+  LanguageStatusSeverity: Record<'Information' | 'Warning' | 'Error', number>;
+  TreeItemCheckboxState: Record<'Unchecked' | 'Checked', number>;
+  ViewColumn: Record<'Active' | 'Beside' | 'One', number>;
+  Uri: { joinPath: (base: unknown, ...parts: string[]) => unknown; file: (p: string) => unknown };
+  env: { uiKind: number; language: string };
   window: {
     activeColorTheme: { kind: number };
     createOutputChannel: (name: string, options?: { log?: boolean }) => LogOutputChannelStub;
@@ -39,6 +52,9 @@ export interface VscodeStub {
       update: () => Promise<void>;
     };
     onDidChangeConfiguration: (listener: (e: unknown) => void) => { dispose(): void };
+    /** Both read by the framework's runtime preflight, at activation. */
+    isTrusted: boolean;
+    workspaceFolders: unknown[] | undefined;
   };
   commands: {
     registerCommand: (id: string, handler: (...args: unknown[]) => unknown) => { dispose(): void };
@@ -64,6 +80,17 @@ export function createVscodeStub(): VscodeStub {
 
   return {
     ColorThemeKind: { Light: 1, Dark: 2, HighContrast: 3, HighContrastLight: 4 },
+    UIKind: { Desktop: 1, Web: 2 },
+    ProgressLocation: { SourceControl: 1, Window: 10, Notification: 15 },
+    StatusBarAlignment: { Left: 1, Right: 2 },
+    LanguageStatusSeverity: { Information: 0, Warning: 1, Error: 2 },
+    TreeItemCheckboxState: { Unchecked: 0, Checked: 1 },
+    ViewColumn: { Active: -1, Beside: -2, One: 1 },
+    Uri: {
+      joinPath: (base: unknown, ...parts: string[]) => ({ base, parts }),
+      file: (p: string) => ({ scheme: 'file', fsPath: p, toString: () => `file://${p}` }),
+    },
+    env: { uiKind: 1, language: 'en' },
     window: {
       get activeColorTheme() {
         return theme;
@@ -92,6 +119,8 @@ export function createVscodeStub(): VscodeStub {
         update: async () => undefined,
       }),
       onDidChangeConfiguration: () => ({ dispose: () => undefined }),
+      isTrusted: true,
+      workspaceFolders: undefined,
     },
     commands: {
       registerCommand: (id, handler) => {
