@@ -15,17 +15,53 @@ import { createVscodeStub, type VscodeStub } from './helpers/vscode-stub';
 const extensionPath = join(__dirname, '../../dist/extension.js');
 const require = createRequire(import.meta.url);
 
+/**
+ * `activate` is asynchronous: the framework starts hosted services inside it,
+ * and the plugin does not exist until they have run. VS Code awaits it before
+ * reading `extendMarkdownIt` off the resolved value — `getContributedMarkdownItPlugins`
+ * in markdown-language-features stores the thenable and awaits it — so this
+ * mirrors what the editor does.
+ */
 interface ExtensionModule {
-  activate(context: { subscriptions: { dispose(): void }[] }): {
+  activate(context: unknown): Promise<{
     extendMarkdownIt(md: unknown): { renderer: { rules: Record<string, unknown> } };
-  };
-  deactivate(): void;
+  }>;
+  deactivate(): Promise<void>;
 }
 
 let vscodeStub: VscodeStub;
 let extension: ExtensionModule;
-let context: { subscriptions: { dispose(): void }[] };
-let api: ReturnType<ExtensionModule['activate']>;
+/**
+ * Enough of an ExtensionContext for the framework to build every capability
+ * adapter. It wires storage, secrets and webviews at activation regardless of
+ * whether the extension declares any, so these have to exist even though this
+ * extension uses none of them.
+ */
+interface ContextStub {
+  subscriptions: { dispose(): void }[];
+  globalState: { get(): undefined; update(): Promise<void>; keys(): string[]; setKeysForSync(): void };
+  workspaceState: { get(): undefined; update(): Promise<void>; keys(): string[] };
+  secrets: { get(): Promise<undefined>; store(): Promise<void>; delete(): Promise<void> };
+  extensionUri: unknown;
+}
+
+function createContextStub(): ContextStub {
+  return {
+    subscriptions: [],
+    globalState: {
+      get: () => undefined,
+      update: async () => undefined,
+      keys: () => [],
+      setKeysForSync: () => undefined,
+    },
+    workspaceState: { get: () => undefined, update: async () => undefined, keys: () => [] },
+    secrets: { get: async () => undefined, store: async () => undefined, delete: async () => undefined },
+    extensionUri: { scheme: 'file', fsPath: '/ext', toString: () => 'file:///ext' },
+  };
+}
+
+let context: ContextStub;
+let api: Awaited<ReturnType<ExtensionModule['activate']>>;
 let restoreLoad: (() => void) | null = null;
 
 type FenceRule = (
@@ -75,7 +111,7 @@ async function waitForRender(
   return html;
 }
 
-beforeAll(() => {
+beforeAll(async () => {
   expect(existsSync(extensionPath), 'dist/extension.js missing — run `npm run bundle` first').toBe(true);
 
   vscodeStub = createVscodeStub();
@@ -96,11 +132,15 @@ beforeAll(() => {
   };
 
   extension = require(extensionPath) as ExtensionModule;
-  context = { subscriptions: [] };
-  api = extension.activate(context);
+  context = createContextStub();
+  api = await extension.activate(context);
 });
 
-afterAll(() => {
+afterAll(async () => {
+  // `deactivate` is the single cleanup path — it stops the worker thread and
+  // cancels the pending refresh. Disposing the subscriptions afterwards only
+  // fires the framework's synchronous failsafe, which is idempotent.
+  await extension.deactivate();
   for (const subscription of context.subscriptions) {
     subscription.dispose();
   }
