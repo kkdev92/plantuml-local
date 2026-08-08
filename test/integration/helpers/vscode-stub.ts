@@ -1,11 +1,12 @@
 /**
  * Minimal `vscode` module stub for loading dist/extension.js outside VS Code.
  *
- * Only what the extension and @kkdev92/vscode-ext-kit actually touch. The kit
- * wires every capability adapter at activation whether the extension uses it or
- * not, so a few members are here purely to be read once and never called —
- * `QuickInputButtons.Back` is the clearest example, and the reason this stub
- * grew when the extension moved to the 3.x framework.
+ * Only what the extension and @kkdev92/vscode-ext-kit actually touch. Some of it
+ * is here for the framework rather than for this extension: runtime preflight
+ * reads `env.uiKind`, `workspace.isTrusted` and the folder list at activation,
+ * and the enum objects exist because capability adapters are constructed then
+ * too. None of them is called — an extension that renders diagrams opens no
+ * quick pick and creates no tree view.
  */
 
 /**
@@ -32,8 +33,6 @@ export interface VscodeStub {
   LanguageStatusSeverity: Record<'Information' | 'Warning' | 'Error', number>;
   TreeItemCheckboxState: Record<'Unchecked' | 'Checked', number>;
   ViewColumn: Record<'Active' | 'Beside' | 'One', number>;
-  /** Read once when the quick-input adapter is built; never invoked here. */
-  QuickInputButtons: { Back: { iconPath: unknown; tooltip: string } };
   Uri: { joinPath: (base: unknown, ...parts: string[]) => unknown; file: (p: string) => unknown };
   env: { uiKind: number; language: string };
   window: {
@@ -87,7 +86,6 @@ export function createVscodeStub(): VscodeStub {
     LanguageStatusSeverity: { Information: 0, Warning: 1, Error: 2 },
     TreeItemCheckboxState: { Unchecked: 0, Checked: 1 },
     ViewColumn: { Active: -1, Beside: -2, One: 1 },
-    QuickInputButtons: { Back: { iconPath: undefined, tooltip: 'Back' } },
     Uri: {
       joinPath: (base: unknown, ...parts: string[]) => ({ base, parts }),
       file: (p: string) => ({ scheme: 'file', fsPath: p, toString: () => `file://${p}` }),

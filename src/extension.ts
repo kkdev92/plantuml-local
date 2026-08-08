@@ -123,15 +123,6 @@ function isDark(theme: 'auto' | 'light' | 'dark'): boolean {
   return kind === vscode.ColorThemeKind.Dark || kind === vscode.ColorThemeKind.HighContrast;
 }
 
-/**
- * The plugin, once the application has built it.
- *
- * `defineExtension` does not expose its container, and `activate` has to return
- * `extendMarkdownIt` to VS Code — so a hosted service publishes the instance
- * here as it starts, which is inside the `activate` that `activate` awaits.
- */
-let started: PlantUmlPlugin | undefined;
-
 export const plantuml = defineModule('plantuml', (module): undefined => {
   module.settings.add(Settings);
 
@@ -189,8 +180,6 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
     id: 'plantuml.preview',
     inject: { plugin: Plugin, requestRefresh: RequestRefresh, settings: Settings.token },
     start: (context, { plugin, requestRefresh, settings }) => {
-      started = plugin;
-
       // A colour-theme flip and a `theme` change both invalidate every cached
       // SVG: the palette is baked into the rendered output rather than applied
       // by CSS afterwards.
@@ -207,7 +196,6 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         settingChanged.dispose();
         // A pending refresh would fire into a preview that is going away.
         requestRefresh.cancel();
-        started = undefined;
       });
     },
   });
@@ -215,23 +203,22 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
   return undefined;
 });
 
-const app = defineExtension({ name: EXTENSION_NAME, modules: [plantuml] });
-
 /**
- * Not `export const activate = app.activate`, because VS Code reads
- * `extendMarkdownIt` off whatever `activate` resolves to and the framework's
- * resolves to nothing. The plan is started first — the plugin does not exist
- * until it has been — and then handed on.
+ * VS Code reads `extendMarkdownIt` off whatever `activate` resolves to, so it
+ * is declared rather than assembled by hand: the framework builds it after the
+ * hosted services have started — the earliest point the plugin exists — from
+ * the same instance the clear-cache command and the theme watcher got.
  */
-export async function activate(
-  context: vscode.ExtensionContext
-): Promise<{ extendMarkdownIt(md: MarkdownIt): MarkdownIt }> {
-  await app.activate(context);
-  const plugin = started;
-  if (plugin === undefined) {
-    throw new Error('the preview service did not start');
-  }
-  return { extendMarkdownIt: (md: MarkdownIt) => plugin.extendMarkdownIt(md) };
-}
+const app = defineExtension({
+  name: EXTENSION_NAME,
+  modules: [plantuml],
+  exports: {
+    inject: { plugin: Plugin },
+    create: ({ plugin }) => ({
+      extendMarkdownIt: (md: MarkdownIt): MarkdownIt => plugin.extendMarkdownIt(md),
+    }),
+  },
+});
 
+export const activate = app.activate;
 export const deactivate = app.deactivate;

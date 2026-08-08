@@ -112,7 +112,7 @@
     "clean": "rimraf dist coverage .vsix-verify-temp"
   },
   "dependencies": {
-    "@kkdev92/vscode-ext-kit": "^3.0.0-alpha.2",
+    "@kkdev92/vscode-ext-kit": "^3.0.0-alpha.3",
     "@plantuml/core": "^1.2026.6",
     "happy-dom": "^20.11.1"
   },
