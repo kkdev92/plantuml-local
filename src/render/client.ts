@@ -99,7 +99,7 @@ export class RendererClient {
       }
     });
 
-    created.on('error', (error) => {
+    created.on('error', (error: Error) => {
       this.log.error(error);
       this.worker = null;
       this.failAll(error.message);
