@@ -11,6 +11,28 @@ updates:
           - minor
           - patch
 
+    ignore:
+      # Both of these were opened, checked and closed rather than merged, so the
+      # reasons live here instead of being rediscovered every week.
+
+      # typescript 7.x: `typescript-eslint` declares `typescript >=4.8.4 <6.1.0`,
+      # and type-aware linting is what `lint` runs — so 7.x fails the lane
+      # outright rather than degrading. Drop this once that peer range widens.
+      - dependency-name: typescript
+        update-types:
+          - version-update:semver-major
+
+      # @types/node majors: these types decide what Node API the code may compile
+      # against, so they must not exceed the runtime. VS Code 1.132's extension
+      # host runs Node 24.18.0 (measured, via ELECTRON_RUN_AS_NODE), and
+      # `engines.vscode: ^1.125.0` puts the floor lower still. A bump past that
+      # passes CI — nothing reaches for a newer API *yet* — which is precisely why
+      # CI cannot be what catches it. Same rule as @types/vscode, where the types
+      # floor is also the ceiling. Revisit when the host moves.
+      - dependency-name: "@types/node"
+        update-types:
+          - version-update:semver-major
+
   # Actions are pinned to commit SHAs, which a person cannot reasonably keep current by
   # hand. Dependabot reads the version from the trailing comment and updates both, so the
   # pinning stays a safeguard rather than becoming a way to stay on old code forever.
