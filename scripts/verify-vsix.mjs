@@ -16,7 +16,7 @@
  * Usage: node scripts/verify-vsix.mjs [path-to.vsix]
  */
 
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -84,11 +84,18 @@ function extract(vsixPath) {
   // either). Relative paths avoid bsdtar misparsing `C:\…` as a remote.
   const localCopy = join(extractDir, 'package.vsix.zip');
   copyFileSync(vsixPath, localCopy);
-  const command =
+  // Spawned with an argv array rather than a shell string, so the archiver's path
+  // is an argument instead of a word to be parsed. `SystemRoot` is a trusted value
+  // — anyone who can set it can already run anything — but as argv there is no
+  // quoting to get right and no shell to get it wrong.
+  const [command, args] =
     process.platform === 'win32'
-      ? `"${join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe')}" -xf package.vsix.zip`
-      : 'unzip -q package.vsix.zip';
-  execSync(command, { cwd: extractDir, stdio: 'inherit' });
+      ? [
+          join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe'),
+          ['-xf', 'package.vsix.zip'],
+        ]
+      : ['unzip', ['-q', 'package.vsix.zip']];
+  execFileSync(command, args, { cwd: extractDir, stdio: 'inherit' });
   rmSync(localCopy);
 }
 
