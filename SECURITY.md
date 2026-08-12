@@ -12,7 +12,12 @@ Fixes ship in a new release rather than as patches to earlier versions.
 ## Reporting a Vulnerability
 
 1. **Do NOT** create a public GitHub issue.
-2. Use GitHub's **"Report a vulnerability"** feature in the Security tab of this repository.
+2. Open a private report:
+   <https://github.com/kkdev92/plantuml-local/security/advisories/new>
+
+   That is the **"Report a vulnerability"** button in this repository's Security
+   tab; the link goes straight to it. Private reporting is enabled, so the
+   advisory stays between us until there is a fix to describe.
 
 Reports are looked at on a best-effort basis; please allow a reasonable disclosure window.
 
