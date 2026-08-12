@@ -1,0 +1,20 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      npm-minor-patch:
+        applies-to: version-updates
+        update-types:
+          - minor
+          - patch
+
+  # Actions are pinned to commit SHAs, which a person cannot reasonably keep current by
+  # hand. Dependabot reads the version from the trailing comment and updates both, so the
+  # pinning stays a safeguard rather than becoming a way to stay on old code forever.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
