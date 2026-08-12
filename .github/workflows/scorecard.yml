@@ -1,0 +1,58 @@
+name: scorecard
+
+# OpenSSF Scorecard: an automated read of this repository's supply-chain posture — whether
+# actions are pinned to SHAs, whether the default branch is protected, whether workflow tokens
+# are scoped down, whether a vulnerability can be reported privately.
+#
+# It exists because every other check here tests the code, and none of them look at how the code
+# gets published. Results land in the code scanning dashboard next to CodeQL, so a regression in
+# the release pipeline shows up in the same place as one in the source.
+#
+# It reports; it changes nothing. Free on public repositories.
+
+on:
+  schedule:
+    # Weekly. Nothing here reacts to the clock, so the day is arbitrary — it just needs to be
+    # often enough that a settings change does not sit unmeasured for a month.
+    - cron: "0 7 * * 1"
+  # Branch protection and token permissions are settings rather than code, so a push that does
+  # not touch them can still move the score. The default branch is the only meaningful subject.
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions: read-all
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analysis:
+    name: analyse
+    runs-on: ubuntu-latest
+    permissions:
+      # To upload the result to the code scanning dashboard.
+      security-events: write
+      # For the signed attestation Scorecard publishes about its own run.
+      id-token: write
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Run analysis
+        uses: ossf/scorecard-action@2d1146689b8cda280b9bc96326124645441f03bc # v2.4.4
+        with:
+          results_file: results.sarif
+          results_format: sarif
+          # Publishing makes the score readable by anyone deciding whether to depend on this,
+          # which is the point of measuring it.
+          publish_results: true
+
+      - name: Upload to code scanning
+        uses: github/codeql-action/upload-sarif@18420e3271f74589575af831a523c833acda327f # codeql-bundle-v2.26.2
+        with:
+          sarif_file: results.sarif
