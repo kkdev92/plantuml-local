@@ -271,4 +271,4 @@ Copyright and licence notices for the third-party code shipped inside the VSIX a
 - Diagram rendering powered by [PlantUML](https://plantuml.com/) and its [`@plantuml/core`](https://www.npmjs.com/package/@plantuml/core) TeaVM build — this extension is a third-party project, not affiliated with or endorsed by the PlantUML project
 - Graphviz layout by [Viz.js](https://github.com/mdaines/viz-js), a WebAssembly build of Graphviz shipped inside `@plantuml/core`
 - DOM for the engine by [happy-dom](https://github.com/capricorn86/happy-dom)
-- Extension utilities by [@kkdev92/vscode-ext-kit](https://github.com/kkdev92/vscode-ext-kit)
+- Extension framework by [@kkdev92/vscode-ext-kit](https://github.com/kkdev92/vscode-ext-kit)
