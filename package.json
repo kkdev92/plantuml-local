@@ -99,7 +99,7 @@
     "bundle:prod": "node scripts/build.mjs --production",
     "bundle:watch": "node scripts/build.mjs --watch",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint src",
+    "lint": "eslint src --max-warnings 0",
     "lint:fix": "eslint src --fix",
     "test": "npm run test:unit && npm run test:integration",
     "test:unit": "vitest run --project unit",
