@@ -4,6 +4,7 @@
 [![CI](https://github.com/kkdev92/plantuml-local/actions/workflows/ci.yml/badge.svg)](https://github.com/kkdev92/plantuml-local/actions/workflows/ci.yml)
 [![VS Code Marketplace](https://vsmarketplacebadges.dev/version-short/kkdev92.plantuml-local.svg)](https://marketplace.visualstudio.com/items?itemName=kkdev92.plantuml-local)
 [![TypeScript](https://img.shields.io/badge/TypeScript-6.0-blue.svg)](https://www.typescriptlang.org/)
+[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/14052/badge)](https://www.bestpractices.dev/projects/14052)
 
 Render ```` ```plantuml ```` code blocks in the built-in Markdown preview — no Java, no server, no network connection.
 Your diagram source is processed locally and is not sent to a rendering service.
