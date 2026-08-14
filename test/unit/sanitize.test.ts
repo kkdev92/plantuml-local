@@ -1,6 +1,7 @@
 import { Window } from 'happy-dom';
 import { describe, expect, it } from 'vitest';
 
+import { encodePng } from '../../src/worker/raster-canvas';
 import { sanitizeSvg } from '../../src/worker/sanitize';
 
 const window = new Window({ url: 'http://localhost/' });
@@ -71,6 +72,46 @@ describe('sanitizeSvg', () => {
   it('strips data: URIs in link attributes', () => {
     const out = sanitizeSvg(window, WRAP('<image href="data:text/html;base64,PHNjcmlwdD4="/>'));
     expect(out).not.toContain('data:');
+  });
+
+  describe('sprite PNGs', () => {
+    // A 1x1 PNG produced by src/worker/raster-canvas.ts. Sprites (Azure and
+    // other icon sets) reach the preview as exactly this shape.
+    const PNG = encodePng(1, 1, new Uint8ClampedArray([1, 2, 3, 255])).toString('base64');
+    const URI = `data:image/png;base64,${PNG}`;
+
+    it('keeps an inline sprite PNG on <image href> and xlink:href', () => {
+      const out = sanitizeSvg(window, WRAP(`<image href="${URI}" xlink:href="${URI}" width="8" height="8"/>`));
+      expect(out).toContain(URI);
+      expect(out).toMatch(/xlink:href="data:image\/png/);
+    });
+
+    it('strips a sprite PNG from <a href> — links are never a sprite', () => {
+      const out = sanitizeSvg(window, WRAP(`<a href="${URI}"><text x="1" y="1">x</text></a>`));
+      expect(out).not.toContain('data:');
+      expect(out).toContain('x</text>');
+    });
+
+    it('strips it from src, which no sprite uses', () => {
+      expect(sanitizeSvg(window, WRAP(`<image src="${URI}"/>`))).not.toContain('data:');
+    });
+
+    it('strips a data: URI merely labelled image/png', () => {
+      // Correct MIME type, but the payload is not a PNG.
+      const fake = `data:image/png;base64,${Buffer.from('<script>alert(1)</script>').toString('base64')}`;
+      expect(sanitizeSvg(window, WRAP(`<image href="${fake}"/>`))).not.toContain('data:');
+    });
+
+    it('strips data:image/svg+xml, which can carry script', () => {
+      const svgUri = `data:image/svg+xml;base64,${Buffer.from('<svg onload="x()"/>').toString('base64')}`;
+      expect(sanitizeSvg(window, WRAP(`<image href="${svgUri}"/>`))).not.toContain('data:');
+    });
+
+    it('strips a payload with characters outside the base64 alphabet', () => {
+      // Anything that could close the attribute or start a second URI.
+      const smuggled = `data:image/png;base64,${PNG}";onerror="x()`;
+      expect(sanitizeSvg(window, WRAP(`<image href="${smuggled}"/>`))).not.toContain('data:');
+    });
   });
 
   it('rejects input whose root is not <svg>', () => {

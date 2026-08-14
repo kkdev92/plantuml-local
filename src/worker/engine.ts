@@ -4,6 +4,8 @@ import { pathToFileURL } from 'node:url';
 import { Window } from 'happy-dom';
 
 import type { PlantUmlEngine } from '../core/types';
+import { createRasterCanvas } from './raster-canvas';
+import { installStdlib, rejectScriptLoad } from './stdlib';
 import { createCanvas2DContextStub } from './text-metrics';
 import { sanitizeSvg } from './sanitize';
 
@@ -21,14 +23,19 @@ import { sanitizeSvg } from './sanitize';
  * 2. `document` — PlantUML assembles the SVG through DOM calls
  *    (`createElementNS`), not string concatenation. happy-dom provides
  *    the DOM.
- * 3. Canvas text metrics — PlantUML measures label widths through a
- *    Canvas 2D context, which happy-dom does not implement. A stub with
- *    approximate advance widths fills the gap (see text-metrics.ts).
+ * 3. Canvas — PlantUML measures label widths through a Canvas 2D context
+ *    and rasterises `sprite` definitions through the same object, neither
+ *    of which happy-dom implements. Text metrics come from a stub with
+ *    approximate advance widths (text-metrics.ts) and the pixel side from
+ *    a software raster canvas (raster-canvas.ts). Both live on a context
+ *    created per canvas element, because sprite pixels are per-canvas
+ *    state that a shared object would let one sprite overwrite.
  *
  * Load order matters: viz-global.js must load *before* `document` exists,
  * because with a `document` present it derives its own URL from
  * `new URL('viz-global.js', document.baseURI)` and crashes on the
- * about:blank base.
+ * about:blank base. The standard library must be installed before
+ * plantuml.js is imported (see stdlib.ts).
  */
 
 const requireEngine = createRequire(__filename);
@@ -40,8 +47,8 @@ export interface LoadedEngine {
 
 let loading: Promise<LoadedEngine> | null = null;
 
-export function loadEngine(engineDir: string): Promise<LoadedEngine> {
-  loading ??= doLoad(engineDir).catch((error: unknown) => {
+export function loadEngine(engineDir: string, stdlibDir: string): Promise<LoadedEngine> {
+  loading ??= doLoad(engineDir, stdlibDir).catch((error: unknown) => {
     // Drop the failed promise so a transient failure (e.g. missing file
     // during development) is retried instead of being replayed forever.
     loading = null;
@@ -50,25 +57,40 @@ export function loadEngine(engineDir: string): Promise<LoadedEngine> {
   return loading;
 }
 
-async function doLoad(engineDir: string): Promise<LoadedEngine> {
+async function doLoad(engineDir: string, stdlibDir: string): Promise<LoadedEngine> {
   const globals = globalThis as Record<string, unknown>;
 
   // 1) Graphviz first, before `document` exists (see module comment).
   globals.window = globalThis;
   globals.Viz = requireEngine(join(engineDir, 'viz-global.cjs'));
 
-  // 2) DOM.
+  // 2) Bundled standard library, before the engine can look for it.
+  installStdlib(stdlibDir);
+
+  // 3) DOM.
   const window = new Window({ url: 'http://localhost/' });
   const document = window.document;
 
-  // 3) Canvas text metrics.
-  const context2d = createCanvas2DContextStub();
+  // 4) Canvas, created fresh per element (see module comment).
   const createElement = document.createElement.bind(document);
   document.createElement = ((tag: string): ReturnType<typeof createElement> => {
     const element = createElement(tag);
-    if (String(tag).toLowerCase() === 'canvas') {
-      Object.assign(element, { getContext: () => context2d });
+    const name = String(tag).toLowerCase();
+
+    if (name === 'canvas') {
+      const raster = createRasterCanvas();
+      const context = Object.assign(createCanvas2DContextStub(), raster);
+      Object.assign(element, {
+        getContext: () => context,
+        // PlantUML reads the rendered sprite off the element, not the
+        // context. Returning an empty data URL rather than null keeps the
+        // engine on its normal path when nothing was drawn.
+        toDataURL: () => raster.toDataURL() ?? 'data:image/png;base64,',
+      });
+    } else if (name === 'script') {
+      rejectScriptLoad(element);
     }
+
     return element;
   });
 

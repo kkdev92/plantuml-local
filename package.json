@@ -98,6 +98,7 @@
     "bundle": "node scripts/build.mjs",
     "bundle:prod": "node scripts/build.mjs --production",
     "bundle:watch": "node scripts/build.mjs --watch",
+    "generate:stdlib": "node scripts/generate-stdlib.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src --max-warnings 0",
     "lint:fix": "eslint src --fix",
@@ -109,7 +110,7 @@
     "verify:vsix": "node scripts/verify-vsix.mjs",
     "install-local": "npm run package && code --install-extension plantuml-local.vsix --force",
     "uninstall-local": "code --uninstall-extension kkdev92.plantuml-local",
-    "clean": "rimraf dist coverage .vsix-verify-temp"
+    "clean": "rimraf dist coverage .vsix-verify-temp .stdlib-temp"
   },
   "dependencies": {
     "@kkdev92/vscode-ext-kit": "^3.0.0",

@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import { Worker } from 'node:worker_threads';
 
-import { RENDER_TIMEOUT_MS } from '../core/constants';
+import { RENDER_TIMEOUT_MS, WORKER_IDLE_TIMEOUT_MS } from '../core/constants';
 import type { RenderLog, RenderRequestMessage, RenderResponseMessage } from '../core/types';
 
 /**
@@ -12,10 +12,16 @@ import type { RenderLog, RenderRequestMessage, RenderResponseMessage } from '../
  * lazily on the first render and restarted transparently if it dies —
  * or if a render exceeds {@link RENDER_TIMEOUT_MS}, since renders are
  * serialised inside the worker and a hung one would wedge the queue.
+ *
+ * It is also shut down once it has been idle for
+ * {@link WORKER_IDLE_TIMEOUT_MS}, which returns the engine and any
+ * sprite libraries it loaded to the OS; the next render starts a fresh
+ * one.
  */
 export class RendererClient {
   private worker: Worker | null = null;
   private nextId = 1;
+  private idleTimer: NodeJS.Timeout | null = null;
   private readonly pending = new Map<
     number,
     { resolve: (svg: string) => void; reject: (error: Error) => void; timer: NodeJS.Timeout }
@@ -24,7 +30,8 @@ export class RendererClient {
   constructor(
     private readonly workerPath: string,
     private readonly log: RenderLog,
-    private readonly timeoutMs: number = RENDER_TIMEOUT_MS
+    private readonly timeoutMs: number = RENDER_TIMEOUT_MS,
+    private readonly idleTimeoutMs: number = WORKER_IDLE_TIMEOUT_MS
   ) {}
 
   render(source: string, dark: boolean): Promise<string> {
@@ -37,15 +44,45 @@ export class RendererClient {
       timer.unref();
 
       this.pending.set(id, { resolve, reject, timer });
+      this.stopIdleTimer();
       const request: RenderRequestMessage = { id, source, dark };
       this.getWorker().postMessage(request);
     });
   }
 
   dispose(): void {
+    this.stopIdleTimer();
     this.failAll('Extension deactivated');
     void this.worker?.terminate();
     this.worker = null;
+  }
+
+  private stopIdleTimer(): void {
+    if (this.idleTimer !== null) {
+      clearTimeout(this.idleTimer);
+      this.idleTimer = null;
+    }
+  }
+
+  /** Arms the idle shutdown once nothing is in flight. */
+  private restartIdleTimer(): void {
+    this.stopIdleTimer();
+    if (this.worker === null || this.pending.size > 0) {
+      return;
+    }
+    this.idleTimer = setTimeout(() => {
+      this.idleTimer = null;
+      if (this.worker === null || this.pending.size > 0) {
+        return;
+      }
+      this.log.debug(`Render worker idle for ${String(this.idleTimeoutMs)} ms; shutting it down`);
+      const idle = this.worker;
+      // Clear first: the 'exit' handler must not read this as a crash.
+      this.worker = null;
+      void idle.terminate();
+    }, this.idleTimeoutMs);
+    // An idle worker waiting to be reaped must not hold the host open.
+    this.idleTimer.unref();
   }
 
   private settle(id: number): { resolve: (svg: string) => void; reject: (error: Error) => void } | undefined {
@@ -55,6 +92,7 @@ export class RendererClient {
     }
     this.pending.delete(id);
     clearTimeout(entry.timer);
+    this.restartIdleTimer();
     return entry;
   }
 
@@ -77,6 +115,7 @@ export class RendererClient {
     this.failAll('Rendering timed out');
     void this.worker?.terminate();
     this.worker = null;
+    this.stopIdleTimer();
   }
 
   private getWorker(): Worker {

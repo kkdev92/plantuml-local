@@ -1,4 +1,4 @@
-import { copyFileSync, mkdirSync, statSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -8,6 +8,7 @@ const require = createRequire(import.meta.url);
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const outDir = join(root, 'dist');
 const engineDir = join(outDir, 'engine');
+const stdlibDir = join(outDir, 'stdlib');
 
 const production = process.argv.includes('--production');
 const watch = process.argv.includes('--watch');
@@ -39,6 +40,24 @@ function copyEngine() {
   // CommonJS first and reparsing (which logs MODULE_TYPELESS_PACKAGE_JSON).
   // viz-global.cjs is unaffected: the .cjs extension always wins.
   writeFileSync(join(engineDir, 'package.json'), '{ "type": "module" }\n');
+}
+
+/**
+ * The bundled PlantUML standard library (assets/stdlib/*.json) is data,
+ * not code: the worker reads it at runtime, so it is copied rather than
+ * bundled. Regenerate it with `npm run generate:stdlib`.
+ */
+function copyStdlib() {
+  mkdirSync(stdlibDir, { recursive: true });
+
+  const from = join(root, 'assets', 'stdlib');
+  for (const name of readdirSync(from).filter((f) => f.endsWith('.json'))) {
+    const source = join(from, name);
+    const target = join(stdlibDir, name);
+    if (statSync(target, { throwIfNoEntry: false })?.size !== statSync(source).size) {
+      copyFileSync(source, target);
+    }
+  }
 }
 
 /**
@@ -77,6 +96,7 @@ const shared = {
 };
 
 copyEngine();
+copyStdlib();
 
 const builds = [
   { ...shared, entryPoints: [join(root, 'src/extension.ts')], outfile: join(outDir, 'extension.js') },

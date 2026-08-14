@@ -6,6 +6,14 @@ node_modules/**
 coverage/**
 work/**
 .vsix-verify-temp/**
+.stdlib-temp/**
+
+# The standard-library source; the build copies it to dist/stdlib/, which is
+# what the worker reads. Shipping both would duplicate half a megabyte.
+assets/**
+
+# Agent/editor configuration
+.claude/**
 
 # Development configuration
 .vscode/**

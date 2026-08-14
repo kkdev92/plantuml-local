@@ -28,14 +28,15 @@ import { createSerialQueue } from './queue';
 // perform network I/O (see network-guard.ts).
 disableNetworkAccess();
 
-// dist/worker.js sits next to dist/engine/.
+// dist/worker.js sits next to dist/engine/ and dist/stdlib/.
 const engineDir = join(__dirname, 'engine');
+const stdlibDir = join(__dirname, 'stdlib');
 
 const queue = createSerialQueue();
 
 function renderOnce(source: string, dark: boolean): Promise<string> {
   return queue.enqueue(async () => {
-    const { engine, sanitize } = await loadEngine(engineDir);
+    const { engine, sanitize } = await loadEngine(engineDir, stdlibDir);
     const svg = await new Promise<string>((resolve, reject) => {
       engine.renderToString(
         source.split(/\r\n|\r|\n/),

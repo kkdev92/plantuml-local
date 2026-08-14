@@ -131,4 +131,87 @@ describe('render worker (dist)', () => {
     const svg = await render('@startuml\nAlice -> Bob : Hello\n@enduml');
     expect(svg).not.toMatch(/plantuml\.com|kroki|unpkg|jsdelivr/i);
   });
+
+  describe('sprites and the bundled standard library', () => {
+    it('renders an inline sprite as an embedded PNG', async () => {
+      const svg = await render(
+        [
+          '@startuml',
+          'sprite $box [8x8/16] {',
+          'FFFFFFFF',
+          'F000000F',
+          'F0FFFF0F',
+          'F0F00F0F',
+          'F0F00F0F',
+          'F0FFFF0F',
+          'F000000F',
+          'FFFFFFFF',
+          '}',
+          'rectangle "<$box>" as a',
+          '@enduml',
+        ].join('\n')
+      );
+
+      // Survives sanitisation only because the payload really is a PNG.
+      expect(svg).toMatch(/<image[^>]*href="data:image\/png;base64,iVBORw0KGg/);
+    });
+
+    it('resolves !include <azure/…> from the bundled library', async () => {
+      const svg = await render(
+        [
+          '@startuml',
+          '!include <azure/AzureCommon>',
+          '!include <azure/Compute/AzureFunction>',
+          'AzureFunction(fn, "注文API", "Functions")',
+          '@enduml',
+        ].join('\n')
+      );
+
+      expect(svg).not.toMatch(/Fatal parsing error/i);
+      // The stereotype comes from AzureCommon's AzureEntity macro, so it
+      // only appears if the include resolved from the bundled library.
+      expect(svg).toContain('«AzureFunction»');
+      expect(svg).toContain('[Functions]');
+      // PlantUML emits CJK one glyph per <text>, so match a single character.
+      expect(svg).toContain('注');
+      expect(svg).toMatch(/data:image\/png;base64,iVBORw0KGg/);
+    });
+
+    it('renders one distinct icon per sprite on a multi-icon diagram', async () => {
+      const svg = await render(
+        [
+          '@startuml',
+          '!include <azure/AzureCommon>',
+          '!include <azure/Compute/AzureFunction>',
+          '!include <azure/Databases/AzureCosmosDb>',
+          'AzureFunction(fn, "API", "Functions")',
+          'AzureCosmosDb(db, "DB", "Cosmos DB")',
+          'fn --> db',
+          '@enduml',
+        ].join('\n')
+      );
+
+      // Per-canvas raster state: a shared buffer would emit one image twice.
+      const payloads = new Set(svg.match(/base64,iVBORw0KGg[A-Za-z0-9+/=]+/g) ?? []);
+      expect(payloads.size).toBe(2);
+    });
+
+    it('fails fast on a library that is not bundled', async () => {
+      // The engine falls back to injecting <script src="aws.min.js">. Left
+      // alone that never settles and the render dies on the 30 s timeout.
+      const started = Date.now();
+      const svg = await render('@startuml\n!include <aws/AWSCommon>\nAlice -> Bob\n@enduml');
+
+      expect(Date.now() - started).toBeLessThan(10_000);
+      expect(svg).toMatch(/<svg/);
+    });
+
+    it('keeps rendering normally after a sprite diagram', async () => {
+      await render('@startuml\n!include <azure/AzureCommon>\nAlice -> Bob\n@enduml');
+      const svg = await render('@startuml\nAlice -> Bob : Hello\n@enduml');
+
+      expect(svg).toContain('Hello');
+      expect(svg).not.toContain('data:image');
+    });
+  });
 });

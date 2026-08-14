@@ -21,11 +21,19 @@ export const CONFIG = {
 
 /**
  * Maximum number of rendered diagrams kept in the preview cache.
- * Entries are evicted oldest-first; each entry is one SVG string
- * (typically a few KB), so the cap mostly guards long editing sessions
- * that touch many files.
+ * Entries are evicted oldest-first.
  */
 export const MAX_CACHE_ENTRIES = 200;
+
+/**
+ * Maximum total size of the cached SVGs, in bytes.
+ *
+ * An entry count alone is a poor proxy for memory once sprites are in
+ * play: a plain sequence diagram is a few KB, while one carrying a dozen
+ * rasterised icons is 100-150 KB, so 200 entries can mean anything from
+ * half a megabyte to thirty. Whichever limit is reached first evicts.
+ */
+export const MAX_CACHE_BYTES = 16 * 1024 * 1024;
 
 /**
  * How long to coalesce preview refresh requests, in milliseconds.
@@ -44,6 +52,18 @@ export const REFRESH_DEBOUNCE_MS = 80;
  * rejects the request and restarts the worker, which unwedges the queue.
  */
 export const RENDER_TIMEOUT_MS = 30_000;
+
+/**
+ * How long the render worker may sit idle before it is shut down.
+ *
+ * The worker holds the engine, the Graphviz WebAssembly and any sprite
+ * libraries a diagram pulled in — a couple of hundred megabytes once
+ * icon-heavy diagrams have been rendered, none of which is useful to
+ * someone who has moved on to another file. It restarts lazily on the
+ * next render, paying the one-off WASM initialisation again, so the
+ * window is long enough that ordinary editing never trips it.
+ */
+export const WORKER_IDLE_TIMEOUT_MS = 5 * 60_000;
 
 /**
  * Matches PlantUML preprocessor directives that reference a URL
