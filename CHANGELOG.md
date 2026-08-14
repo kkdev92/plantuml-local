@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Sprites render.** PlantUML rasterises `sprite` definitions through a Canvas
+  2D context, which Node does not have, so any diagram using one previously
+  failed with `TypeError: f.createImageData is not a function`. The worker now
+  provides a software raster canvas and encodes the result as a PNG using the
+  built-in `zlib` — no native dependency.
+- **The Azure icon set is bundled.** `!include <azure/AzureCommon>` and the rest
+  of [Azure-PlantUML](https://github.com/plantuml-stdlib/Azure-PlantUML) resolve
+  from a copy inside the VSIX, so existing Azure diagrams render unchanged and
+  still without any network access. Other libraries report that they are
+  unavailable rather than being fetched.
+
+### Changed
+
+- The SVG sanitiser now permits an inline `data:image/png` on `<image>` — the
+  form a rasterised sprite arrives in — provided it is base64 with no other
+  characters and begins with the PNG signature. `<a href>`, `src`,
+  `data:text/html`, `data:image/svg+xml` and `javascript:` stay blocked. See
+  [SECURITY.md](SECURITY.md) for the reasoning.
+- The canvas context is created per canvas element rather than shared, so one
+  sprite's pixels can no longer overwrite another's.
+
 ## [0.4.0] - 2026-08-08
 
 Rebuilt on `@kkdev92/vscode-ext-kit` 3.x. Rendering, sanitisation, the worker

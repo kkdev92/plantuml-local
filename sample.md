@@ -94,6 +94,56 @@ Ingredient ..> Inventory : allocates
 @enduml
 ```
 
+## Azure icons (bundled sprite library, no network)
+
+```plantuml
+@startuml
+!include <azure/AzureCommon>
+!include <azure/Networking/AzureApplicationGateway>
+!include <azure/Compute/AzureFunction>
+!include <azure/Databases/AzureCosmosDb>
+!include <azure/Storage/AzureBlobStorage>
+
+LAYOUT_LEFT_RIGHT
+
+AzureApplicationGateway(gw, "受信ゲートウェイ", "Application Gateway")
+AzureFunction(fn, "注文API", "Functions")
+AzureCosmosDb(db, "注文DB", "Cosmos DB")
+AzureBlobStorage(blob, "帳票保管", "Blob Storage")
+
+gw --> fn
+fn --> db
+fn --> blob
+@enduml
+```
+
+## Sprite written straight into the diagram
+
+```plantuml
+@startuml
+sprite $box [8x8/16] {
+FFFFFFFF
+F000000F
+F0FFFF0F
+F0F00F0F
+F0F00F0F
+F0FFFF0F
+F000000F
+FFFFFFFF
+}
+rectangle "<$box>\n==inline sprite" as a
+@enduml
+```
+
+## A library that is not bundled (reported, not fetched)
+
+```plantuml
+@startuml
+!include <aws/AWSCommon>
+Alice -> Bob
+@enduml
+```
+
 ## Syntax error (only this block breaks; everything else stays intact)
 
 ```plantuml

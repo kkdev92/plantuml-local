@@ -3,5 +3,6 @@ dist/
 coverage/
 work/
 .vsix-verify-temp/
+.stdlib-temp/
 *.vsix
 *.log

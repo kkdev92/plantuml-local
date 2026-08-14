@@ -19,6 +19,7 @@ in [`third-party/`](third-party).
 | [ws](https://github.com/websockets/ws) | 8.21.1 | MIT | [ws-LICENSE.txt](third-party/ws-LICENSE.txt) |
 | [buffer-image-size](https://github.com/netroy/buffer-image-size) | 0.6.4 | MIT | [buffer-image-size-LICENSE.txt](third-party/buffer-image-size-LICENSE.txt) |
 | [`@kkdev92/vscode-ext-kit`](https://github.com/kkdev92/vscode-ext-kit) | 1.1.0 | MIT | [vscode-ext-kit-LICENSE.txt](third-party/vscode-ext-kit-LICENSE.txt) |
+| [Azure-PlantUML](https://github.com/plantuml-stdlib/Azure-PlantUML) | 2.1.0 | MIT | [azure-plantuml-LICENSE.txt](third-party/azure-plantuml-LICENSE.txt) |
 
 Development-only dependencies (TypeScript, esbuild, ESLint, Vitest, vsce and
 their transitive dependencies) contribute no code to the VSIX and are not
@@ -44,6 +45,16 @@ object code form:
 
 - Graphviz is licensed under the Eclipse Public License, Version 1.0
 - Expat is licensed under the MIT License
+
+## Azure-PlantUML
+
+Copyright (c) 2018-2019 Ricardo Niepel, 2021-2022 Ricardo Niepel and
+contributors. Licensed under the MIT License.
+
+The `dist/` tree of the upstream repository — the Azure icon sprites and the
+`AzureCommon` macros — is baked into `dist/stdlib/azure.json` and served to the
+engine as the `azure` standard-library entry, so `!include <azure/…>` resolves
+without a network request. Regenerate it with `npm run generate:stdlib`.
 
 ## happy-dom
 

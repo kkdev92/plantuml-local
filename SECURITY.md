@@ -54,9 +54,23 @@ The Markdown preview webview runs none of this extension's code — no `previewS
 
 Error messages and user source shown in error boxes are HTML-escaped.
 
+#### The one exception: rasterised sprites
+
+PlantUML draws `sprite` definitions — the mechanism behind icon sets such as Azure-PlantUML — by rasterising them and emitting the result as an inline PNG on an `<image>`. Stripping that link leaves an image element with no image, so the icon renders as blank space. The sanitiser therefore keeps a link value that meets **all** of the following:
+
+- the element is `<image>`, and the attribute is `href` or `xlink:href` — never `<a href>`, so no navigation path is opened, and never `src`
+- the value matches `data:image/png;base64,` followed only by base64 characters, so it cannot carry a second URI or break out of the attribute
+- the payload begins with the PNG signature, so a `data:` URI merely *labelled* `image/png` does not qualify
+
+`data:text/html`, `data:image/svg+xml`, `javascript:` and remote URLs remain blocked. The reasoning for allowing this much: a PNG cannot carry script the way an SVG can; the bytes are inline rather than fetched, so the network-egress concern behind the general rule does not apply; and the Markdown preview's default Content-Security-Policy already permits `img-src … data:` while confining scripts to a nonce.
+
 ### Remote references are rejected up front
 
-`!include https://…` and `!theme … from https://…` never reach the engine; the block renders an explanatory message instead. Local-file includes are not supported by the browser build of the engine and fail harmlessly.
+`!include https://…` and `!theme … from https://…` never reach the engine; the block renders an explanatory message instead. Includes of a file are not supported by the browser build of the engine and fail harmlessly.
+
+### The standard library is served from the package
+
+`!include <azure/…>` resolves against a copy of the library baked into the VSIX. Left to itself the engine reacts to an unknown library by appending `<script src="azure.min.js">` to its document and waiting, which would mean either a network request or a render that hangs until the timeout. The worker pre-populates the globals the engine reads (`window.PLANTUML_STDLIB` and friends) so that path never runs, and makes any `<script>` the engine still creates report failure immediately — so `!include <aws/…>`, which is not bundled, produces a prompt error instead of a stalled render.
 
 ### Untrusted and virtual workspaces
 

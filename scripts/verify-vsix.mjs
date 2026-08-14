@@ -38,6 +38,7 @@ const REQUIRED = [
   'extension/dist/engine/plantuml.js',
   'extension/dist/engine/viz-global.cjs',
   'extension/dist/engine/package.json',
+  'extension/dist/stdlib/azure.json',
   'extension/media/plantuml.css',
   'extension/l10n/bundle.l10n.ja.json',
   'extension/images/icon.png',
@@ -49,6 +50,9 @@ const FORBIDDEN = [
   'extension/scripts',
   'extension/node_modules',
   'extension/sample.md',
+  // dist/stdlib/ is the shipped copy; assets/ is its source.
+  'extension/assets',
+  'extension/.claude',
   'extension/dist/extension.js.map',
   'extension/dist/worker.js.map',
 ];
@@ -162,39 +166,56 @@ function checkNoExternalRenderers() {
   }
 }
 
+function renderOn(worker, id, source) {
+  return new Promise((resolvePromise, rejectPromise) => {
+    const timer = setTimeout(() => {
+      rejectPromise(new Error('render timed out after 60s'));
+    }, 60_000);
+    const onMessage = (message) => {
+      if (message.id !== id) {
+        return;
+      }
+      clearTimeout(timer);
+      worker.off('message', onMessage);
+      if (message.error !== undefined) {
+        rejectPromise(new Error(message.error));
+      } else {
+        resolvePromise(message.svg);
+      }
+    };
+    worker.on('message', onMessage);
+    worker.postMessage({ id, source, dark: false });
+  });
+}
+
 async function renderSmoke() {
   const workerPath = join(extractDir, 'extension/dist/worker.js');
   const worker = new Worker(workerPath);
+  worker.once('error', (error) => {
+    fail(`packaged worker crashed: ${error.message}`);
+  });
 
   try {
-    const svg = await new Promise((resolvePromise, rejectPromise) => {
-      const timer = setTimeout(() => {
-        rejectPromise(new Error('render timed out after 60s'));
-      }, 60_000);
-      worker.once('error', (error) => {
-        clearTimeout(timer);
-        rejectPromise(error);
-      });
-      worker.once('message', (message) => {
-        clearTimeout(timer);
-        if (message.error !== undefined) {
-          rejectPromise(new Error(message.error));
-        } else {
-          resolvePromise(message.svg);
-        }
-      });
-      worker.postMessage({
-        id: 1,
-        // CJK fixture text: proves full-width metrics and UTF-8 survive packaging.
-        source: '@startuml\nactor "利用者" as U\nU -> B : 追加\n@enduml',
-        dark: false,
-      });
-    });
-
+    // CJK fixture text: proves full-width metrics and UTF-8 survive packaging.
+    const svg = await renderOn(worker, 1, '@startuml\nactor "利用者" as U\nU -> B : 追加\n@enduml');
     if (typeof svg === 'string' && svg.includes('<svg') && svg.includes('利用者')) {
       ok(`packaged worker renders (SVG ${String(svg.length)} bytes, CJK intact)`);
     } else {
       fail('packaged worker returned unexpected output');
+    }
+
+    // Proves dist/stdlib/ resolves relative to the packaged worker and that a
+    // sprite survives rasterisation and sanitisation with its pixels intact.
+    const sprite = await renderOn(
+      worker,
+      2,
+      '@startuml\n!include <azure/AzureCommon>\n!include <azure/Compute/AzureFunction>\n' +
+        'AzureFunction(fn, "check", "Functions")\n@enduml'
+    );
+    if (typeof sprite === 'string' && /<image[^>]*href="data:image\/png;base64,iVBORw0KGg/.test(sprite)) {
+      ok('packaged worker resolves <azure/…> and embeds the sprite PNG');
+    } else {
+      fail('packaged worker did not render the bundled Azure sprite');
     }
   } catch (error) {
     fail(`packaged worker failed to render: ${error instanceof Error ? error.message : String(error)}`);

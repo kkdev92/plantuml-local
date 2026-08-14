@@ -133,15 +133,46 @@ diagram is.
 If a diagram looks stale, run `PlantUML Local: Clear Render Cache and Re-render`
 from the Command Palette.
 
+### Icons and sprites
+
+Sprites render, including the Azure icon set, which ships inside the extension:
+
+````markdown
+```plantuml
+@startuml
+!include <azure/AzureCommon>
+!include <azure/Compute/AzureFunction>
+!include <azure/Databases/AzureCosmosDb>
+
+AzureFunction(fn, "Orders API", "Functions")
+AzureCosmosDb(db, "Orders", "Cosmos DB")
+fn --> db
+@enduml
+```
+````
+
+The library is [Azure-PlantUML](https://github.com/plantuml-stdlib/Azure-PlantUML)
+and the include paths are its own, so existing diagrams work unchanged — and,
+as everywhere else here, nothing is downloaded to render them. Sprites written
+directly into the diagram with `sprite $name […] { … }` work too.
+
+Azure is the only icon set bundled. The AWS and GCP libraries both place their
+icons under CC-BY-ND 2.0 with only the macros under MIT, and this extension
+ships nothing but MIT / BSD / EPL; Azure-PlantUML has no such split. Other
+`!include <…>` libraries report that they are unavailable rather than being
+fetched — but their sprite definitions can be pasted into the diagram, which
+renders identically.
+
 ---
 
 ## Known Limitations
 
-- `!include` is not supported: URL-based directives are rejected with an inline
-  message, and local-file includes are not available in the bundled browser
-  build of the engine
+- Only the `azure` standard-library entry is bundled; other `!include <…>`
+  libraries are unavailable
+- `!include` of a URL or of a file is not supported: URL-based directives are
+  rejected with an inline message, and file includes are not available in the
+  bundled browser build of the engine
 - Remote themes, images and other network resources are not supported
-- Optional external sprite libraries are not bundled
 - Features excluded from the bundled PlantUML browser build are unavailable
 - Text is measured with approximate metrics (Node has no Canvas), so element
   widths, line wrapping and placement can differ slightly from plantuml.com
@@ -182,13 +213,13 @@ the SVG from cache.
 PlantUML Local is designed to render diagrams without sending their source to an
 external rendering service.
 
-- **Local Rendering**: The engine, the Graphviz WebAssembly and all runtime assets ship inside the VSIX and load from disk
+- **Local Rendering**: The engine, the Graphviz WebAssembly, the bundled icon library and all runtime assets ship inside the VSIX and load from disk
 - **No Telemetry**: The extension collects no usage data and makes no intentional network requests
 - **Network Guard**: `fetch` / `XMLHttpRequest` / `WebSocket` / `EventSource` are replaced with throwing stubs inside the render worker — a network attempt fails the render instead of making a request
 - **Remote References Rejected**: `!include https://…` / `!theme … from https://…` render an explanatory message instead of reaching the engine
 - **Worker Isolation**: The engine's browser shims live in a worker thread, never on the extension host globals
 - **Render Timeout**: A render exceeding 30 s is abandoned; the worker is terminated and restarted
-- **SVG Sanitisation**: Scripts, event handlers and non-fragment links are stripped before SVG reaches the preview
+- **SVG Sanitisation**: Scripts, event handlers and non-fragment links are stripped before SVG reaches the preview. The one exception is a rasterised sprite, which must reach the preview as an inline `data:image/png` — it is allowed on `<image>` only, must be base64 with no other characters, and must actually begin with the PNG signature
 - **Untrusted Workspaces Supported**: No workspace files are read, no processes are spawned
 
 These controls reduce the extension's attack surface, but they have limits worth
