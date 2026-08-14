@@ -285,4 +285,40 @@ describe('createPlantUmlPlugin', () => {
     h.fence('plantuml', 'first');
     expect(h.deps.render.mock.calls.length).toBe(before + 1);
   });
+
+  it('evicts on total size too, so a few huge diagrams cannot hold megabytes', async () => {
+    // A diagram carrying rasterised sprites is 100-150 KB against a few KB
+    // for a plain one, so the entry cap alone is a poor memory bound.
+    const huge = 'x'.repeat(2 * 1024 * 1024);
+    const h = makeHarness({ render: (source) => Promise.resolve(`<svg>${source}${huge}</svg>`) });
+
+    h.fence('plantuml', 'first');
+    await h.settle();
+    expect(h.fence('plantuml', 'first')).toContain('<svg>first');
+
+    // Nine more at ~2 MB each pushes the total past the 16 MB budget
+    // while staying far below the 200-entry cap.
+    for (let i = 0; i < 9; i++) {
+      h.fence('plantuml', `big ${String(i)}`);
+    }
+    await h.settle();
+
+    const before = h.deps.render.mock.calls.length;
+    h.fence('plantuml', 'first');
+    expect(h.deps.render.mock.calls.length).toBe(before + 1);
+  });
+
+  it('keeps the most recent entry even when it alone exceeds the budget', async () => {
+    // Evicting down to empty would make the render that just finished
+    // unreachable, and the fence would re-request it forever.
+    const enormous = 'x'.repeat(20 * 1024 * 1024);
+    const h = makeHarness({ render: () => Promise.resolve(`<svg>${enormous}</svg>`) });
+
+    h.fence('plantuml', 'only');
+    await h.settle();
+
+    const before = h.deps.render.mock.calls.length;
+    expect(h.fence('plantuml', 'only')).toContain('<svg>');
+    expect(h.deps.render.mock.calls.length).toBe(before);
+  });
 });

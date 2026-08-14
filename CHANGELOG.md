@@ -27,6 +27,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   it, whose artwork filled only 61% × 41% of its canvas. Now 256×256 and cropped
   to the artwork. The package drops from 3.77 MB to 2.41 MB even with the Azure
   library added.
+- The preview cache is now bounded by total size (16 MB) as well as entry count.
+  200 entries was a poor memory bound once sprites existed: a plain diagram is a
+  few KB while an icon-heavy one is 100-150 KB.
+- The render worker shuts down after five minutes idle and restarts on the next
+  render. It holds the engine, the Graphviz WebAssembly and any sprite library a
+  diagram pulled in — around 280 MB after heavy icon use, of which about 90 MB
+  comes back on shutdown — none of it useful to someone who has moved on.
 - The SVG sanitiser now permits an inline `data:image/png` on `<image>` — the
   form a rasterised sprite arrives in — provided it is base64 with no other
   characters and begins with the PNG signature. `<a href>`, `src`,

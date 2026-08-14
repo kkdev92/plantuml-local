@@ -1,6 +1,6 @@
 import type MarkdownIt from 'markdown-it';
 
-import { MAX_CACHE_ENTRIES, REMOTE_REFERENCE } from '../core/constants';
+import { MAX_CACHE_BYTES, MAX_CACHE_ENTRIES, REMOTE_REFERENCE } from '../core/constants';
 import type { RenderLog } from '../core/types';
 
 /**
@@ -56,26 +56,70 @@ export interface PlantUmlPlugin {
   clearCache(): void;
 }
 
+interface BoundedStore {
+  get(key: string): string | undefined;
+  set(key: string, value: string): void;
+  delete(key: string): void;
+  clear(): void;
+}
+
+/**
+ * A Map bounded by both entry count and total size, evicting oldest-first.
+ *
+ * An entry count alone is a poor proxy for memory once sprites are in
+ * play: a plain sequence diagram is a few KB, while one carrying a dozen
+ * rasterised icons is 100-150 KB, so 200 entries can mean anything from
+ * half a megabyte to thirty. Size is counted in UTF-16 code units rather
+ * than bytes on the wire — SVG is overwhelmingly ASCII, so the two are
+ * close, and the point is to bound memory, not to be exact.
+ */
+function createBoundedStore(maxEntries: number, maxSize: number): BoundedStore {
+  /** Insertion order doubles as eviction order. */
+  const entries = new Map<string, string>();
+  let size = 0;
+
+  function drop(key: string): void {
+    const existing = entries.get(key);
+    if (existing !== undefined) {
+      size -= existing.length;
+      entries.delete(key);
+    }
+  }
+
+  return {
+    get: (key): string | undefined => entries.get(key),
+    delete: drop,
+    clear: (): void => {
+      entries.clear();
+      size = 0;
+    },
+    set(key, value): void {
+      // Re-insert so a refreshed entry counts as the newest.
+      drop(key);
+      entries.set(key, value);
+      size += value.length;
+
+      while (entries.size > maxEntries || (size > maxSize && entries.size > 1)) {
+        const oldest = entries.keys().next().value;
+        if (oldest === undefined) {
+          break;
+        }
+        drop(oldest);
+      }
+    },
+  };
+}
+
 export function createPlantUmlPlugin(deps: PluginDeps): PlantUmlPlugin {
-  /** key → sanitised SVG. Insertion order doubles as eviction order. */
-  const rendered = new Map<string, string>();
+  /** key → sanitised SVG. */
+  const rendered = createBoundedStore(MAX_CACHE_ENTRIES, MAX_CACHE_BYTES);
   /** key → error message for renders that failed. */
-  const failed = new Map<string, string>();
+  const failed = createBoundedStore(MAX_CACHE_ENTRIES, MAX_CACHE_BYTES);
   /** Keys currently rendering, so a preview refresh does not re-enqueue. */
   const inFlight = new Set<string>();
 
   function cacheKey(source: string, dark: boolean): string {
     return `${dark ? 'dark' : 'light'}\n${source}`;
-  }
-
-  function remember(store: Map<string, string>, key: string, value: string): void {
-    if (store.size >= MAX_CACHE_ENTRIES) {
-      const oldest = store.keys().next().value;
-      if (oldest !== undefined) {
-        store.delete(oldest);
-      }
-    }
-    store.set(key, value);
   }
 
   function startRender(source: string, dark: boolean, key: string): void {
@@ -88,13 +132,13 @@ export function createPlantUmlPlugin(deps: PluginDeps): PlantUmlPlugin {
       .render(source, dark)
       .then(
         (svg) => {
-          remember(rendered, key, svg);
+          rendered.set(key, svg);
           failed.delete(key);
           deps.log.debug(`Rendered diagram (${String(svg.length)} bytes)`);
         },
         (error: unknown) => {
           const message = error instanceof Error ? error.message : String(error);
-          remember(failed, key, message);
+          failed.set(key, message);
           deps.log.warn(`Render failed: ${message}`);
         }
       )

@@ -68,4 +68,37 @@ describe('RendererClient', () => {
     await expect(pending).rejects.toThrow('Extension deactivated');
     client = null;
   });
+
+  describe('idle shutdown', () => {
+    it('shuts the worker down once it has been idle, and restarts on demand', async () => {
+      // The worker holds the engine, the WASM and any sprite library a
+      // diagram pulled in; that should not outlive the editing session.
+      client = new RendererClient(realWorkerPath, log, 30_000, 150);
+
+      const first = await client.render('@startuml\nAlice -> Bob : Hello\n@enduml', false);
+      expect(first).toContain('Hello');
+
+      await vi.waitFor(
+        () => {
+          expect(log.debug).toHaveBeenCalledWith(expect.stringContaining('idle'));
+        },
+        { timeout: 5_000 }
+      );
+
+      // A fresh worker serves the next request transparently.
+      const second = await client.render('@startuml\nCarol -> Dave : Bye\n@enduml', false);
+      expect(second).toContain('Bye');
+    });
+
+    it('does not shut down while a render is still in flight', async () => {
+      // Idle window far shorter than the render it must not interrupt.
+      client = new RendererClient(hangWorkerPath, log, 800, 100);
+
+      await expect(client.render('@startuml\nA -> B\n@enduml', false)).rejects.toThrow(
+        'Rendering timed out'
+      );
+      // Reaching the render timeout proves the idle timer did not fire
+      // underneath it and reject the request early with another message.
+    });
+  });
 });
