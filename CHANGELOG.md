@@ -22,6 +22,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The extension icon is 43 KB instead of 1.35 MB.** It was a 1024×1024 PNG,
+  the second-largest file in the VSIX and far larger than anything that renders
+  it, whose artwork filled only 61% × 41% of its canvas. Now 256×256 and cropped
+  to the artwork. The package drops from 3.77 MB to 2.41 MB even with the Azure
+  library added.
 - The SVG sanitiser now permits an inline `data:image/png` on `<image>` — the
   form a rasterised sprite arrives in — provided it is base64 with no other
   characters and begins with the PNG signature. `<a href>`, `src`,
