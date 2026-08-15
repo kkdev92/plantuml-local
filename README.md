@@ -167,7 +167,7 @@ renders identically.
 
 The preview is the only place a ` ```plantuml ` block becomes a diagram — GitHub
 renders one as source, not as a picture. To be readable there too, export the
-SVG and reference it. One command does both:
+SVG and reference it. One command does both. Name the block:
 
 ````markdown
 ```plantuml orders-api
@@ -175,9 +175,11 @@ SVG and reference it. One command does both:
 Alice -> Bob : Hello
 @enduml
 ```
-
-![orders-api](images/orders-api.svg#plantuml-local)
 ````
+
+*Export All Diagrams and Update References* then writes
+`images/orders-api.svg` and, directly below the block, a Markdown image
+reference whose target is `images/orders-api.svg#plantuml-local`.
 
 | Command | What it does |
 | --- | --- |

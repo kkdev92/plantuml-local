@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-08-15
+
+### Fixed
+
+- **0.6.0 never reached the Marketplace**; this release is 0.6.0 plus the fix
+  that lets it publish. The README and CHANGELOG showed the inserted image
+  reference as an example, and `vsce` rewrites relative Markdown links with a
+  regular expression over the raw file — code fences and backticks included —
+  so the packaged listing carried a real `<img>` pointing at an `.svg` in this
+  repository. The Marketplace rejects SVG images from anywhere but its trusted
+  badge providers, and does so *after* upload: `vsce publish` reported success
+  and the version silently never appeared. Both examples now describe the
+  reference instead of writing it, and `verify-vsix` fails the build if a
+  packaged Markdown file ever renders a repository-hosted SVG again.
+
 ## [0.6.0] - 2026-08-15
 
 ### Added
@@ -36,7 +51,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   commands fall back to a visible Markdown editor.
 - **References write themselves.** `PlantUML Local: Export All Diagrams and
   Update References` exports and then inserts
-  `![name](images/name.svg#plantuml-local)` after each block — or rewrites it
+  a Markdown image reference targeting `images/name.svg#plantuml-local` after
+  each block — or rewrites it
   when the block was renamed or the directory changed. Only lines carrying the
   `#plantuml-local` marker are ever touched; a hand-written reference is out of
   bounds by construction, a marked line orphaned by a deleted block is left
@@ -216,7 +232,8 @@ First public release.
 - happy-dom's bundled self-signed TLS certificate (unused fetch machinery) is
   stripped from the worker bundle at build time.
 
-[Unreleased]: https://github.com/kkdev92/plantuml-local/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/kkdev92/plantuml-local/compare/v0.6.1...HEAD
+[0.6.1]: https://github.com/kkdev92/plantuml-local/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/kkdev92/plantuml-local/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/kkdev92/plantuml-local/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/kkdev92/plantuml-local/compare/v0.3.0...v0.4.0
