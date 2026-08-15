@@ -147,6 +147,44 @@ function checkThirdPartyNotices() {
   ok(`third-party licence texts ship and are referenced (${String(licences.length)} files)`);
 }
 
+/**
+ * The Marketplace rejects an extension whose README or CHANGELOG renders
+ * an SVG image, unless it comes from one of its trusted badge providers.
+ * The rejection is asynchronous — `vsce publish` reports success and the
+ * version silently never appears — so it has to be caught here.
+ *
+ * vsce makes this easy to do by accident: it rewrites relative Markdown
+ * links with a regex over the raw file, so an example inside a fenced
+ * code block, or even in backticks, becomes a real `<img>` in the
+ * package. What matters is the packaged text, which is what this reads.
+ */
+function checkNoOwnSvgImages() {
+  const files = ['extension/readme.md', 'extension/changelog.md'];
+  let found = false;
+
+  for (const file of files) {
+    const path = join(extractDir, file);
+    if (!existsSync(path)) {
+      continue;
+    }
+    for (const [, alt, target] of readFileSync(path, 'utf8').matchAll(
+      /!\[([^\]]*)\]\(([^)\s]+)/g
+    )) {
+      // Badges are the exception the Marketplace allows; ours all live on
+      // hosts whose path says badge. Anything pointing back at this
+      // repository's own files is not one.
+      const isOwnContent = /\/raw\//.test(target) || !/^\w+:\/\//.test(target);
+      if (isOwnContent && /\.svg(\?|#|$)/i.test(target)) {
+        fail(`${file} renders an SVG image the Marketplace will reject: ![${alt}](${target})`);
+        found = true;
+      }
+    }
+  }
+  if (!found) {
+    ok('no repository-hosted SVG images in the packaged README or CHANGELOG');
+  }
+}
+
 function checkNoSecrets() {
   const worker = readFileSync(join(extractDir, 'extension/dist/worker.js'), 'utf8');
   if (worker.includes('BEGIN PRIVATE KEY') || worker.includes('BEGIN CERTIFICATE')) {
@@ -230,6 +268,7 @@ console.log(`Verifying ${vsixPath}`);
 extract(vsixPath);
 checkFiles();
 checkThirdPartyNotices();
+checkNoOwnSvgImages();
 checkNoSecrets();
 checkNoExternalRenderers();
 await renderSmoke();
