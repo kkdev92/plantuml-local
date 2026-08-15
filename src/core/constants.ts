@@ -11,13 +11,52 @@ export const EXTENSION_NAME = 'PlantUML Local';
 /** Command identifiers contributed in package.json. */
 export const COMMANDS = {
   CLEAR_CACHE: `${EXTENSION_ID}.clearCache`,
+  EXPORT_SVG: `${EXTENSION_ID}.exportSvg`,
+  EXPORT_ALL_SVG: `${EXTENSION_ID}.exportAllSvg`,
+  EXPORT_ALL_UPDATE_REFS: `${EXTENSION_ID}.exportAllAndUpdateRefs`,
+} as const;
+
+/**
+ * Context keys behind the editor context-menu entries, set with the
+ * `setContext` command. They gate the menu items so that an ordinary
+ * Markdown file's right-click menu is not taxed with export commands
+ * that would only report there is nothing to do.
+ */
+export const CONTEXT_KEYS = {
+  /** The active document contains at least one ```plantuml block. */
+  HAS_DIAGRAMS: `${EXTENSION_ID}.hasDiagrams`,
+  /** The cursor is inside a ```plantuml block. */
+  CURSOR_IN_DIAGRAM: `${EXTENSION_ID}.cursorInDiagram`,
 } as const;
 
 /** Configuration keys under the `plantumlLocal.` prefix. */
 export const CONFIG = {
   THEME: 'theme',
   LOG_LEVEL: 'logLevel',
+  EXPORT_DIRECTORY: 'exportDirectory',
+  EXPORT_THEME: 'exportTheme',
+  HIDE_EXPORTED_IMAGES: 'hideExportedImages',
 } as const;
+
+/**
+ * Fragment appended to the image references the extension writes
+ * (`![name](images/name.svg#plantuml-local)`).
+ *
+ * It marks the reference as this extension's, which serves two purposes:
+ * the preview hides marked images so a document does not show the block's
+ * render and the exported file side by side, and the reference updater
+ * only ever rewrites lines that carry it. GitHub passes a fragment on an
+ * image source through untouched (verified against its Markdown API), so
+ * the same line still renders the SVG there.
+ */
+export const EXPORT_FRAGMENT = '#plantuml-local';
+
+/**
+ * Where exported SVGs go, relative to the Markdown file rather than to
+ * the workspace root — so moving a document keeps its diagrams beside it
+ * and the links in it still resolve.
+ */
+export const DEFAULT_EXPORT_DIRECTORY = 'images';
 
 /**
  * Maximum number of rendered diagrams kept in the preview cache.

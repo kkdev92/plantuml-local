@@ -4,7 +4,7 @@ import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { createVscodeStub, type VscodeStub } from './helpers/vscode-stub';
+import { createVscodeStub, type TextEditorStub, type VscodeStub } from './helpers/vscode-stub';
 
 /**
  * Loads the built dist/extension.js with a stubbed `vscode` module and
@@ -279,5 +279,220 @@ describe('extension (dist)', () => {
       expect(html).toMatch(/<svg/);
       expect(html).toContain(`msg${String(index + 1)}`);
     }
+  });
+});
+
+function makeEditor(
+  path: string,
+  text: string,
+  line: number,
+  options?: { languageId?: string; isUntitled?: boolean }
+): TextEditorStub {
+  // Mutable so the stub's workspace.applyEdit can write reference lines back.
+  let current = text;
+  return {
+    document: {
+      languageId: options?.languageId ?? 'markdown',
+      version: 1,
+      isUntitled: options?.isUntitled ?? false,
+      uri: { toString: () => path },
+      getText: () => current,
+      lineAt: (at: number) => ({ text: current.split('\n')[at] ?? '' }),
+      setText: (next: string) => {
+        current = next;
+      },
+    },
+    selection: { active: { line } },
+  };
+}
+
+const NAMED_BLOCK = ['```plantuml orders', '@startuml', 'Alice -> Bob : hi', '@enduml', '```'].join(
+  '\n'
+);
+
+describe('export (dist)', () => {
+  it('tracks the context keys behind the editor menu as the cursor moves', () => {
+    const editor = makeEditor('file:///c/docs/design.md', `intro\n\n${NAMED_BLOCK}\n\nafter`, 3);
+    vscodeStub._test.setActiveEditor(editor);
+
+    expect(vscodeStub._test.contextKeys.get('plantumlLocal.hasDiagrams')).toBe(true);
+    expect(vscodeStub._test.contextKeys.get('plantumlLocal.cursorInDiagram')).toBe(true);
+
+    // Cursor out of the block: same document, so the scan is reused.
+    editor.selection.active.line = 0;
+    vscodeStub._test.fireSelection(editor);
+    expect(vscodeStub._test.contextKeys.get('plantumlLocal.hasDiagrams')).toBe(true);
+    expect(vscodeStub._test.contextKeys.get('plantumlLocal.cursorInDiagram')).toBe(false);
+
+    // A document without diagrams clears both.
+    vscodeStub._test.setActiveEditor(makeEditor('file:///c/docs/plain.md', '# prose only', 0));
+    expect(vscodeStub._test.contextKeys.get('plantumlLocal.hasDiagrams')).toBe(false);
+    expect(vscodeStub._test.contextKeys.get('plantumlLocal.cursorInDiagram')).toBe(false);
+  });
+
+  it('export command renders through the worker and writes beside the document', async () => {
+    vscodeStub._test.setActiveEditor(
+      makeEditor('file:///c/docs/design.md', `intro\n\n${NAMED_BLOCK}`, 3)
+    );
+
+    const command = vscodeStub._test.registeredCommands.get('plantumlLocal.exportSvg');
+    expect(command).toBeDefined();
+    await command?.();
+
+    const svg = vscodeStub._test.writtenFiles.get('file:///c/docs/images/orders.svg');
+    expect(svg, 'expected images/orders.svg beside the document').toBeDefined();
+    expect(svg).toMatch(/^<svg/);
+    expect(svg).toContain('hi');
+    expect(svg).not.toMatch(/<script/i);
+  });
+
+  it('export-all writes every named block and warns about unnamed ones', async () => {
+    const text = [
+      '```plantuml first',
+      '@startuml',
+      'A -> B : one',
+      '@enduml',
+      '```',
+      '',
+      '```plantuml second',
+      '@startuml',
+      'C -> D : two',
+      '@enduml',
+      '```',
+      '',
+      '```plantuml',
+      '@startuml',
+      'E -> F : anonymous',
+      '@enduml',
+      '```',
+    ].join('\n');
+    vscodeStub._test.setActiveEditor(makeEditor('file:///c/notes/multi.md', text, 0));
+
+    await vscodeStub._test.registeredCommands.get('plantumlLocal.exportAllSvg')?.();
+
+    expect(vscodeStub._test.writtenFiles.get('file:///c/notes/images/first.svg')).toContain('one');
+    expect(vscodeStub._test.writtenFiles.get('file:///c/notes/images/second.svg')).toContain('two');
+    // The unnamed block is skipped, not guessed at, and the summary says so.
+    expect(vscodeStub._test.writtenFiles.size).toBe(3); // orders.svg + these two
+    expect(vscodeStub._test.notifications.warn.some((m) => m.includes('unnamed'))).toBe(true);
+  });
+
+  it('refuses to export in an untrusted workspace', async () => {
+    vscodeStub._test.setActiveEditor(
+      makeEditor('file:///c/docs/design.md', `intro\n\n${NAMED_BLOCK}`, 3)
+    );
+    const before = vscodeStub._test.writtenFiles.size;
+
+    vscodeStub.workspace.isTrusted = false;
+    try {
+      await vscodeStub._test.registeredCommands.get('plantumlLocal.exportSvg')?.();
+    } finally {
+      vscodeStub.workspace.isTrusted = true;
+    }
+
+    expect(vscodeStub._test.writtenFiles.size).toBe(before);
+    expect(vscodeStub._test.notifications.warn.some((m) => m.includes('trusted'))).toBe(true);
+  });
+
+  it('refuses an untitled document, which has no folder to write beside', async () => {
+    vscodeStub._test.setActiveEditor(
+      makeEditor('untitled:Untitled-1', NAMED_BLOCK, 1, { isUntitled: true })
+    );
+    const before = vscodeStub._test.writtenFiles.size;
+
+    await vscodeStub._test.registeredCommands.get('plantumlLocal.exportSvg')?.();
+
+    expect(vscodeStub._test.writtenFiles.size).toBe(before);
+    expect(vscodeStub._test.notifications.warn.some((m) => m.includes('Save'))).toBe(true);
+  });
+
+  it('never writes outside the document folder, whatever the block is named', async () => {
+    // The name is document content, so on someone else's repository it is
+    // attacker-controlled; Uri.joinPath would resolve the `..` segments.
+    const traversal = ['```plantuml ../../../evil', '@startuml', 'A -> B', '@enduml', '```'].join(
+      '\n'
+    );
+    vscodeStub._test.setActiveEditor(makeEditor('file:///c/docs/evil.md', traversal, 1));
+    const before = new Set(vscodeStub._test.writtenFiles.keys());
+    vscodeStub._test.inputBoxPrompts.length = 0;
+
+    // The prompt is dismissed (the stub's default), so nothing is written.
+    await vscodeStub._test.registeredCommands.get('plantumlLocal.exportSvg')?.();
+
+    expect([...vscodeStub._test.writtenFiles.keys()].filter((k) => !before.has(k))).toEqual([]);
+    // The unusable name is treated as no name: the user is asked for one.
+    expect(vscodeStub._test.inputBoxPrompts).toHaveLength(1);
+  });
+
+  it('exports under the name given at the prompt when the block has none', async () => {
+    const unnamed = ['```plantuml', '@startuml', 'A -> B : prompted', '@enduml', '```'].join('\n');
+    vscodeStub._test.setActiveEditor(makeEditor('file:///c/asked/doc.md', unnamed, 1));
+    vscodeStub._test.inputBoxReply = 'chosen-name';
+
+    try {
+      await vscodeStub._test.registeredCommands.get('plantumlLocal.exportSvg')?.();
+    } finally {
+      vscodeStub._test.inputBoxReply = null;
+    }
+
+    expect(vscodeStub._test.writtenFiles.get('file:///c/asked/images/chosen-name.svg')).toContain(
+      'prompted'
+    );
+  });
+
+  it('update-references inserts marked lines after each block and is idempotent', async () => {
+    const text = [
+      '# doc',
+      '',
+      '```plantuml refone',
+      '@startuml',
+      'A -> B : r1',
+      '@enduml',
+      '```',
+      '',
+      'body text',
+      '',
+      '```plantuml reftwo',
+      '@startuml',
+      'C -> D : r2',
+      '@enduml',
+      '```',
+    ].join('\n');
+    const editor = makeEditor('file:///c/refs/doc.md', text, 0);
+    vscodeStub._test.setActiveEditor(editor);
+
+    await vscodeStub._test.registeredCommands.get('plantumlLocal.exportAllAndUpdateRefs')?.();
+
+    const after = editor.document.getText();
+    // The SVGs were written and each block gained its marked reference,
+    // separated from the fence and the following prose by blank lines.
+    expect(vscodeStub._test.writtenFiles.get('file:///c/refs/images/refone.svg')).toContain('r1');
+    expect(vscodeStub._test.writtenFiles.get('file:///c/refs/images/reftwo.svg')).toContain('r2');
+    expect(after).toContain('```\n\n![refone](images/refone.svg#plantuml-local)\n\nbody text');
+    expect(after.endsWith('![reftwo](images/reftwo.svg#plantuml-local)')).toBe(true);
+
+    // Running it again re-exports but must not touch the document.
+    await vscodeStub._test.registeredCommands.get('plantumlLocal.exportAllAndUpdateRefs')?.();
+    expect(editor.document.getText()).toBe(after);
+  });
+
+  it('exportTheme=dark renders the exported SVG in the dark palette', async () => {
+    vscodeStub._test.setConfiguration('exportTheme', 'dark');
+    try {
+      const editor = makeEditor('file:///c/dark/doc.md', NAMED_BLOCK, 1);
+      vscodeStub._test.setActiveEditor(editor);
+
+      await vscodeStub._test.registeredCommands.get('plantumlLocal.exportSvg')?.();
+    } finally {
+      vscodeStub._test.setConfiguration('exportTheme', undefined);
+    }
+
+    const dark = vscodeStub._test.writtenFiles.get('file:///c/dark/images/orders.svg');
+    const light = vscodeStub._test.writtenFiles.get('file:///c/docs/images/orders.svg');
+    expect(dark).toBeDefined();
+    // Same source as the earlier default-palette export; dark output draws
+    // white text where light does not.
+    expect(dark).not.toBe(light);
+    expect(dark).toContain('#FFFFFF');
   });
 });

@@ -1,6 +1,12 @@
 {
   "extension.description": "Render ```plantuml code blocks in the built-in Markdown preview. No Java, no server, no network connection — your diagram source is rendered locally.",
   "command.clearCache.title": "Clear Render Cache and Re-render",
+  "command.exportSvg.title": "Export Diagram as SVG",
+  "command.exportAllSvg.title": "Export All Diagrams as SVG",
+  "command.exportAllAndUpdateRefs.title": "Export All Diagrams and Update References",
   "config.theme.description": "Diagram colour palette. \"auto\" follows the VS Code colour theme.",
-  "config.logLevel.description": "Log level for the PlantUML Local output channel. The Output panel's own level selector applies on top of this."
+  "config.logLevel.description": "Log level for the PlantUML Local output channel. The Output panel's own level selector applies on top of this.",
+  "config.exportDirectory.description": "Where exported SVGs are written, relative to the Markdown file. Use \".\" for the same folder. Absolute paths and \"..\" are rejected.",
+  "config.exportTheme.description": "Palette for exported SVGs. Exports face hosts like GitHub whose background this extension does not control, so \"light\" is the default; \"preview\" follows the palette the preview currently uses.",
+  "config.hideExportedImages.description": "Hide images marked with #plantuml-local in the Markdown preview, so an exported diagram is not shown next to its block's own render. Turn off to check how the exported SVG itself looks."
 }

@@ -12,8 +12,11 @@ work/**
 # what the worker reads. Shipping both would duplicate half a megabyte.
 assets/**
 
-# Agent/editor configuration
+# Agent/editor configuration and local tooling output. vsce ignores
+# .gitignore entirely whenever this file exists, so anything a tool drops
+# into the repo root ships unless it is listed here.
 .claude/**
+.clipshot/**
 
 # Development configuration
 .vscode/**

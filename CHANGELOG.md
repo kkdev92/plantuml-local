@@ -7,6 +7,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Diagrams can be exported as SVG.** The preview was the only place a
+  ` ```plantuml ` block became a diagram, so a document was unreadable anywhere
+  that does not render PlantUML itself — GitHub shows the block as source.
+  `PlantUML Local: Export Diagram as SVG` writes the block under the cursor and
+  `PlantUML Local: Export All Diagrams as SVG` writes every named block, both
+  producing the same sanitised SVG the preview receives — plus an `xmlns:xlink`
+  declaration the engine omits: injected into the preview as HTML nobody
+  notices, but a standalone `.svg` is strict XML, and without the declaration a
+  browser shows a broken image for any diagram containing an icon.
+- A block can be named in its info string — ` ```plantuml orders-api ` — which
+  becomes the file name. That is what ties a block to its SVG across edits; a
+  position could not, since inserting a diagram above would repoint every file
+  below it. Unnamed blocks are skipped by the bulk command rather than guessed
+  at. The syntax already rendered, and GitHub already ignores the extra word.
+- `plantumlLocal.exportDirectory` (default `images`) sets the destination,
+  relative to the Markdown file rather than to the workspace root. Absolute
+  paths and `..` are rejected.
+- The commands sit in the editor's right-click menu, gated by context keys:
+  *Export Diagram as SVG* appears with the cursor inside a ` ```plantuml `
+  block, the bulk commands whenever the file contains one — the menu of a
+  Markdown file without diagrams is left alone. They also work while the
+  preview pane has focus, where VS Code reports no active text editor: the
+  commands fall back to a visible Markdown editor.
+- **References write themselves.** `PlantUML Local: Export All Diagrams and
+  Update References` exports and then inserts
+  `![name](images/name.svg#plantuml-local)` after each block — or rewrites it
+  when the block was renamed or the directory changed. Only lines carrying the
+  `#plantuml-local` marker are ever touched; a hand-written reference is out of
+  bounds by construction, a marked line orphaned by a deleted block is left
+  alone rather than guessed about, and running the command twice changes
+  nothing. One Undo reverts everything it wrote. It is the only command that
+  edits the document; the two plain export commands still never do.
+- **Marked images are hidden in the preview** (`plantumlLocal.hideExportedImages`,
+  default on), because the block above them already renders there — without
+  this the same diagram would appear twice. GitHub ignores the fragment and
+  shows the SVG. The hiding happens in this extension's own markdown-it image
+  rule rather than CSS, so it does not depend on how the preview rewrites
+  image URLs.
+- **Exports default to the light palette** (`plantumlLocal.exportTheme`:
+  `light` / `dark` / `preview`). Exported files face hosts like GitHub whose
+  background this extension does not control; a dark diagram on a white page
+  reads as broken. `preview` restores follow-the-editor rendering.
+- **Exported SVGs carry their own background** — white, or `#1b1b1b` for dark
+  exports, the same backdrops the preview's stylesheet uses. The engine leaves
+  most canvases transparent, which the preview papers over with CSS; on
+  GitHub's dark theme a transparent light-palette diagram was black text on a
+  near-black page.
+
 ## [0.5.0] - 2026-08-14
 
 ### Added

@@ -53,6 +53,7 @@ const FORBIDDEN = [
   // dist/stdlib/ is the shipped copy; assets/ is its source.
   'extension/assets',
   'extension/.claude',
+  'extension/.clipshot',
   'extension/dist/extension.js.map',
   'extension/dist/worker.js.map',
 ];

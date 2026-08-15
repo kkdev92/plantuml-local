@@ -163,6 +163,68 @@ ships nothing but MIT / BSD / EPL; Azure-PlantUML has no such split. Other
 fetched — but their sprite definitions can be pasted into the diagram, which
 renders identically.
 
+### Exporting for GitHub and other hosts
+
+The preview is the only place a ` ```plantuml ` block becomes a diagram — GitHub
+renders one as source, not as a picture. To be readable there too, export the
+SVG and reference it. One command does both:
+
+````markdown
+```plantuml orders-api
+@startuml
+Alice -> Bob : Hello
+@enduml
+```
+
+![orders-api](images/orders-api.svg#plantuml-local)
+````
+
+| Command | What it does |
+| --- | --- |
+| `PlantUML Local: Export Diagram as SVG` | Writes the block under the cursor |
+| `PlantUML Local: Export All Diagrams as SVG` | Writes every **named** block in the file |
+| `PlantUML Local: Export All Diagrams and Update References` | The above, then inserts or updates the image line after each block |
+
+All three are also in the editor's right-click menu: the single export appears
+with the cursor inside a block, the other two whenever the file contains a
+diagram — so the menu of an ordinary Markdown file stays untouched.
+
+The word after the language — `orders-api` above — names the output file. It is
+what ties a block to its SVG across edits, which a position could not: inserting
+a diagram above would silently repoint everything below it. Naming is therefore
+required for the bulk commands, and the single-diagram one asks when the block
+has none — or when its name could not be a file name, since names are limited
+to letters, digits, hyphens and underscores.
+
+The `#plantuml-local` fragment on the inserted reference does two jobs. GitHub
+ignores it and renders the SVG, while this extension's preview hides marked
+images — the block above them already renders, and without that the same
+diagram would appear twice (`plantumlLocal.hideExportedImages` turns this off,
+for checking how the exported file itself looks). It also marks the line as
+machine-managed: renaming a block or changing the export directory rewrites the
+line on the next run, while every line without the marker — including a
+hand-written reference to the same file — is never touched. The update command
+is idempotent: running it twice changes nothing, and one Undo reverts whatever
+it wrote.
+
+Exports use the light palette regardless of your editor theme, since the files
+face hosts whose background this extension does not control;
+`plantumlLocal.exportTheme` pins `dark` or follows the preview instead. Each
+exported SVG also carries an opaque background of its palette — the engine
+leaves the canvas transparent, and a dark host page would otherwise show
+through it.
+
+`plantumlLocal.exportDirectory` (default `images`) decides where files go,
+relative to the Markdown file rather than to the workspace root, so moving a
+document keeps its diagrams beside it. Exporting writes files, so it needs a
+trusted workspace — the preview does not.
+
+Two things to keep in mind. The SVG is a snapshot: after editing a block,
+re-run the command (commit the `images/` directory alongside the document,
+or the references point at nothing). And this flow is for hosts that do
+*not* render PlantUML — one that does, like GitLab, renders the block itself
+and would show the referenced image as a second copy.
+
 ---
 
 ## Known Limitations
@@ -186,6 +248,9 @@ renders identically.
 | --- | --- | --- |
 | `plantumlLocal.theme` | `auto` | Diagram palette. `auto` follows the VS Code theme; `light` / `dark` pin it |
 | `plantumlLocal.logLevel` | `info` | Floor for the *PlantUML Local* output channel. VS Code's own channel level applies first — see [Troubleshooting](#troubleshooting) |
+| `plantumlLocal.exportDirectory` | `images` | Where exported SVGs are written, relative to the Markdown file. `.` for the same folder; absolute paths and `..` are rejected |
+| `plantumlLocal.exportTheme` | `light` | Palette for exported SVGs. `preview` follows the palette the preview currently uses |
+| `plantumlLocal.hideExportedImages` | `true` | Hide images marked `#plantuml-local` in the preview, so an exported diagram is not shown next to its block's render |
 
 ---
 

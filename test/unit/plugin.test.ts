@@ -27,6 +27,7 @@ interface Harness {
 
 function makeHarness(options?: {
   dark?: boolean;
+  hideExportedImages?: boolean;
   render?: (source: string, dark: boolean) => Promise<string>;
 }): Harness {
   let refreshCount = 0;
@@ -46,6 +47,7 @@ function makeHarness(options?: {
 
   const deps: Harness['deps'] = {
     isDark: () => options?.dark ?? false,
+    hideExportedImages: () => options?.hideExportedImages ?? true,
     render,
     requestRefresh: () => {
       refreshCount += 1;
@@ -320,5 +322,75 @@ describe('createPlantUmlPlugin', () => {
     const before = h.deps.render.mock.calls.length;
     expect(h.fence('plantuml', 'only')).toContain('<svg>');
     expect(h.deps.render.mock.calls.length).toBe(before);
+  });
+});
+
+describe('exported-image hiding (image rule)', () => {
+  type Token = { attrGet(name: string): string | null };
+  type ImageRule = (
+    tokens: Token[],
+    index: number,
+    options: unknown,
+    env: unknown,
+    self: { renderToken: () => string }
+  ) => string;
+
+  /** Extends a fresh md object and returns its patched image rule. */
+  function imageRule(h: Harness, fallback?: string): ImageRule {
+    const md = {
+      renderer: {
+        rules: fallback !== undefined ? { image: (): string => fallback } : {},
+      },
+    };
+    h.plugin.extendMarkdownIt(md as unknown as Parameters<Harness['plugin']['extendMarkdownIt']>[0]);
+    return (md as { renderer: { rules: { image: ImageRule } } }).renderer.rules.image;
+  }
+
+  const token = (attrs: Record<string, string>): Token => ({
+    attrGet: (name) => attrs[name] ?? null,
+  });
+  const self = { renderToken: (): string => '<img data-fallback="renderToken">' };
+
+  it('drops an image whose src carries the export marker', () => {
+    const rule = imageRule(makeHarness(), '<img data-fallback="original">');
+    const marked = token({ src: 'images/orders.svg#plantuml-local' });
+
+    expect(rule([marked], 0, {}, {}, self)).toBe('');
+  });
+
+  it('drops it when only data-src carries the marker', () => {
+    // VS Code's own image rule wraps this one: it rewrites src to a
+    // webview resource URI but stores the original in data-src first.
+    const rewritten = token({
+      src: 'https://file+.vscode-resource.vscode-cdn.net/c/docs/images/orders.svg',
+      'data-src': 'images/orders.svg#plantuml-local',
+    });
+
+    const rule = imageRule(makeHarness(), '<img data-fallback="original">');
+    expect(rule([rewritten], 0, {}, {}, self)).toBe('');
+  });
+
+  it('delegates unmarked images to the previous rule', () => {
+    const rule = imageRule(makeHarness(), '<img data-fallback="original">');
+    const plain = token({ src: 'images/photo.png' });
+
+    expect(rule([plain], 0, {}, {}, self)).toBe('<img data-fallback="original">');
+  });
+
+  it('falls back to renderToken when no previous rule exists', () => {
+    const rule = imageRule(makeHarness());
+    const plain = token({ src: 'images/photo.png' });
+
+    expect(rule([plain], 0, {}, {}, self)).toBe('<img data-fallback="renderToken">');
+  });
+
+  it('shows marked images when hiding is turned off', () => {
+    const rule = imageRule(
+      makeHarness({ hideExportedImages: false }),
+      '<img data-fallback="original">'
+    );
+    const marked = token({ src: 'images/orders.svg#plantuml-local' });
+
+    expect(rule([marked], 0, {}, {}, self)).toBe('<img data-fallback="original">');
   });
 });

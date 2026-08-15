@@ -112,6 +112,29 @@ describe('sanitizeSvg', () => {
       const smuggled = `data:image/png;base64,${PNG}";onerror="x()`;
       expect(sanitizeSvg(window, WRAP(`<image href="${smuggled}"/>`))).not.toContain('data:');
     });
+
+    it('declares xmlns:xlink when a surviving attribute needs it', () => {
+      // The engine writes xlink:href on sprites without declaring the
+      // prefix; as a standalone .svg file that is a fatal XML error.
+      const out = sanitizeSvg(window, WRAP(`<image xlink:href="${URI}" width="8" height="8"/>`));
+
+      expect(out).toContain('xmlns:xlink="http://www.w3.org/1999/xlink"');
+      expect(out).toContain(`xlink:href="${URI}"`);
+    });
+
+    it('does not add the xlink declaration when nothing uses the prefix', () => {
+      const out = sanitizeSvg(window, WRAP(`<image href="${URI}"/>`));
+      expect(out).not.toContain('xmlns:xlink');
+    });
+
+    it('does not duplicate an existing xlink declaration', () => {
+      const input =
+        '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" ' +
+        `viewBox="0 0 10 10"><image xlink:href="${URI}"/></svg>`;
+      const out = sanitizeSvg(window, input);
+
+      expect(out.match(/xmlns:xlink=/g)).toHaveLength(1);
+    });
   });
 
   it('rejects input whose root is not <svg>', () => {
