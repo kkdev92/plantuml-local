@@ -1,6 +1,11 @@
 import type MarkdownIt from 'markdown-it';
 
-import { MAX_CACHE_BYTES, MAX_CACHE_ENTRIES, REMOTE_REFERENCE } from '../core/constants';
+import {
+  EXPORT_FRAGMENT,
+  MAX_CACHE_BYTES,
+  MAX_CACHE_ENTRIES,
+  REMOTE_REFERENCE,
+} from '../core/constants';
 import type { RenderLog } from '../core/types';
 
 /**
@@ -45,6 +50,8 @@ export interface PluginDeps {
   requestRefresh(): void;
   /** Escapes text for inclusion in HTML. */
   escapeHtml(text: string): string;
+  /** Whether images marked {@link EXPORT_FRAGMENT} are hidden in the preview. */
+  hideExportedImages(): boolean;
   log: RenderLog;
   labels: PluginLabels;
 }
@@ -165,6 +172,26 @@ export function createPlantUmlPlugin(deps: PluginDeps): PlantUmlPlugin {
     },
 
     extendMarkdownIt(md: MarkdownIt): MarkdownIt {
+      // The reference updater writes `![name](images/name.svg#plantuml-local)`
+      // after each exported block so other hosts show the diagram. In this
+      // preview the block itself already renders, so a marked image would be
+      // the same diagram twice; drop it here rather than with CSS, which
+      // would depend on the fragment surviving VS Code's resource-URI
+      // rewrite. VS Code's own image rule wraps this one and preserves the
+      // original target in `data-src` before delegating, so both attributes
+      // are checked.
+      const imageFallback = md.renderer.rules.image?.bind(md.renderer.rules);
+      md.renderer.rules.image = (tokens, index, options, env, self): string => {
+        const token = tokens[index];
+        const source = token?.attrGet('data-src') ?? token?.attrGet('src') ?? '';
+        if (deps.hideExportedImages() && source.endsWith(EXPORT_FRAGMENT)) {
+          return '';
+        }
+        return imageFallback !== undefined
+          ? imageFallback(tokens, index, options, env, self)
+          : self.renderToken(tokens, index, options);
+      };
+
       const fallback = md.renderer.rules.fence?.bind(md.renderer.rules);
 
       md.renderer.rules.fence = (tokens, index, options, env, self): string => {

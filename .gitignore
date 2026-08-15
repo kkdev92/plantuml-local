@@ -4,5 +4,6 @@ coverage/
 work/
 .vsix-verify-temp/
 .stdlib-temp/
+.clipshot/
 *.vsix
 *.log

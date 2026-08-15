@@ -49,7 +49,7 @@
   "capabilities": {
     "untrustedWorkspaces": {
       "supported": true,
-      "description": "Diagrams are rendered locally in a worker thread; the extension reads no workspace files and makes no network requests."
+      "description": "Diagrams are rendered locally in a worker thread; the extension reads no workspace files and makes no network requests. The export commands are the only actions that write files or edit the document, and they are disabled here."
     },
     "virtualWorkspaces": true
   },
@@ -63,8 +63,42 @@
         "command": "plantumlLocal.clearCache",
         "title": "%command.clearCache.title%",
         "category": "PlantUML Local"
+      },
+      {
+        "command": "plantumlLocal.exportSvg",
+        "title": "%command.exportSvg.title%",
+        "category": "PlantUML Local"
+      },
+      {
+        "command": "plantumlLocal.exportAllSvg",
+        "title": "%command.exportAllSvg.title%",
+        "category": "PlantUML Local"
+      },
+      {
+        "command": "plantumlLocal.exportAllAndUpdateRefs",
+        "title": "%command.exportAllAndUpdateRefs.title%",
+        "category": "PlantUML Local"
       }
     ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "plantumlLocal.exportSvg",
+          "when": "editorLangId == markdown && plantumlLocal.cursorInDiagram",
+          "group": "2_plantuml@1"
+        },
+        {
+          "command": "plantumlLocal.exportAllSvg",
+          "when": "editorLangId == markdown && plantumlLocal.hasDiagrams",
+          "group": "2_plantuml@2"
+        },
+        {
+          "command": "plantumlLocal.exportAllAndUpdateRefs",
+          "when": "editorLangId == markdown && plantumlLocal.hasDiagrams",
+          "group": "2_plantuml@3"
+        }
+      ]
+    },
     "configuration": {
       "title": "PlantUML Local",
       "properties": {
@@ -89,6 +123,26 @@
           ],
           "default": "info",
           "description": "%config.logLevel.description%"
+        },
+        "plantumlLocal.exportDirectory": {
+          "type": "string",
+          "default": "images",
+          "description": "%config.exportDirectory.description%"
+        },
+        "plantumlLocal.exportTheme": {
+          "type": "string",
+          "enum": [
+            "light",
+            "dark",
+            "preview"
+          ],
+          "default": "light",
+          "description": "%config.exportTheme.description%"
+        },
+        "plantumlLocal.hideExportedImages": {
+          "type": "boolean",
+          "default": true,
+          "description": "%config.hideExportedImages.description%"
         }
       }
     }

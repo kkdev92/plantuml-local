@@ -76,6 +76,8 @@ PlantUML draws `sprite` definitions — the mechanism behind icon sets such as A
 
 The extension declares support for untrusted and virtual workspaces: it reads no workspace files, spawns no processes, and executes nothing from the workspace. The only input it processes is the text of ` ```plantuml ` fences, inside a worker, with the output sanitised as above.
 
+Exporting is the one path that writes anything: the export commands write SVG files, and *Export All Diagrams and Update References* also edits the Markdown buffer. All three refuse to run in an untrusted workspace, enforced by a runtime `workspace.isTrusted` check rather than by hiding the commands — a hidden command can still be invoked programmatically. Rendering and the preview are unaffected. The destination comes from `plantumlLocal.exportDirectory`, which must be a relative path without `..`, and file names come from the block's own name, restricted to letters, digits, hyphens and underscores; neither can be made to point outside the document's folder.
+
 ### Supply chain notes
 
 - `@plantuml/core` is required at `^1.2026.6` — 1.2026.6 is the first MIT-licensed release — and its two engine files are copied verbatim into the package (no CDN at build or run time). `package-lock.json` records the exact version each build used.

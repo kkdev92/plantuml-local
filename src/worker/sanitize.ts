@@ -69,9 +69,15 @@ interface ElementLike {
   attributes: ArrayLike<{ name: string; value: string }>;
   remove(): void;
   removeAttribute(name: string): void;
+  setAttribute(name: string, value: string): void;
 }
 
-function stripAttributes(element: ElementLike): void {
+/** Whether any attribute that survived stripping uses the xlink prefix. */
+interface StripState {
+  xlink: boolean;
+}
+
+function stripAttributes(element: ElementLike, state: StripState): void {
   for (const attribute of Array.from(element.attributes)) {
     const name = attribute.name.toLowerCase();
     if (name.startsWith('on')) {
@@ -82,20 +88,24 @@ function stripAttributes(element: ElementLike): void {
       !isSpritePng(element, name, attribute.value)
     ) {
       element.removeAttribute(attribute.name);
+    } else if (name.startsWith('xlink:')) {
+      state.xlink = true;
     }
   }
 }
 
-function walk(element: ElementLike): void {
+function walk(element: ElementLike, state: StripState): void {
   for (const child of Array.from(element.children)) {
     if (DANGEROUS_ELEMENTS.has(child.nodeName.toLowerCase())) {
       child.remove();
       continue;
     }
-    stripAttributes(child);
-    walk(child);
+    stripAttributes(child, state);
+    walk(child, state);
   }
 }
+
+const XLINK_NAMESPACE = 'http://www.w3.org/1999/xlink';
 
 /**
  * Parses `svg` as an SVG document, strips dangerous content and returns
@@ -111,8 +121,22 @@ export function sanitizeSvg(window: Window, svg: string): string {
 
   // The root <svg> carries attributes too (a hypothetical onload=…);
   // strip it with the same rules as every descendant.
-  stripAttributes(root as unknown as ElementLike);
-  walk(root as unknown as ElementLike);
+  const rootElement = root as unknown as ElementLike;
+  const state: StripState = { xlink: false };
+  stripAttributes(rootElement, state);
+  walk(rootElement, state);
+
+  // The engine writes `xlink:href` on sprites without ever declaring the
+  // prefix. As HTML injected into the preview that parses fine; as a
+  // standalone .svg file it is a fatal XML error — a browser shows a
+  // broken image for the whole file. Declare the namespace whenever a
+  // surviving attribute needs it.
+  if (
+    state.xlink &&
+    !Array.from(rootElement.attributes).some((a) => a.name.toLowerCase() === 'xmlns:xlink')
+  ) {
+    rootElement.setAttribute('xmlns:xlink', XLINK_NAMESPACE);
+  }
 
   return new window.XMLSerializer().serializeToString(root);
 }
