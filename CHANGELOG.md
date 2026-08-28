@@ -22,8 +22,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   months against a stable line already past 1.131, and has now caught up to
   1.134.0 — one release behind the current 1.135.
 
-- Dependencies: `happy-dom` 20.11.2 → 20.11.6, `@types/markdown-it` 14.1.2 →
-  14.2.0, `vitest` and `@vitest/coverage-v8` 4.1.10 → 4.1.11.
+- **The diagram engine moved: `@plantuml/core` 1.2026.6 → 1.2026.7.** This is the
+  runtime dependency that renders every diagram, so it is the one bump here that
+  can change output. Upstream published no changelog for .7 at the time of this
+  release, so it was checked by running it: 122 unit and 44 integration tests,
+  the latter rendering real diagrams, plus `verify:vsix`, which renders from the
+  packaged extension.
+
+- Other dependencies: `happy-dom` 20.11.2 → 20.11.6, `@types/markdown-it` 14.1.2
+  → 14.2.0, `vitest` and `@vitest/coverage-v8` 4.1.10 → 4.1.11, `eslint` 10.7.0
+  → 10.9.1, `typescript-eslint` 8.61.0 → 8.68.0. All build-time only.
 
 ## [0.6.1] - 2026-08-15
 
