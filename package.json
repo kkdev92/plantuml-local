@@ -168,7 +168,7 @@
   },
   "dependencies": {
     "@kkdev92/vscode-ext-kit": "^3.0.0",
-    "@plantuml/core": "^1.2026.6",
+    "@plantuml/core": "^1.2026.7",
     "happy-dom": "^20.11.6"
   },
   "devDependencies": {
@@ -179,10 +179,10 @@
     "@vitest/coverage-v8": "^4.1.11",
     "@vscode/vsce": "^3.7.1",
     "esbuild": "^0.28.1",
-    "eslint": "^10.7.0",
+    "eslint": "^10.9.1",
     "rimraf": "^6.1.2",
     "typescript": "~6.0.3",
-    "typescript-eslint": "^8.67.0",
+    "typescript-eslint": "^8.68.0",
     "vitest": "^4.0.17"
   }
 }
