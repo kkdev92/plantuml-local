@@ -18,7 +18,7 @@
     "url": "https://github.com/kkdev92/plantuml-local/issues"
   },
   "engines": {
-    "vscode": "^1.125.0",
+    "vscode": "^1.134.0",
     "node": ">=24.0.0"
   },
   "categories": [

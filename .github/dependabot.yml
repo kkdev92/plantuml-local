@@ -25,7 +25,7 @@ updates:
       # @types/node majors: these types decide what Node API the code may compile
       # against, so they must not exceed the runtime. VS Code 1.132's extension
       # host runs Node 24.18.0 (measured, via ELECTRON_RUN_AS_NODE), and
-      # `engines.vscode: ^1.125.0` puts the floor lower still. A bump past that
+      # `engines.vscode: ^1.134.0` puts the floor lower still. A bump past that
       # passes CI — nothing reaches for a newer API *yet* — which is precisely why
       # CI cannot be what catches it. Same rule as @types/vscode, where the types
       # floor is also the ceiling. Revisit when the host moves.
