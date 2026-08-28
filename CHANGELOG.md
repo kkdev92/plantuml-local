@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking: VS Code 1.134 or later is now required**, up from 1.125.
+  `@types/vscode` moved to `~1.134.0` in the same change, and the two have to
+  move together: `vsce` refuses to package an extension whose `@types/vscode`
+  is newer than its `engines.vscode`. That is what the grouped dependency
+  update ran into — `@types/vscode ~1.134.0 greater than engines.vscode
+  ^1.125.0. Either upgrade engines.vscode or use an older @types/vscode
+  version`.
+
+  The rule is right: types above the floor let code compile against an API the
+  declared minimum does not have. DefinitelyTyped had been stuck at 1.125.0 for
+  months against a stable line already past 1.131, and has now caught up to
+  1.134.0 — one release behind the current 1.135.
+
+- Dependencies: `happy-dom` 20.11.2 → 20.11.6, `@types/markdown-it` 14.1.2 →
+  14.2.0, `vitest` and `@vitest/coverage-v8` 4.1.10 → 4.1.11.
+
 ## [0.6.1] - 2026-08-15
 
 ### Fixed
