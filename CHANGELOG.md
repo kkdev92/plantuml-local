@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `@kkdev92/vscode-ext-kit` `^4.0.0` → `^4.1.0`. The framework's 4.1 is about
+  introspection and tooling; its API is additive and the VS Code floor is
+  unchanged, so nothing here had to move.
+
+  **The bundle grows by 6,446 bytes (204,121 → 210,567), and the growth is
+  accounted for.** Built against both kit versions and compared: all of it is
+  framework runtime this extension links — a preflight failure reported as
+  data, a shutdown timeout that names what was holding it, `inspect()` on both
+  scope kinds, and `defineExtension` refusing a second activation after
+  deactivation. This extension activates once per suite, the way a real host
+  does, so the last one changes nothing here.
+
+  The extension module now also exports its compiled `plan`, which is what the
+  kit's new command line reads off the built bundle: `plan --check` reports the
+  compiled plan sound, and `manifest` reports package.json and the plan
+  agreeing on 4 commands and 5 settings. The plan is data — nothing callable is
+  reachable through it.
+
 - `@kkdev92/vscode-ext-kit` `^3.0.0` → `^4.0.0`. The framework raised its own
   `engines.vscode` to `^1.134.0`, which this extension already declares, so the
   two now agree instead of the extension quietly requiring more than the library
