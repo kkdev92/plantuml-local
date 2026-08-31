@@ -38,6 +38,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   callers through the `./testing` subpath and never enters a bundle, and all
   105 `.d.ts` are identical, so there is no API change either.
 
+### Fixed
+
+- **The Marketplace version badge could render as a broken image.** The host
+  serving it, `vsmarketplacebadges.dev`, returns HTTP 500 intermittently. The
+  badge now comes from `badgen.net` and reports the same version.
+
 ## [0.7.0] - 2026-08-29
 
 ### Changed
