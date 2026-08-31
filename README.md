@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![CI](https://github.com/kkdev92/plantuml-local/actions/workflows/ci.yml/badge.svg)](https://github.com/kkdev92/plantuml-local/actions/workflows/ci.yml)
-[![VS Code Marketplace](https://vsmarketplacebadges.dev/version-short/kkdev92.plantuml-local.svg)](https://marketplace.visualstudio.com/items?itemName=kkdev92.plantuml-local)
+[![VS Code Marketplace](https://badgen.net/vs-marketplace/v/kkdev92.plantuml-local)](https://marketplace.visualstudio.com/items?itemName=kkdev92.plantuml-local)
 [![TypeScript](https://img.shields.io/badge/TypeScript-6.0-blue.svg)](https://www.typescriptlang.org/)
 [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/14052/badge)](https://www.bestpractices.dev/projects/14052)
 
