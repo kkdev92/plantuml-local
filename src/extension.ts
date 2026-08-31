@@ -674,4 +674,9 @@ const app = defineExtension({
 });
 
 export const activate = app.activate;
+
+// The compiled plan, for tooling: `vscode-ext-kit plan` and `vscode-ext-kit
+// manifest` read it off the built bundle, and a test can hand it to
+// `createTestHost`. Data only — nothing callable is reachable through it.
+export const plan = app.plan;
 export const deactivate = app.deactivate;
