@@ -169,7 +169,7 @@
   "dependencies": {
     "@kkdev92/vscode-ext-kit": "^4.1.0",
     "@plantuml/core": "^1.2026.7",
-    "happy-dom": "^20.11.6"
+    "happy-dom": "^20.11.15"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.0",
