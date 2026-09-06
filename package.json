@@ -167,22 +167,22 @@
     "clean": "rimraf dist coverage .vsix-verify-temp .stdlib-temp"
   },
   "dependencies": {
-    "@kkdev92/vscode-ext-kit": "^4.1.0",
+    "@kkdev92/vscode-ext-kit": "^4.1.1",
     "@plantuml/core": "^1.2026.7",
-    "happy-dom": "^20.11.15"
+    "happy-dom": "^20.14.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.0",
     "@types/markdown-it": "^14.2.0",
     "@types/node": "^24.13.3",
-    "@types/vscode": "~1.134.0",
+    "@types/vscode": "~1.136.0",
     "@vitest/coverage-v8": "^4.1.11",
     "@vscode/vsce": "^3.7.1",
     "esbuild": "^0.28.1",
     "eslint": "^10.9.1",
     "rimraf": "^6.1.2",
     "typescript": "~6.0.3",
-    "typescript-eslint": "^8.68.0",
+    "typescript-eslint": "^8.69.0",
     "vitest": "^4.0.17"
   }
 }
