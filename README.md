@@ -305,14 +305,14 @@ For the full threat model and for vulnerability reporting, see
 
 ## Platform Requirements
 
-- **VS Code 1.134 or later**
+- **VS Code 1.136 or later**
 - Windows, macOS or Linux, on x64 or ARM64
 
 That's it — no Java runtime, no Graphviz install, no external tools.
 
-> **Upgrading?** The minimum is now 1.134 — it was 1.125 from 0.4.0, and 1.101
-> before that. Older installations keep the version they have and stop
-> receiving updates.
+> **Upgrading?** The minimum is now 1.136 — it was 1.134 from 0.7.0, 1.125 from
+> 0.4.0, and 1.101 before that. Older installations keep the version they have
+> and stop receiving updates.
 
 CI runs the test suite on Windows, macOS and Linux (x64 on Windows and Linux,
 ARM64 on macOS). The extension is plain JavaScript and WebAssembly, so other
