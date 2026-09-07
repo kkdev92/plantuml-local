@@ -31,8 +31,6 @@ updates.
   engine renders into, so it ships with the extension; the releases in between
   are patches to node lifecycle and custom-element handling.
 
-### Changed
-
 - `@kkdev92/vscode-ext-kit` `^4.0.0` → `^4.1.0`. The framework's 4.1 is about
   introspection and tooling; its API is additive and the VS Code floor is
   unchanged, so nothing here had to move.
