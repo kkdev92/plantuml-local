@@ -176,7 +176,7 @@
     "@types/markdown-it": "^14.2.0",
     "@types/node": "^24.13.3",
     "@types/vscode": "~1.136.0",
-    "@vitest/coverage-v8": "^4.1.11",
+    "@vitest/coverage-v8": "^5.0.0",
     "@vscode/vsce": "^3.7.1",
     "esbuild": "^0.28.1",
     "eslint": "^10.9.1",
