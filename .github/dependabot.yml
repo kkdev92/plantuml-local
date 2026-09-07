@@ -33,6 +33,24 @@ updates:
         update-types:
           - version-update:semver-major
 
+      # vitest 5.x: measured against a real consumer, not assumed. Installing
+      # vitest 5 and @vitest/coverage-v8 5 together resolves cleanly, but the
+      # integration project — which activates the built bundle against the
+      # `vscode` mock from `@kkdev92/vscode-ext-kit/testing/vitest` — then sees
+      # an empty mock: six tests fail with recorded calls of []. The unit
+      # project, which imports src directly, still passes, so the alias works and
+      # the kit's own `vscode` import is what stops resolving to the same module.
+      # Declaring the inline explicitly in this repo's own config did not change
+      # it. Drop this once the kit's testing surface is verified on vitest 5 —
+      # the kit's `peerDependencies` say `vitest >=4`, and that claim is what has
+      # to become true first.
+      - dependency-name: vitest
+        update-types:
+          - version-update:semver-major
+      - dependency-name: "@vitest/coverage-v8"
+        update-types:
+          - version-update:semver-major
+
   # Actions are pinned to commit SHAs, which a person cannot reasonably keep current by
   # hand. Dependabot reads the version from the trailing comment and updates both, so the
   # pinning stays a safeguard rather than becoming a way to stay on old code forever.
