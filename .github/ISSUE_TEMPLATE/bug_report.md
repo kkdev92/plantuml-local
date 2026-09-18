@@ -9,7 +9,7 @@ assignees: ''
 ## Environment
 
 - **OS**: (e.g., Windows 11, macOS 15, Ubuntu 24.04)
-- **VS Code Version**: (e.g., 1.130.0)
+- **VS Code Version**: (e.g., 1.138.0)
 - **PlantUML Local Version**: (e.g., 0.1.0)
 
 ## Description
