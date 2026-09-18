@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-09-18
+
+**Breaking: VS Code 1.138 or later is now required**, up from 1.137, in step with
+`@types/vscode` moving to `~1.138.0`. The two have to move together — `vsce`
+refuses to package an extension whose `@types/vscode` outruns its
+`engines.vscode`, and raising only the types would let code compile against an
+API the declared floor does not have.
+
+The floor is inherited: `@kkdev92/vscode-ext-kit` 7.0.0 raised its own
+`engines.vscode` to `^1.138.0`, and every extension built on it declares at least
+the same. Nothing this extension does changed — no command, setting, view or
+behaviour is different from 0.9.x. Installations on an older VS Code keep 0.9.x
+and stop receiving updates.
+
+### Changed
+
+- **Breaking:** `engines.vscode` raised from `^1.137.0` to `^1.138.0`, with
+  `@types/vscode` at `~1.138.0` to match.
+- `@kkdev92/vscode-ext-kit` `^6.0.0` → `^7.0.0`. The only change in that major is
+  the VS Code floor; the API it exposes is byte-for-byte what 6.1.0 exposed.
+
 ## [0.9.0] - 2026-09-14
 
 **Breaking: VS Code 1.137 or later is now required**, up from 1.136, in step with
@@ -340,7 +361,8 @@ First public release.
 - happy-dom's bundled self-signed TLS certificate (unused fetch machinery) is
   stripped from the worker bundle at build time.
 
-[Unreleased]: https://github.com/kkdev92/plantuml-local/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/kkdev92/plantuml-local/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/kkdev92/plantuml-local/compare/v0.9.0...v0.10.0
 [0.8.0]: https://github.com/kkdev92/plantuml-local/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/kkdev92/plantuml-local/compare/v0.6.1...v0.7.0
 [0.6.1]: https://github.com/kkdev92/plantuml-local/compare/v0.6.0...v0.6.1
