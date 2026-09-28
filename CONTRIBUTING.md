@@ -10,7 +10,7 @@ This project follows the [Contributor Covenant](CODE_OF_CONDUCT.md). By particip
 
 ### Prerequisites
 
-- Node.js ≥ 22 (matches `engines.node` and CI)
+- Node.js ≥ 24 (matches `engines.node` and CI)
 - VS Code ≥ 1.138 (the floor this extension declares)
 - No Java, no Graphviz, no Docker — the whole point of this project.
 
@@ -30,6 +30,8 @@ Open the folder in VS Code and press `F5`. An Extension Development Host starts 
 ```text
 src/
 ├── core/            constants and shared types (message protocol, log surface)
+├── export/          SVG export: finds the diagram blocks in a Markdown file and
+│                    writes one file per diagram
 ├── preview/         markdown-it plugin: fence dispatch + cache-and-refresh cycle
 │                    (dependency-injected, no `vscode` import — unit-testable)
 ├── render/          extension-host side of the worker (request/response, restart)
@@ -38,7 +40,11 @@ src/
 └── extension.ts     wiring only: vscode + @kkdev92/vscode-ext-kit + the above
 scripts/
 ├── build.mjs        esbuild bundling + engine copy + happy-dom cert stub
+├── generate-stdlib.mjs  regenerates assets/stdlib/ from PlantUML's standard
+│                    library (run by hand; the output is committed)
 └── verify-vsix.mjs  VSIX content check + packaged-worker render smoke test
+assets/
+└── stdlib/          bundled standard-library data (the Azure icons)
 test/
 ├── unit/            vitest against src/ (no build needed)
 └── integration/     vitest against dist/ (real engine, stubbed `vscode`)
@@ -63,12 +69,12 @@ npm run package       # build the VSIX
 npm run verify:vsix   # unpack the VSIX and render from the packaged worker
 ```
 
-All of these must pass before a PR is merged; CI runs the same steps on Linux, macOS and Windows.
+All of these must pass before a PR is merged. CI runs the tests on Linux, macOS and Windows, and lint, the type check, packaging and the VSIX check on Linux.
 
 ### Making Changes
 
 - Keep `src/preview/plugin.ts` free of `vscode` imports — everything host-specific arrives through its `PluginDeps`. This is what keeps the render cycle unit-testable.
-- User-facing strings go through `vscode.l10n` (`t()` from the kit) with English defaults; add Japanese to `l10n/bundle.l10n.ja.json` and manifest strings to `package.nls*.json`.
+- User-facing strings go through `vscode.l10n` (`context.l10n.t`) with English defaults; add Japanese to `l10n/bundle.l10n.ja.json` and manifest strings to `package.nls*.json`.
 - New behaviour needs a test. Pure logic → `test/unit/`; anything that depends on the real engine or the built bundles → `test/integration/`.
 
 ### Commit Messages
@@ -85,7 +91,7 @@ Use [Conventional Commits](https://www.conventionalcommits.org/): `feat:`, `fix:
 
 ## Reporting Issues
 
-Use the issue templates. For rendering problems, include the smallest PlantUML source that reproduces the issue and the output of *Output → PlantUML Local* at `logLevel: debug`.
+Use the issue templates. For rendering problems, include the smallest PlantUML source that reproduces the issue and the output of *Output → PlantUML Local* with the level set to Debug via **Developer: Set Log Level**.
 
 For security reports, **do not open a public issue** — see [SECURITY.md](SECURITY.md).
 

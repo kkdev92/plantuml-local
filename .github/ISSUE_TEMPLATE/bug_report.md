@@ -38,7 +38,7 @@ What actually happened (broken layout, error box, stuck on "Rendering diagram…
 
 ## Logs
 
-Set `plantumlLocal.logLevel` to `debug`, reproduce, and paste relevant lines from *View → Output → PlantUML Local*.
+Run **Developer: Set Log Level**, pick *PlantUML Local* and choose Debug, reproduce, and paste relevant lines from *View → Output → PlantUML Local*. (`plantumlLocal.logLevel` can only make the log quieter, so leave it at its default.)
 
 ## Additional Context
 
