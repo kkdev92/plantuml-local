@@ -80,7 +80,7 @@ Exporting is the one path that writes anything: the export commands write SVG fi
 
 ### Supply chain notes
 
-- `@plantuml/core` is required at `^1.2026.6` — 1.2026.6 is the first MIT-licensed release — and its two engine files are copied verbatim into the package (no CDN at build or run time). `package-lock.json` records the exact version each build used.
+- `@plantuml/core` is required at a range that starts no lower than 1.2026.6, the first MIT-licensed release (see `package.json`), and its two engine files are copied verbatim into the package (no CDN at build or run time). `package-lock.json` records the exact version each build used.
 - Copyright and licence notices for every third-party component shipped in the VSIX are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md), with full licence texts under `third-party/`.
 - happy-dom ships a self-signed TLS certificate (private key included) for HTTPS emulation in its fetch stack. This extension never uses that stack; the build replaces the certificate module with an empty stub, and `verify-vsix` fails the build if key material reappears in the bundle.
 

@@ -359,7 +359,7 @@ Really appreciate you using PlantUML Local 💛
 
 PlantUML Local is licensed under the MIT License — see [LICENSE](LICENSE).
 
-The bundled engine `@plantuml/core` is MIT-licensed from version 1.2026.6 onwards (earlier versions are GPL-3.0-or-later). This extension therefore depends on `^1.2026.6`, which permits any compatible 1.x release from that version up; the exact version a build used is recorded in `package-lock.json`.
+The bundled engine `@plantuml/core` is MIT-licensed from version 1.2026.6 onwards (earlier versions are GPL-3.0-or-later). This extension's dependency range for it starts no lower than 1.2026.6 (see `package.json`), so it only ever resolves to MIT-licensed releases; the exact version a build used is recorded in `package-lock.json`.
 
 Copyright and licence notices for the third-party code shipped inside the VSIX are collected in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
