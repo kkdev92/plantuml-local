@@ -9,16 +9,16 @@ in [`third-party/`](third-party).
 
 | Component | Version | Licence | Full text |
 | --- | --- | --- | --- |
-| [`@plantuml/core`](https://www.npmjs.com/package/@plantuml/core) | 1.2026.6 | MIT | [plantuml-core-LICENSE.txt](third-party/plantuml-core-LICENSE.txt) |
+| [`@plantuml/core`](https://www.npmjs.com/package/@plantuml/core) | 1.2026.8 | MIT | [plantuml-core-LICENSE.txt](third-party/plantuml-core-LICENSE.txt) |
 | [Viz.js](https://github.com/mdaines/viz-js) | 3.24.0 | MIT | [viz-js-LICENSE.txt](third-party/viz-js-LICENSE.txt) |
 | [Graphviz](https://graphviz.org/) | (in Viz.js WebAssembly) | EPL-1.0 | [graphviz-LICENSE.txt](third-party/graphviz-LICENSE.txt) |
 | [Expat](https://libexpat.github.io/) | (in Viz.js WebAssembly) | MIT | [expat-LICENSE.txt](third-party/expat-LICENSE.txt) |
-| [happy-dom](https://github.com/capricorn86/happy-dom) | 20.11.1 | MIT | [happy-dom-LICENSE.txt](third-party/happy-dom-LICENSE.txt) |
+| [happy-dom](https://github.com/capricorn86/happy-dom) | 20.14.5 | MIT | [happy-dom-LICENSE.txt](third-party/happy-dom-LICENSE.txt) |
 | [entities](https://github.com/fb55/entities) | 7.0.1 | BSD-2-Clause | [entities-LICENSE.txt](third-party/entities-LICENSE.txt) |
 | [whatwg-mimetype](https://github.com/jsdom/whatwg-mimetype) | 3.0.0 | MIT | [whatwg-mimetype-LICENSE.txt](third-party/whatwg-mimetype-LICENSE.txt) |
-| [ws](https://github.com/websockets/ws) | 8.21.1 | MIT | [ws-LICENSE.txt](third-party/ws-LICENSE.txt) |
+| [ws](https://github.com/websockets/ws) | 8.21.3 | MIT | [ws-LICENSE.txt](third-party/ws-LICENSE.txt) |
 | [buffer-image-size](https://github.com/netroy/buffer-image-size) | 0.6.4 | MIT | [buffer-image-size-LICENSE.txt](third-party/buffer-image-size-LICENSE.txt) |
-| [`@kkdev92/vscode-ext-kit`](https://github.com/kkdev92/vscode-ext-kit) | 1.1.0 | MIT | [vscode-ext-kit-LICENSE.txt](third-party/vscode-ext-kit-LICENSE.txt) |
+| [`@kkdev92/vscode-ext-kit`](https://github.com/kkdev92/vscode-ext-kit) | 7.0.0 | MIT | [vscode-ext-kit-LICENSE.txt](third-party/vscode-ext-kit-LICENSE.txt) |
 | [Azure-PlantUML](https://github.com/plantuml-stdlib/Azure-PlantUML) | 2.1.0 | MIT | [azure-plantuml-LICENSE.txt](third-party/azure-plantuml-LICENSE.txt) |
 
 Development-only dependencies (TypeScript, esbuild, ESLint, Vitest, vsce and
