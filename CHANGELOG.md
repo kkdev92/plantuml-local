@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-09-28
+
+### Changed
+
+- happy-dom, the DOM the diagram engine runs on inside the render worker,
+  20.14.3 → 20.14.5: two fixes to how HTML comments are parsed.
+
+### Fixed
+
+- `THIRD_PARTY_NOTICES.md` lists the versions this package actually ships.
+  `@plantuml/core`, happy-dom, ws and `@kkdev92/vscode-ext-kit` had fallen
+  behind; their licence texts are unchanged.
+
 ## [0.10.0] - 2026-09-18
 
 **Breaking: VS Code 1.138 or later is now required**, up from 1.137, in step with
@@ -361,7 +374,8 @@ First public release.
 - happy-dom's bundled self-signed TLS certificate (unused fetch machinery) is
   stripped from the worker bundle at build time.
 
-[Unreleased]: https://github.com/kkdev92/plantuml-local/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/kkdev92/plantuml-local/compare/v0.10.1...HEAD
+[0.10.1]: https://github.com/kkdev92/plantuml-local/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/kkdev92/plantuml-local/compare/v0.9.0...v0.10.0
 [0.8.0]: https://github.com/kkdev92/plantuml-local/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/kkdev92/plantuml-local/compare/v0.6.1...v0.7.0
