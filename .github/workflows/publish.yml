@@ -3,12 +3,19 @@ name: Publish Extension
 on:
   release:
     types: [published]
+  # A manual run publishes nothing: it runs only `check-credential` below. The
+  # environment admits `v*` tags, so a manual run from a release tag works as it
+  # is, and one from a branch needs that branch allowed on the environment for
+  # the duration.
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
   test:
+    # `package` and `publish` hang off this job, so a manual run skips all three.
+    if: github.event_name == 'release'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -30,17 +37,12 @@ jobs:
       - name: Test
         run: npm test
 
-  publish:
+  # Packaging stays out of the job that can sign in: `npm ci` runs the
+  # dependencies' install scripts, and none of them should share a job with
+  # `id-token: write`.
+  package:
     needs: test
     runs-on: ubuntu-latest
-    # Publishing to the Marketplace waits for an approval. The environment also
-    # restricts what may deploy to it to `v*` tags, which is the ref every
-    # release this workflow has ever run on.
-    #
-    # `VSCE_PAT` is still a repository secret, so this gates *when* it is used,
-    # not who can reference it. Moving the secret onto this environment is the
-    # step that would do that, and needs the token value.
-    environment: marketplace-publish
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -58,5 +60,92 @@ jobs:
       - name: Verify VSIX contents and render from the package
         run: node scripts/verify-vsix.mjs plantuml-local.vsix
 
+      - name: Upload VSIX artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: plantuml-local-vsix
+          path: plantuml-local.vsix
+          retention-days: 1
+
+  publish:
+    needs: package
+    runs-on: ubuntu-latest
+    # Publishing to the Marketplace waits for an approval. The environment also
+    # restricts what may deploy to it to `v*` tags, which is the ref every
+    # release this workflow has ever run on.
+    #
+    # No credential is stored. The job signs in to Microsoft Entra ID as a
+    # managed identity, through a federated credential that trusts only this
+    # environment of this repository (by repository and owner ID, not by name),
+    # and the Marketplace lets that identity publish as kkdev92.
+    #
+    # `id-token: write` lets any step of this job ask for the token that sign-in
+    # exchanges, so the job runs nothing it does not need: it publishes the VSIX
+    # that `package` verified, and installs without install scripts.
+    environment: marketplace-publish
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+
+      - name: Install vsce from the lockfile
+        run: npm ci --ignore-scripts
+
+      - name: Download the VSIX
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: plantuml-local-vsix
+
+      - name: Sign in to Microsoft Entra ID
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          allow-no-subscriptions: true
+
       - name: Publish to Marketplace
-        run: npx @vscode/vsce publish --packagePath plantuml-local.vsix -p ${{ secrets.VSCE_PAT }}
+        run: npx @vscode/vsce publish --packagePath plantuml-local.vsix --azure-credential
+
+  # The manual run. It signs in the way `publish` does and asks the Marketplace
+  # whether that identity may publish as kkdev92 (`vsce verify-pat` accepts an
+  # Entra credential in place of a PAT), so a broken credential shows up before a
+  # release rather than in the middle of one. It also prints the identity's
+  # Azure DevOps profile id, which is what the publisher's member list takes.
+  check-credential:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    environment: marketplace-publish
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+
+      - name: Install vsce from the lockfile
+        run: npm ci --ignore-scripts
+
+      - name: Sign in to Microsoft Entra ID
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          allow-no-subscriptions: true
+
+      - name: Show the identity's Azure DevOps profile id
+        run: az rest -u https://app.vssps.visualstudio.com/_apis/profile/profiles/me --resource 499b84ac-1321-427f-aa17-267ca6975798 --query id -o tsv
+
+      - name: Check that the identity may publish as kkdev92
+        run: npx @vscode/vsce verify-pat kkdev92 --azure-credential
