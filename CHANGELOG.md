@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-09-29
+
+### Added
+
+- **` ```plantuml ` blocks are highlighted in the editor**, including ones
+  inside block quotes and list items, and also when another extension's
+  grammar claims every fence first. The grammar follows the parser of the
+  bundled engine rather than PlantUML's documentation: every command of every
+  diagram type the engine renders has a test case, and CI renders each case
+  with the engine, so the grammar is tested on syntax the engine actually
+  accepts. The JSON and YAML inside `@startjson` / `@startyaml` are coloured by
+  VS Code's own JSON and YAML grammars. Diagram types the bundled engine does
+  not render (`@startditaa`, …) are marked invalid, and some older forms it
+  accepts only with a warning — a colour in front of an activity, `label on
+  first column` in a Gantt chart — are marked deprecated.
+
+### Fixed
+
+- **A diagram no longer depends on the one rendered before it.** For a source
+  of ten lines or more, the engine first tries the diagram type that accepted
+  the previous diagram, so a source that reads as two types — lines of
+  `A -> B : message` are both a sequence and a class diagram — became a class
+  diagram when one had just been rendered, in the preview and in exported SVGs
+  alike. The worker now clears that after every render.
+- **`!theme` works.** The engine reads its themes from a `themes.js` next to
+  it, which this extension did not ship, so `!theme cerulean` and the rest were
+  ignored and the diagram rendered unthemed. The theme library now ships, all
+  but four themes whose licence is not one this extension ships: `mars`,
+  `sunlust`, `toy` and `vibrant`, for which the engine reports that it cannot
+  load the theme. Most themes paint no background and were made for a page of
+  one colour, so a diagram whose theme would be hard to read in the palette in
+  use is drawn in the other one: `!theme plain` gets the light palette in a
+  dark editor, in the preview and in exports.
+- **OpenIconic icons render.** A diagram using one (`<&check>`) failed with
+  `Failed to load openiconic.js`; the icons now ship too.
+- A diagram using an emoji (`<:smile:>`) still does not render — the emoji
+  images are not bundled — but the preview and the export now say so, instead
+  of showing `Failed to load emoji.js`.
+
 ## [0.10.1] - 2026-09-28
 
 ### Changed
@@ -374,7 +413,8 @@ First public release.
 - happy-dom's bundled self-signed TLS certificate (unused fetch machinery) is
   stripped from the worker bundle at build time.
 
-[Unreleased]: https://github.com/kkdev92/plantuml-local/compare/v0.10.1...HEAD
+[Unreleased]: https://github.com/kkdev92/plantuml-local/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/kkdev92/plantuml-local/compare/v0.10.1...v0.11.0
 [0.10.1]: https://github.com/kkdev92/plantuml-local/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/kkdev92/plantuml-local/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/kkdev92/plantuml-local/compare/v0.8.0...v0.9.0

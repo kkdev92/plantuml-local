@@ -23,7 +23,7 @@ npm install
 npm run bundle
 ```
 
-Open the folder in VS Code and press `F5`. An Extension Development Host starts with `sample.md` open; hit `Ctrl+Shift+V` to see the preview. `npm run bundle:watch` rebuilds on save.
+Open the folder in VS Code and press `F5`. An Extension Development Host starts with `sample.md` open; open the preview with **Markdown: Open Preview** (`Ctrl+Shift+V` by default). `npm run bundle:watch` rebuilds on save.
 
 ## Project Structure
 
@@ -32,6 +32,8 @@ src/
 ├── core/            constants and shared types (message protocol, log surface)
 ├── export/          SVG export: finds the diagram blocks in a Markdown file and
 │                    writes one file per diagram
+├── grammar/         syntax highlighting for ```plantuml fences: TextMate
+│                    grammars written as TypeScript, built into dist/syntaxes/
 ├── preview/         markdown-it plugin: fence dispatch + cache-and-refresh cycle
 │                    (dependency-injected, no `vscode` import — unit-testable)
 ├── render/          extension-host side of the worker (request/response, restart)
@@ -39,14 +41,19 @@ src/
 │                    SVG sanitiser, approximate text metrics
 └── extension.ts     wiring only: vscode + @kkdev92/vscode-ext-kit + the above
 scripts/
-├── build.mjs        esbuild bundling + engine copy + happy-dom cert stub
+├── build.mjs        esbuild bundling + engine copy + happy-dom cert stub +
+│                    grammar JSON
+├── extract-grammar-checklist.mjs  lists what the bundled engine accepts, from
+│                    the upstream PlantUML sources (run by hand; the output is
+│                    committed)
 ├── generate-stdlib.mjs  regenerates assets/stdlib/ from PlantUML's standard
 │                    library (run by hand; the output is committed)
 └── verify-vsix.mjs  VSIX content check + packaged-worker render smoke test
 assets/
 └── stdlib/          bundled standard-library data (the Azure icons)
 test/
-├── unit/            vitest against src/ (no build needed)
+├── unit/            vitest against src/ (no build needed); grammar/ holds the
+│                    grammar cases and the checklist
 └── integration/     vitest against dist/ (real engine, stubbed `vscode`)
 ```
 
@@ -76,6 +83,32 @@ All of these must pass before a PR is merged. CI runs the tests on Linux, macOS 
 - Keep `src/preview/plugin.ts` free of `vscode` imports — everything host-specific arrives through its `PluginDeps`. This is what keeps the render cycle unit-testable.
 - User-facing strings go through `vscode.l10n` (`context.l10n.t`) with English defaults; add Japanese to `l10n/bundle.l10n.ja.json` and manifest strings to `package.nls*.json`.
 - New behaviour needs a test. Pure logic → `test/unit/`; anything that depends on the real engine or the built bundles → `test/integration/`.
+
+### Syntax Highlighting
+
+The grammar should recognise what the bundled engine accepts, and mark what it
+rejects. `test/unit/grammar/checklist.json` lists the former: the commands of
+every diagram type in the engine's browser build, the gantt sentences, the
+preprocessor and the creole markup, extracted from the upstream PlantUML sources
+at the tag of the bundled `@plantuml/core`.
+
+- Every checklist entry needs a grammar case in `test/unit/grammar/cases/`: a
+  whole diagram, the scopes its parts must (or must not) get, and the entries it
+  covers. The unit tests check the scopes and that no entry is left uncovered.
+  The integration tests render every case with the bundled engine, so a case is
+  also evidence that the engine accepts the syntax it shows: it must render
+  without the engine's warning banner unless it declares one (`warns`, for
+  deprecated forms), and the commands it covers must belong to the diagram type
+  the engine chose for it — inside `@startuml` the engine keeps the first
+  diagram type that reads every line.
+- When `@plantuml/core` is upgraded, a unit test fails until the checklist
+  matches the new version. Regenerate it from a checkout of the matching
+  upstream tag, then cover the entries the diff of `checklist.json` adds:
+
+  ```bash
+  git clone --depth 1 --branch v<version> https://github.com/plantuml/plantuml.git ../plantuml
+  node scripts/extract-grammar-checklist.mjs --source ../plantuml
+  ```
 
 ### Commit Messages
 

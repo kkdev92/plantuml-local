@@ -1,4 +1,4 @@
-import { REMOTE_REFERENCE } from '../core/constants';
+import { DIAGRAM_BACKDROP, EMOJI_UNAVAILABLE, REMOTE_REFERENCE } from '../core/constants';
 import { findPlantUmlBlocks, isValidBlockName, type PlantUmlBlock } from './blocks';
 
 /**
@@ -20,12 +20,19 @@ export interface ExporterDeps {
   render(source: string, dark: boolean): Promise<string>;
   /** Whether diagrams should currently render in dark colours. */
   isDark(): boolean;
+  /**
+   * The palette to draw `source` in when `dark` is asked for: the other one
+   * for a diagram whose `!theme` cannot be read in it (src/render/palette.ts).
+   */
+  resolvePalette(source: string, dark: boolean): Promise<boolean>;
   /** Writes `content` to `path`, creating parent directories. */
   writeFile(path: string, content: string): Promise<void>;
   /** Joins a document path's directory with a relative path. */
   resolve(documentPath: string, relative: string): string;
   /** Localised reason given for a block carrying a URL-based include. */
   remoteReferenceMessage: string;
+  /** Localised reason given for a diagram that uses an emoji. */
+  emojiUnavailableMessage: string;
   /** Localised reason given for a block name unusable as a file name. */
   invalidNameMessage: string;
 }
@@ -65,9 +72,6 @@ export function isValidExportDirectory(directory: string): boolean {
     .some((segment) => segment === '..');
 }
 
-/** Matches the backdrops media/plantuml.css gives the preview. */
-const BACKGROUND = { light: '#FFFFFF', dark: '#1b1b1b' } as const;
-
 /**
  * Bakes an opaque background into an exported SVG.
  *
@@ -87,7 +91,7 @@ export function addBackground(svg: string, dark: boolean): string {
     viewBox !== null
       ? `x="${viewBox[1] ?? '0'}" y="${viewBox[2] ?? '0'}" width="${viewBox[3] ?? '100%'}" height="${viewBox[4] ?? '100%'}"`
       : 'width="100%" height="100%"';
-  const rect = `<rect ${size} fill="${dark ? BACKGROUND.dark : BACKGROUND.light}"/>`;
+  const rect = `<rect ${size} fill="${dark ? DIAGRAM_BACKDROP.dark : DIAGRAM_BACKDROP.light}"/>`;
   return svg.slice(0, open[0].length) + rect + svg.slice(open[0].length);
 }
 
@@ -120,16 +124,17 @@ async function exportBlock(
   }
 
   try {
-    const dark = deps.isDark();
+    const dark = await deps.resolvePalette(block.source, deps.isDark());
     const svg = addBackground(await deps.render(block.source, dark), dark);
     const path = deps.resolve(documentPath, `${directory}/${name}.svg`);
     await deps.writeFile(path, svg);
     return { name, path, error: null };
   } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
     return {
       name,
       path: null,
-      error: error instanceof Error ? error.message : String(error),
+      error: EMOJI_UNAVAILABLE.test(message) ? deps.emojiUnavailableMessage : message,
     };
   }
 }

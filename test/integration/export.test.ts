@@ -49,7 +49,9 @@ function render(source: string): Promise<string> {
 const deps: ExporterDeps = {
   render,
   isDark: () => false,
+  resolvePalette: (_source, dark) => Promise.resolve(dark),
   remoteReferenceMessage: 'URL-based external references are not supported.',
+  emojiUnavailableMessage: 'Emoji are not supported.',
   invalidNameMessage: 'Use letters, digits, hyphens and underscores only.',
   resolve: (documentPath, relative) => resolve(dirname(documentPath), relative),
   writeFile: (path, content) =>

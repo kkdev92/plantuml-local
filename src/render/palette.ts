@@ -1,0 +1,143 @@
+import { DIAGRAM_BACKDROP } from '../core/constants';
+
+/**
+ * The palette a diagram that picks a `!theme` is drawn in.
+ *
+ * The engine's dark palette only swaps colours that come in a light/dark
+ * pair, which its own defaults do. A theme sets plain colours, drawn as
+ * they are in both palettes, and most themes paint no background: the
+ * diagram sits on the backdrop of the palette in use. A theme made for a
+ * white page (`plain`, `cerulean`) then puts dark text on the dark
+ * backdrop, and one made for a dark page puts white text on the light one.
+ *
+ * So such a diagram gets the palette asked for only if its theme can be
+ * read in it. That is measured rather than listed: a small diagram with
+ * the same `!theme` lines is rendered in both palettes, and the contrast
+ * of its message label against what is behind it decides. Measuring keeps
+ * up with the engine's theme library, and takes in several `!theme` lines,
+ * which the engine applies one over the other.
+ */
+
+/** The probe's message, found again in the rendered SVG. */
+const PROBE_LABEL = 'plantumlLocalProbe';
+
+/** WCAG's minimum contrast for text (level AA). */
+export const MIN_TEXT_CONTRAST = 4.5;
+
+/** How many sets of `!theme` lines keep their measurement. */
+const MAX_MEASUREMENTS = 64;
+
+/** Contrast of the probe's label in each palette. */
+export interface LabelContrast {
+  light: number;
+  dark: number;
+}
+
+/** The `!theme` lines of a diagram, trimmed; none when it picks no theme. */
+export function themeLines(source: string): string[] {
+  return source
+    .split(/\r?\n/)
+    .filter((line) => /^[ \t]*!theme[ \t]/.test(line))
+    .map((line) => line.trim());
+}
+
+/** A diagram that shows only what `lines` do to a message label. */
+export function probeSource(lines: readonly string[]): string {
+  return ['@startuml', ...lines, `Alice -> Bob : ${PROBE_LABEL}`, '@enduml'].join('\n');
+}
+
+function luminance(hex: string): number {
+  const channel = (offset: number): number => {
+    const value = parseInt(hex.slice(offset, offset + 2), 16) / 255;
+    return value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * channel(1) + 0.7152 * channel(3) + 0.0722 * channel(5);
+}
+
+/** WCAG contrast ratio of two `#RRGGBB` colours, from 1 to 21. */
+export function contrast(a: string, b: string): number {
+  const [lighter, darker] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+  return ((lighter ?? 0) + 0.05) / ((darker ?? 0) + 0.05);
+}
+
+/**
+ * The contrast of the probe's label against what is behind it: the
+ * background the diagram paints, or else the backdrop of the palette it
+ * was drawn in. Undefined when there is no label — the engine drew an
+ * error instead, as it does for a theme it cannot load.
+ */
+export function labelContrast(svg: string, dark: boolean): number | undefined {
+  const label = new RegExp(
+    `<text[^>]*\\bfill="(#[0-9A-Fa-f]{6})(?:[0-9A-Fa-f]{2})?"[^>]*>${PROBE_LABEL}</text>`
+  ).exec(svg)?.[1];
+  if (label === undefined) {
+    return undefined;
+  }
+  const painted = /<svg\b[^>]*\bstyle="[^"]*background-color:\s*(#[0-9A-Fa-f]{6})([0-9A-Fa-f]{2})?/.exec(svg);
+  const behind =
+    painted?.[1] !== undefined && painted[2] !== '00'
+      ? painted[1]
+      : DIAGRAM_BACKDROP[dark ? 'dark' : 'light'];
+  return contrast(label, behind);
+}
+
+/**
+ * The palette to draw in: the one asked for, unless text is hard to read
+ * in it and easier in the other.
+ */
+export function choosePalette(dark: boolean, measured: LabelContrast): boolean {
+  const asked = dark ? measured.dark : measured.light;
+  const other = dark ? measured.light : measured.dark;
+  return asked < MIN_TEXT_CONTRAST && other > asked ? !dark : dark;
+}
+
+/**
+ * Measures each set of `!theme` lines once — two renders — and remembers
+ * the answer for every diagram that uses the same lines.
+ */
+export class ThemePalettes {
+  private readonly measured = new Map<string, Promise<LabelContrast | undefined>>();
+
+  constructor(private readonly render: (source: string, dark: boolean) => Promise<string>) {}
+
+  /** The palette to draw `source` in when `dark` is asked for. */
+  async resolve(source: string, dark: boolean): Promise<boolean> {
+    const lines = themeLines(source);
+    if (lines.length === 0) {
+      return dark;
+    }
+    const measured = await this.measure(lines.join('\n'), lines);
+    return measured === undefined ? dark : choosePalette(dark, measured);
+  }
+
+  private measure(key: string, lines: readonly string[]): Promise<LabelContrast | undefined> {
+    const known = this.measured.get(key);
+    if (known !== undefined) {
+      return known;
+    }
+    const pending = this.probe(key, lines);
+    this.measured.set(key, pending);
+    // Typing a theme name measures every prefix of it on the way.
+    if (this.measured.size > MAX_MEASUREMENTS) {
+      const oldest = this.measured.keys().next().value;
+      if (oldest !== undefined) {
+        this.measured.delete(oldest);
+      }
+    }
+    return pending;
+  }
+
+  private async probe(key: string, lines: readonly string[]): Promise<LabelContrast | undefined> {
+    const source = probeSource(lines);
+    try {
+      const light = labelContrast(await this.render(source, false), false);
+      const dark = labelContrast(await this.render(source, true), true);
+      return light === undefined || dark === undefined ? undefined : { light, dark };
+    } catch {
+      // A render that did not finish (a timeout, a restarting worker)
+      // says nothing about the theme: measure again next time.
+      this.measured.delete(key);
+      return undefined;
+    }
+  }
+}

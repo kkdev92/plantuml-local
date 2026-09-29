@@ -38,7 +38,8 @@ Your diagram source is processed locally and is not sent to a rendering service.
 
 ## Features
 
-- **Built-in Preview**: Diagrams appear in the same Markdown preview you already use (`Ctrl+Shift+V`)
+- **Built-in Preview**: Diagrams appear in the same Markdown preview you already use
+- **Syntax Highlighting**: ```` ```plantuml ```` blocks are coloured in the editor, following the syntax the bundled engine accepts
 - **Offline Rendering**: No Java, no PlantUML server, no network connection required — nothing to install besides the extension
 - **Fault-Tolerant**: A syntax error shows up inline at the broken diagram; the rest of the page stays intact
 - **Multi-Diagram Pages**: Any number of diagrams per page; renders are serialised so results never mix
@@ -87,7 +88,7 @@ npm run install-local
    ```
    ````
 
-3. Open the preview (`Ctrl+Shift+V`)
+3. Open the preview: the preview button at the top right of the editor, or **Markdown: Open Preview** (`Ctrl+Shift+V` by default)
 4. The block renders as a diagram — edit and save, and it follows
 
 See [sample.md](sample.md) for a tour of diagram types, including error handling.
@@ -133,6 +134,26 @@ diagram is.
 If a diagram looks stale, run `PlantUML Local: Clear Render Cache and Re-render`
 from the Command Palette.
 
+### Syntax highlighting
+
+` ```plantuml ` blocks are also coloured in the editor, including ones inside
+block quotes and list items. As with the preview, only the language
+`plantuml` counts — ` ```puml ` stays plain. The grammar follows the parser of
+the bundled engine rather than PlantUML's documentation, and covers every
+diagram type that engine renders:
+
+- the JSON and YAML inside `@startjson` / `@startyaml` are coloured by VS
+  Code's own JSON and YAML grammars
+- diagram types the bundled engine does not render (`@startditaa`, …) are
+  marked invalid
+- some older forms the engine accepts only with a warning — a colour in front
+  of an activity (`#pink:text`), `label on first column` in a Gantt chart — are
+  marked deprecated
+
+Tokens carry the usual TextMate scope names with a `.plantuml` suffix
+(`keyword.other.plantuml`, `entity.name.type.plantuml`, …), so any colour
+theme applies, and `editor.tokenColorCustomizations` can adjust them.
+
 ### Icons and sprites
 
 Sprites render, including the Azure icon set, which ships inside the extension:
@@ -162,6 +183,13 @@ ships nothing but MIT / BSD / EPL; Azure-PlantUML has no such split. Other
 `!include <…>` libraries report that they are unavailable rather than being
 fetched — but their sprite definitions can be pasted into the diagram, which
 renders identically.
+
+PlantUML's own icons and themes ship as well: the OpenIconic icons creole draws
+with `<&check>`, and the `!theme` library (`!theme cerulean`) — all of it but
+four themes, `mars`, `toy` and `vibrant` (Apache License 2.0) and `sunlust`
+(GPL 3+), for which the engine reports that it cannot load the theme. Emoji
+(`<:smile:>`) do not ship: their images, from Twemoji, are under CC-BY 4.0, so
+a diagram using one shows a message saying emoji are not supported.
 
 ### Exporting for GitHub and other hosts
 
@@ -237,10 +265,19 @@ and would show the referenced image as a second copy.
   rejected with an inline message, and file includes are not available in the
   bundled browser build of the engine
 - Remote themes, images and other network resources are not supported
-- Features excluded from the bundled PlantUML browser build are unavailable
+- Emoji (`<:smile:>`) are not supported: their images are not bundled, and a
+  diagram using one shows an inline message instead
+- Four `!theme` themes are not bundled: `mars`, `sunlust`, `toy` and `vibrant`
+- Features excluded from the bundled PlantUML browser build are unavailable.
+  Among them: embedded diagrams (`{{ … }}` inside a note, a legend or a class
+  body) and formulas (`<math>`, `<latex>`) are accepted but not drawn
 - Text is measured with approximate metrics (Node has no Canvas), so element
   widths, line wrapping and placement can differ slightly from plantuml.com
 - A render that exceeds 30 seconds is terminated
+- Highlighting cannot tell which diagram type a `@startuml` block will turn
+  into, so it colours the syntax of all of them: a line the engine rejects in
+  one diagram type can still be coloured. Nor can it tell which names
+  `!procedure` and `!function` define: a call written without `$` stays plain
 
 ---
 
@@ -253,6 +290,13 @@ and would show the referenced image as a second copy.
 | `plantumlLocal.exportDirectory` | `images` | Where exported SVGs are written, relative to the Markdown file. `.` for the same folder; absolute paths and `..` are rejected |
 | `plantumlLocal.exportTheme` | `light` | Palette for exported SVGs. `preview` follows the palette the preview currently uses |
 | `plantumlLocal.hideExportedImages` | `true` | Hide images marked `#plantuml-local` in the preview, so an exported diagram is not shown next to its block's render |
+
+A diagram that picks a `!theme` is drawn in that theme's colours, and most
+themes paint no background of their own, leaving the diagram on the backdrop
+of the palette. When the theme's text would be hard to read on that backdrop,
+the diagram is drawn in the other palette instead — a theme made for a white
+page, such as `plain` or `cerulean`, gets the light palette in a dark editor.
+This applies to the preview and to exports alike.
 
 ---
 

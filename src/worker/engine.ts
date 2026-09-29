@@ -31,6 +31,16 @@ import { sanitizeSvg } from './sanitize';
  *    created per canvas element, because sprite pixels are per-canvas
  *    state that a shared object would let one sprite overwrite.
  *
+ * The engine also reads two data tables from globals, when a diagram needs
+ * them: the `!theme` library (`PLANTUML_THEMES`) and the OpenIconic icons
+ * (`<&check>`, `PLANTUML_OPENICONIC`). Missing, it would load them with a
+ * `<script>` element, which the worker refuses (see stdlib.ts), and
+ * `!theme` was ignored while an icon failed the whole diagram. The build
+ * writes both as `.cjs` scripts — the icons copied, the themes without the
+ * few it does not ship (see scripts/build.mjs) — and requiring them fills
+ * the tables. The emoji table is not bundled: a diagram with an emoji
+ * fails, and the preview and the export explain why (EMOJI_UNAVAILABLE).
+ *
  * Load order matters: viz-global.js must load *before* `document` exists,
  * because with a `document` present it derives its own URL from
  * `new URL('viz-global.js', document.baseURI)` and crashes on the
@@ -57,6 +67,22 @@ export function loadEngine(engineDir: string, stdlibDir: string): Promise<Loaded
   return loading;
 }
 
+/**
+ * Fills the `!theme` and OpenIconic tables. The engine passes every such
+ * file through its script loader before reading the table (upstream's
+ * TeaVmScriptLoader), and the loader's fast path is the file marked as
+ * loaded in `__pl_script_state` — the way it documents for hosts that
+ * provide the data themselves.
+ */
+function installEngineData(engineDir: string): void {
+  const globals = globalThis as Record<string, unknown>;
+  const scriptState = (globals.__pl_script_state ??= {}) as Record<string, unknown>;
+  for (const script of ['themes.js', 'openiconic.js']) {
+    requireEngine(join(engineDir, script.replace(/\.js$/, '.cjs')));
+    scriptState[script] = { state: 'loaded', ok: [], err: [] };
+  }
+}
+
 async function doLoad(engineDir: string, stdlibDir: string): Promise<LoadedEngine> {
   const globals = globalThis as Record<string, unknown>;
 
@@ -66,6 +92,10 @@ async function doLoad(engineDir: string, stdlibDir: string): Promise<LoadedEngin
 
   // 2) Bundled standard library, before the engine can look for it.
   installStdlib(stdlibDir);
+
+  // Themes and icons, after the standard library, which resets the
+  // script-loading state they are marked in.
+  installEngineData(engineDir);
 
   // 3) DOM.
   const window = new Window({ url: 'http://localhost/' });

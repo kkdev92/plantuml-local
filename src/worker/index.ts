@@ -34,8 +34,23 @@ const stdlibDir = join(__dirname, 'stdlib');
 
 const queue = createSerialQueue();
 
+/**
+ * A diagram that makes the engine forget the previous render.
+ *
+ * For a source of ten lines or more, the engine first tries the diagram
+ * type that accepted the previous diagram (`lastFactory` in upstream's
+ * PSystemBuilder2), where the command-line PlantUML always tries them in
+ * the same order. A source that reads as two types — lines of
+ * `A -> B : message` are both a sequence and a class diagram — therefore
+ * depended on what happened to be rendered before it, in any open
+ * document. A short creole document resets that: it is under ten lines,
+ * and creole has a diagram type of its own, so remembering it changes
+ * nothing for the next diagram. It takes around 10 ms.
+ */
+const RESET_SOURCE = ['@startcreole', 'x', '@endcreole'];
+
 function renderOnce(source: string, dark: boolean): Promise<string> {
-  return queue.enqueue(async () => {
+  const result = queue.enqueue(async () => {
     const { engine, sanitize } = await loadEngine(engineDir, stdlibDir);
     const svg = await new Promise<string>((resolve, reject) => {
       engine.renderToString(
@@ -50,6 +65,17 @@ function renderOnce(source: string, dark: boolean): Promise<string> {
       );
     });
     return sanitize(svg);
+  });
+  // Queued behind this render and ahead of the next one, so the next
+  // render always starts clean, while this result is not held up.
+  queue.enqueue(forgetPreviousRender).catch(() => undefined);
+  return result;
+}
+
+async function forgetPreviousRender(): Promise<void> {
+  const { engine } = await loadEngine(engineDir, stdlibDir);
+  await new Promise<void>((resolve) => {
+    engine.renderToString(RESET_SOURCE, () => resolve(), () => resolve(), { dark: false });
   });
 }
 

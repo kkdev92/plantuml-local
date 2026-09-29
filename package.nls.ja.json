@@ -4,9 +4,9 @@
   "command.exportSvg.title": "図を SVG に書き出す",
   "command.exportAllSvg.title": "ファイル内のすべての図を SVG に書き出す",
   "command.exportAllAndUpdateRefs.title": "すべての図を書き出して参照を更新する",
-  "config.theme.description": "図の配色。\"auto\" は VS Code のテーマに追随します。",
+  "config.theme.description": "図の配色。\"auto\" は VS Code のテーマに追随します。!theme で選んだテーマの文字がその配色で読みにくい図は、もう一方の配色で描きます。",
   "config.logLevel.description": "出力パネル (PlantUML Local) に出すログの水準。出力パネル側のレベル選択も併せて効きます。",
   "config.exportDirectory.description": "SVG の書き出し先。Markdown ファイルからの相対パスで指定します。同じ場所なら \".\"。絶対パスと \"..\" は拒否します。",
-  "config.exportTheme.description": "書き出す SVG の配色。書き出した図は GitHub など背景を制御できない場所で見られるため、既定は \"light\" です。\"preview\" にするとプレビューの現在の配色に従います。",
+  "config.exportTheme.description": "書き出す SVG の配色。書き出した図は GitHub など背景を制御できない場所で見られるため、既定は \"light\" です。\"preview\" にするとプレビューの現在の配色に従います。!theme で選んだテーマの文字がその配色で読みにくい図は、もう一方の配色で書き出します。",
   "config.hideExportedImages.description": "#plantuml-local が付いた画像を Markdown プレビューで隠し、ブロックの描画と書き出した SVG が二重に表示されないようにします。書き出した SVG 自体の見た目を確認したいときはオフにしてください。"
 }

@@ -1,6 +1,7 @@
 import type MarkdownIt from 'markdown-it';
 
 import {
+  EMOJI_UNAVAILABLE,
   EXPORT_FRAGMENT,
   MAX_CACHE_BYTES,
   MAX_CACHE_ENTRIES,
@@ -39,6 +40,8 @@ export interface PluginLabels {
   emptySource: string;
   /** Error for `!include https://…` and friends. */
   remoteReference: string;
+  /** Error for a diagram that uses an emoji, which cannot be drawn here. */
+  emojiUnavailable: string;
 }
 
 export interface PluginDeps {
@@ -46,6 +49,11 @@ export interface PluginDeps {
   isDark(): boolean;
   /** Renders PlantUML source to sanitised SVG (the worker round-trip). */
   render(source: string, dark: boolean): Promise<string>;
+  /**
+   * The palette to draw `source` in when `dark` is asked for: the other one
+   * for a diagram whose `!theme` cannot be read in it (src/render/palette.ts).
+   */
+  resolvePalette(source: string, dark: boolean): Promise<boolean>;
   /** Asks VS Code to refresh Markdown previews (debounced by the caller). */
   requestRefresh(): void;
   /** Escapes text for inclusion in HTML. */
@@ -118,7 +126,7 @@ function createBoundedStore(maxEntries: number, maxSize: number): BoundedStore {
 }
 
 export function createPlantUmlPlugin(deps: PluginDeps): PlantUmlPlugin {
-  /** key → sanitised SVG. */
+  /** key → sanitised SVG in the wrapper that names its palette. */
   const rendered = createBoundedStore(MAX_CACHE_ENTRIES, MAX_CACHE_BYTES);
   /** key → error message for renders that failed. */
   const failed = createBoundedStore(MAX_CACHE_ENTRIES, MAX_CACHE_BYTES);
@@ -136,16 +144,17 @@ export function createPlantUmlPlugin(deps: PluginDeps): PlantUmlPlugin {
     inFlight.add(key);
 
     deps
-      .render(source, dark)
+      .resolvePalette(source, dark)
+      .then(async (palette) => ({ svg: await deps.render(source, palette), palette }))
       .then(
-        (svg) => {
-          rendered.set(key, svg);
+        ({ svg, palette }) => {
+          rendered.set(key, diagramHtml(svg, palette));
           failed.delete(key);
           deps.log.debug(`Rendered diagram (${String(svg.length)} bytes)`);
         },
         (error: unknown) => {
           const message = error instanceof Error ? error.message : String(error);
-          failed.set(key, message);
+          failed.set(key, EMOJI_UNAVAILABLE.test(message) ? deps.labels.emojiUnavailable : message);
           deps.log.warn(`Render failed: ${message}`);
         }
       )
@@ -153,6 +162,17 @@ export function createPlantUmlPlugin(deps: PluginDeps): PlantUmlPlugin {
         inFlight.delete(key);
         deps.requestRefresh();
       });
+  }
+
+  /**
+   * Tells the stylesheet which palette the diagram was rendered with. The
+   * backdrop must follow the diagram, not the page theme: with
+   * `plantumlLocal.theme` pinned to light or dark, or a theme drawn in the
+   * other palette, a page-based backdrop would erase the text (dark
+   * diagrams draw white text and no background of their own).
+   */
+  function diagramHtml(svg: string, dark: boolean): string {
+    return `<div class="plantuml-diagram plantuml-diagram--${dark ? 'dark' : 'light'}">${svg}</div>`;
   }
 
   function errorBlock(message: string, source?: string): string {
@@ -221,15 +241,9 @@ export function createPlantUmlPlugin(deps: PluginDeps): PlantUmlPlugin {
         const dark = deps.isDark();
         const key = cacheKey(source, dark);
 
-        const svg = rendered.get(key);
-        if (svg !== undefined) {
-          // Tell the stylesheet which palette the diagram was rendered
-          // with. The background must follow the diagram, not the page
-          // theme: with `plantumlLocal.theme` pinned to light or dark,
-          // page-based backgrounds would erase the text (dark diagrams
-          // draw white text and no background of their own).
-          const mode = dark ? 'dark' : 'light';
-          return `<div class="plantuml-diagram plantuml-diagram--${mode}">${svg}</div>`;
+        const html = rendered.get(key);
+        if (html !== undefined) {
+          return html;
         }
 
         const message = failed.get(key);

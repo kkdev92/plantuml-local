@@ -1,6 +1,6 @@
 # PlantUML Local — sample tour
 
-Open this file and press `Ctrl+Shift+V`. Every block below renders locally — no Java, no server, no network.
+Open the preview of this file: the preview button at the top right of the editor, or **Markdown: Open Preview** (`Ctrl+Shift+V` by default). Every block below renders locally — no Java, no server, no network.
 
 ## Use-case diagram (system boundary, include / extend)
 
