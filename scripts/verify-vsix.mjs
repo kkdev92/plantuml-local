@@ -11,7 +11,9 @@
  *    EPL licences of what we bundle require it.
  * 4. The packaged worker actually renders — a Japanese sequence diagram
  *    is rendered from the extracted VSIX, which proves the engine files
- *    and the worker bundle fit together without Java or network access.
+ *    and the worker bundle fit together without Java or network access;
+ *    so are an Azure sprite, a `!theme` and an OpenIconic icon, whose
+ *    data ships beside the engine.
  *
  * Usage: node scripts/verify-vsix.mjs [path-to.vsix]
  */
@@ -37,7 +39,14 @@ const REQUIRED = [
   'extension/dist/worker.js',
   'extension/dist/engine/plantuml.js',
   'extension/dist/engine/viz-global.cjs',
+  'extension/dist/engine/themes.cjs',
+  'extension/dist/engine/openiconic.cjs',
   'extension/dist/engine/package.json',
+  'extension/dist/syntaxes/plantuml.tmLanguage.json',
+  'extension/dist/syntaxes/markdown-plantuml.tmLanguage.json',
+  'extension/dist/syntaxes/markdown-plantuml-fallback.tmLanguage.json',
+  'extension/dist/syntaxes/plantuml-data.tmLanguage.json',
+  'extension/dist/syntaxes/plantuml-json.tmLanguage.json',
   'extension/dist/stdlib/azure.json',
   'extension/media/plantuml.css',
   'extension/l10n/bundle.l10n.ja.json',
@@ -255,6 +264,25 @@ async function renderSmoke() {
       ok('packaged worker resolves <azure/…> and embeds the sprite PNG');
     } else {
       fail('packaged worker did not render the bundled Azure sprite');
+    }
+
+    // Proves the !theme library and the OpenIconic icons load from the
+    // packaged engine folder: a theme brings colours of its own, an icon
+    // draws a path. The engine's own error text would bring colours too.
+    const fills = (text) => new Set([...text.matchAll(/fill="(#[0-9A-Fa-f]{3,8})"/g)].map((m) => m[1]));
+    const plain = await renderOn(worker, 3, '@startuml\nAlice -> Bob : done\n@enduml');
+    const themed = await renderOn(worker, 4, '@startuml\n!theme cerulean\nAlice -> Bob : done\n@enduml');
+    const plainFills = fills(plain);
+    if (!/Cannot load theme/.test(themed) && [...fills(themed)].some((f) => !plainFills.has(f))) {
+      ok('packaged worker applies a !theme from the bundled library');
+    } else {
+      fail('packaged worker did not apply !theme cerulean');
+    }
+    const icon = await renderOn(worker, 5, '@startuml\nAlice -> Bob : <&check> done\n@enduml');
+    if (icon.split('<path').length > plain.split('<path').length) {
+      ok('packaged worker draws an OpenIconic icon');
+    } else {
+      fail('packaged worker did not draw <&check>');
     }
   } catch (error) {
     fail(`packaged worker failed to render: ${error instanceof Error ? error.message : String(error)}`);

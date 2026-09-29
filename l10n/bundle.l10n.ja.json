@@ -3,6 +3,7 @@
   "Failed to render diagram": "図を描画できませんでした",
   "The PlantUML source is empty.": "PlantUML のソースが空です。",
   "URL-based external references (!include, !theme) are not supported.": "URL による外部参照 (!include や !theme) には対応していません。",
+  "Emoji (<:name:>) are not supported: the emoji images are not bundled.": "絵文字 (<:name:>) には対応していません。絵文字の画像を同梱していないためです。",
   "PlantUML render cache cleared.": "PlantUML の描画キャッシュを捨てました。",
   "Exporting needs a trusted workspace. The preview works either way.": "書き出しは信頼されたワークスペースでのみ行えます。プレビューはどちらでも動きます。",
   "Open a Markdown file first.": "先に Markdown ファイルを開いてください。",

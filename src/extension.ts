@@ -41,6 +41,7 @@ import { planReferenceEdits, type ReferenceEdit } from './export/references';
 import { createPlantUmlPlugin, type PlantUmlPlugin } from './preview/plugin';
 import type { RenderLog } from './core/types';
 import { RendererClient, defaultWorkerPath } from './render/client';
+import { ThemePalettes } from './render/palette';
 
 /**
  * Extension entry point: wires VS Code, the markdown-it plugin and the render
@@ -92,6 +93,12 @@ export const ExportAllAndUpdateRefs = defineCommandContract<readonly [], void>({
 
 /** The worker client. An object with `dispose`, so the container shuts it down. */
 const Renderer: ServiceToken<RendererClient> = serviceToken<RendererClient>('plantuml.renderer');
+
+/**
+ * Which palette a themed diagram can be read in, measured once per set of
+ * `!theme` lines and shared by the preview and the export commands.
+ */
+const Palettes: ServiceToken<ThemePalettes> = serviceToken<ThemePalettes>('plantuml.palettes');
 
 /**
  * Coalesces a burst of finished renders into one preview refresh.
@@ -270,12 +277,17 @@ async function askForName(context: OperationContext): Promise<string | null> {
 function exporterDeps(
   context: OperationContext,
   renderer: RendererClient,
+  palettes: ThemePalettes,
   settings: { read(): { values: Record<string, unknown> } }
 ): ExporterDeps {
   return {
     render: (source, dark) => renderer.render(source, dark),
+    resolvePalette: (source, dark) => palettes.resolve(source, dark),
     remoteReferenceMessage: context.l10n.t(
       'URL-based external references (!include, !theme) are not supported.'
+    ),
+    emojiUnavailableMessage: context.l10n.t(
+      'Emoji (<:name:>) are not supported: the emoji images are not bundled.'
     ),
     invalidNameMessage: context.l10n.t(
       'Use letters, digits, hyphens and underscores only.'
@@ -311,13 +323,14 @@ type SettingsReader = { read(): { values: Record<string, unknown> } };
 function runBulkExport(
   context: OperationContext,
   renderer: RendererClient,
+  palettes: ThemePalettes,
   settings: SettingsReader,
   document: ActiveMarkdown,
   directory: string
 ): Promise<ExportOutcome> {
   return context.progress.run({ title: context.l10n.t('Exporting diagrams…') }, (report) =>
     exportAll(
-      exporterDeps(context, renderer, settings),
+      exporterDeps(context, renderer, palettes, settings),
       document.path,
       directory,
       document.text,
@@ -416,6 +429,11 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
       ),
   });
 
+  module.services.singleton(Palettes, {
+    inject: { renderer: Renderer },
+    create: ({ renderer }) => new ThemePalettes((source, dark) => renderer.render(source, dark)),
+  });
+
   module.services.singleton(RequestRefresh, () =>
     debounce(() => {
       void vscode.commands.executeCommand('markdown.preview.refresh');
@@ -425,15 +443,17 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
   module.services.singleton(Plugin, {
     inject: {
       renderer: Renderer,
+      palettes: Palettes,
       requestRefresh: RequestRefresh,
       logger: Log,
       l10n: Localization,
       settings: Settings.token,
     },
-    create: ({ renderer, requestRefresh, logger, l10n, settings }) =>
+    create: ({ renderer, palettes, requestRefresh, logger, l10n, settings }) =>
       createPlantUmlPlugin({
         isDark: () => isDark(settings.read().values[CONFIG.THEME]),
         render: (source, dark) => renderer.render(source, dark),
+        resolvePalette: (source, dark) => palettes.resolve(source, dark),
         requestRefresh,
         escapeHtml,
         hideExportedImages: () => settings.read().values[CONFIG.HIDE_EXPORTED_IMAGES],
@@ -444,6 +464,9 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
           emptySource: l10n.t('The PlantUML source is empty.'),
           remoteReference: l10n.t(
             'URL-based external references (!include, !theme) are not supported.'
+          ),
+          emojiUnavailable: l10n.t(
+            'Emoji (<:name:>) are not supported: the emoji images are not bundled.'
           ),
         },
       }),
@@ -459,8 +482,12 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
   });
 
   module.commands.handle(ExportSvg, {
-    inject: { renderer: Renderer, settings: Settings.token },
-    execute: async (context: OperationContext, _args, { renderer, settings }): Promise<void> => {
+    inject: { renderer: Renderer, palettes: Palettes, settings: Settings.token },
+    execute: async (
+      context: OperationContext,
+      _args,
+      { renderer, palettes, settings }
+    ): Promise<void> => {
       const document = activeMarkdown(context);
       if (document === null) {
         return;
@@ -491,7 +518,7 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
       }
 
       const result = await exportOne(
-        exporterDeps(context, renderer, settings),
+        exporterDeps(context, renderer, palettes, settings),
         document.path,
         directory,
         block,
@@ -509,8 +536,12 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
   });
 
   module.commands.handle(ExportAllSvg, {
-    inject: { renderer: Renderer, settings: Settings.token },
-    execute: async (context: OperationContext, _args, { renderer, settings }): Promise<void> => {
+    inject: { renderer: Renderer, palettes: Palettes, settings: Settings.token },
+    execute: async (
+      context: OperationContext,
+      _args,
+      { renderer, palettes, settings }
+    ): Promise<void> => {
       const document = activeMarkdown(context);
       if (document === null) {
         return;
@@ -521,14 +552,18 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         return;
       }
 
-      const outcome = await runBulkExport(context, renderer, settings, document, directory);
+      const outcome = await runBulkExport(context, renderer, palettes, settings, document, directory);
       await reportOutcome(context, outcome, [], false);
     },
   });
 
   module.commands.handle(ExportAllAndUpdateRefs, {
-    inject: { renderer: Renderer, settings: Settings.token },
-    execute: async (context: OperationContext, _args, { renderer, settings }): Promise<void> => {
+    inject: { renderer: Renderer, palettes: Palettes, settings: Settings.token },
+    execute: async (
+      context: OperationContext,
+      _args,
+      { renderer, palettes, settings }
+    ): Promise<void> => {
       const document = activeMarkdown(context);
       if (document === null) {
         return;
@@ -539,7 +574,7 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         return;
       }
 
-      const outcome = await runBulkExport(context, renderer, settings, document, directory);
+      const outcome = await runBulkExport(context, renderer, palettes, settings, document, directory);
 
       // Plan against the buffer as it is *now*, not the snapshot the
       // exports rendered from: they take time, and an edit meanwhile

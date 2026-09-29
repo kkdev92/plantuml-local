@@ -70,7 +70,7 @@ PlantUML draws `sprite` definitions — the mechanism behind icon sets such as A
 
 ### The standard library is served from the package
 
-`!include <azure/…>` resolves against a copy of the library baked into the VSIX. Left to itself the engine reacts to an unknown library by appending `<script src="azure.min.js">` to its document and waiting, which would mean either a network request or a render that hangs until the timeout. The worker pre-populates the globals the engine reads (`window.PLANTUML_STDLIB` and friends) so that path never runs, and makes any `<script>` the engine still creates report failure immediately — so `!include <aws/…>`, which is not bundled, produces a prompt error instead of a stalled render.
+`!include <azure/…>` resolves against a copy of the library baked into the VSIX. Left to itself the engine reacts to an unknown library by appending `<script src="azure.min.js">` to its document and waiting, which would mean either a network request or a render that hangs until the timeout. The worker pre-populates the globals the engine reads (`window.PLANTUML_STDLIB` and friends) so that path never runs, and makes any `<script>` the engine still creates report failure immediately — so `!include <aws/…>`, which is not bundled, produces a prompt error instead of a stalled render. The `!theme` library and the OpenIconic icons are served the same way: the worker loads the copies in the VSIX and marks them loaded, so the engine never asks for `themes.js` or `openiconic.js`. Emoji are not bundled, and a diagram using one fails at once with a message.
 
 ### Untrusted and virtual workspaces
 
@@ -80,7 +80,7 @@ Exporting is the one path that writes anything: the export commands write SVG fi
 
 ### Supply chain notes
 
-- `@plantuml/core` is required at a range that starts no lower than 1.2026.6, the first MIT-licensed release (see `package.json`), and its two engine files are copied verbatim into the package (no CDN at build or run time). `package-lock.json` records the exact version each build used.
+- `@plantuml/core` is required at a range that starts no lower than 1.2026.6, the first MIT-licensed release (see `package.json`), and its engine files are copied into the package (no CDN at build or run time): `plantuml.js`, `viz-global.cjs` and the OpenIconic icons verbatim, and the `!theme` library rebuilt without the themes this extension does not ship. `package-lock.json` records the exact version each build used.
 - Copyright and licence notices for every third-party component shipped in the VSIX are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md), with full licence texts under `third-party/`.
 - happy-dom ships a self-signed TLS certificate (private key included) for HTTPS emulation in its fetch stack. This extension never uses that stack; the build replaces the certificate module with an empty stub, and `verify-vsix` fails the build if key material reappears in the bundle.
 

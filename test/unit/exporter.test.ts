@@ -17,6 +17,7 @@ function makeDeps(overrides?: Partial<ExporterDeps>): ExporterDeps & {
   const deps = {
     render: vi.fn((source: string) => Promise.resolve(`<svg>${source}</svg>`)),
     isDark: (): boolean => false,
+    resolvePalette: (_source: string, dark: boolean): Promise<boolean> => Promise.resolve(dark),
     writeFile: vi.fn((path: string, content: string) => {
       written.set(path, content);
       return Promise.resolve();
@@ -25,6 +26,7 @@ function makeDeps(overrides?: Partial<ExporterDeps>): ExporterDeps & {
     resolve: (documentPath: string, relative: string): string =>
       `${documentPath.slice(0, documentPath.lastIndexOf('/'))}/${relative}`,
     remoteReferenceMessage: 'remote references are not supported',
+    emojiUnavailableMessage: 'emoji are not available',
     invalidNameMessage: 'unusable name',
     ...overrides,
   };
@@ -98,6 +100,20 @@ describe('exportOne', () => {
     );
   });
 
+  it('exports in the palette the theme can be read in, with the background of that palette', async () => {
+    // A theme made for a dark page, exported with the light palette.
+    const deps = makeDeps({ resolvePalette: () => Promise.resolve(true) });
+    const [block] = findPlantUmlBlocks('```plantuml\n@startuml\n!theme cyborg\n@enduml\n```');
+
+    await exportOne(deps, DOC, 'images', block!, 'orders');
+
+    expect(deps.render).toHaveBeenCalledWith('@startuml\n!theme cyborg\n@enduml', true);
+    expect(deps.writeFile).toHaveBeenCalledWith(
+      '/repo/docs/images/orders.svg',
+      expect.stringContaining('fill="#1b1b1b"')
+    );
+  });
+
   it('honours a directory of "." by writing next to the document', async () => {
     const deps = makeDeps();
     const [block] = findPlantUmlBlocks('```plantuml\nx\n```');
@@ -115,6 +131,18 @@ describe('exportOne', () => {
 
     expect(result.error).toBe('syntax error');
     expect(result.path).toBeNull();
+    expect(deps.writeFile).not.toHaveBeenCalled();
+  });
+
+  it('explains a diagram that uses an emoji instead of passing on the engine error', async () => {
+    const deps = makeDeps({
+      render: vi.fn(() => Promise.reject(new Error('java.lang.RuntimeException: Failed to load emoji.js'))),
+    });
+    const [block] = findPlantUmlBlocks('```plantuml\n@startuml\nA -> B : <:smile:>\n@enduml\n```');
+
+    const result = await exportOne(deps, DOC, 'images', block!, 'orders');
+
+    expect(result.error).toBe('emoji are not available');
     expect(deps.writeFile).not.toHaveBeenCalled();
   });
 

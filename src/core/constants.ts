@@ -75,6 +75,13 @@ export const MAX_CACHE_ENTRIES = 200;
 export const MAX_CACHE_BYTES = 16 * 1024 * 1024;
 
 /**
+ * What a diagram is drawn on, by palette: the backdrop media/plantuml.css
+ * gives the preview, and the background baked into an exported SVG. The
+ * dark one matches the background the engine paints for dark renders.
+ */
+export const DIAGRAM_BACKDROP = { light: '#FFFFFF', dark: '#1b1b1b' } as const;
+
+/**
  * How long to coalesce preview refresh requests, in milliseconds.
  * A page with five diagrams finishes five renders in quick succession;
  * without batching it would refresh the preview five times.
@@ -113,3 +120,15 @@ export const WORKER_IDLE_TIMEOUT_MS = 5 * 60_000;
  * actionable message instead.
  */
 export const REMOTE_REFERENCE = /^[^\n]*![a-z]+[^\n]*\bhttps?:\/\//im;
+
+/**
+ * Matches the render error of a diagram that uses an emoji (`<:smile:>`).
+ *
+ * The emoji images are not bundled, so the engine asks for its emoji.js
+ * and the worker refuses the load ("Failed to load emoji.js", see
+ * stdlib.ts). The source is not checked up front the way
+ * {@link REMOTE_REFERENCE} is: `<:name:>` can also be plain text, so the
+ * error is recognised instead and replaced with a message that says what
+ * is missing.
+ */
+export const EMOJI_UNAVAILABLE = /\bFailed to load emoji\.js\b/;

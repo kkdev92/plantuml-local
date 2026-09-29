@@ -14,6 +14,7 @@ const LABELS = {
   failedTitle: 'failed',
   emptySource: 'source is empty',
   remoteReference: 'remote references are not supported',
+  emojiUnavailable: 'emoji are not available',
 };
 
 interface Harness {
@@ -23,12 +24,15 @@ interface Harness {
   refreshes(): number;
   /** Waits until all in-flight renders have settled. */
   settle(): Promise<void>;
+  /** Waits until the renders just asked for have started (the palette is resolved first). */
+  started(): Promise<void>;
 }
 
 function makeHarness(options?: {
   dark?: boolean;
   hideExportedImages?: boolean;
   render?: (source: string, dark: boolean) => Promise<string>;
+  resolvePalette?: (source: string, dark: boolean) => Promise<boolean>;
 }): Harness {
   let refreshCount = 0;
   let pending: Promise<unknown> = Promise.resolve();
@@ -49,6 +53,7 @@ function makeHarness(options?: {
     isDark: () => options?.dark ?? false,
     hideExportedImages: () => options?.hideExportedImages ?? true,
     render,
+    resolvePalette: options?.resolvePalette ?? ((_source, dark) => Promise.resolve(dark)),
     requestRefresh: () => {
       refreshCount += 1;
     },
@@ -94,6 +99,7 @@ function makeHarness(options?: {
       await pending;
       await new Promise((resolve) => setTimeout(resolve, 0));
     },
+    started: () => new Promise((resolve) => setTimeout(resolve, 0)),
   };
 }
 
@@ -167,6 +173,7 @@ describe('createPlantUmlPlugin', () => {
 
     h.fence('plantuml', SOURCE);
     h.fence('plantuml', SOURCE);
+    await h.started();
     expect(h.deps.render).toHaveBeenCalledTimes(1);
 
     release('<svg/>');
@@ -186,6 +193,20 @@ describe('createPlantUmlPlugin', () => {
     expect(html).toContain('plantuml-error');
     expect(html).toContain(LABELS.failedTitle);
     expect(html).toContain('Syntax Error line 2');
+    expect(html).toContain('plantuml-source');
+  });
+
+  it('explains a diagram that uses an emoji instead of showing the engine error', async () => {
+    const h = makeHarness({
+      render: () => Promise.reject(new Error('java.lang.RuntimeException: Failed to load emoji.js')),
+    });
+
+    h.fence('plantuml', SOURCE);
+    await h.settle();
+
+    const html = h.fence('plantuml', SOURCE);
+    expect(html).toContain(LABELS.emojiUnavailable);
+    expect(html).not.toContain('RuntimeException');
     expect(html).toContain('plantuml-source');
   });
 
@@ -229,6 +250,18 @@ describe('createPlantUmlPlugin', () => {
 
     expect(h.deps.render).toHaveBeenCalledWith(SOURCE, true);
     expect(h.fence('plantuml', SOURCE)).toContain('plantuml-diagram--dark');
+  });
+
+  it('draws in the palette the theme can be read in, on the backdrop of that palette', async () => {
+    // A theme made for a white page, asked for in a dark editor.
+    const h = makeHarness({ dark: true, resolvePalette: () => Promise.resolve(false) });
+    h.fence('plantuml', SOURCE);
+    await h.settle();
+
+    expect(h.deps.render).toHaveBeenCalledWith(SOURCE, false);
+    const html = h.fence('plantuml', SOURCE);
+    expect(html).toContain('plantuml-diagram--light');
+    expect(html).not.toContain('plantuml-diagram--dark');
   });
 
   it('caches light and dark renders separately', async () => {
@@ -285,6 +318,7 @@ describe('createPlantUmlPlugin', () => {
     // 'first' was evicted, so asking again triggers a fresh render.
     const before = h.deps.render.mock.calls.length;
     h.fence('plantuml', 'first');
+    await h.started();
     expect(h.deps.render.mock.calls.length).toBe(before + 1);
   });
 
@@ -307,6 +341,7 @@ describe('createPlantUmlPlugin', () => {
 
     const before = h.deps.render.mock.calls.length;
     h.fence('plantuml', 'first');
+    await h.started();
     expect(h.deps.render.mock.calls.length).toBe(before + 1);
   });
 

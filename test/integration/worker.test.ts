@@ -1,9 +1,19 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { join } from 'node:path';
+import { runInNewContext } from 'node:vm';
 import { Worker } from 'node:worker_threads';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import { EMOJI_UNAVAILABLE } from '../../src/core/constants';
 import type { RenderResponseMessage } from '../../src/core/types';
+import {
+  choosePalette,
+  labelContrast,
+  MIN_TEXT_CONTRAST,
+  probeSource,
+  ThemePalettes,
+} from '../../src/render/palette';
 
 /**
  * Runs the built dist/worker.js as-is — WASM Graphviz, DOM shims and all.
@@ -105,6 +115,31 @@ describe('render worker (dist)', () => {
     }
   });
 
+  it('reads a diagram the same way whatever was rendered before it', async () => {
+    // Ten lines of messages read as a sequence diagram — the engine's
+    // first choice — and as a class diagram. The engine tries the diagram
+    // type of the previous render first, for sources of ten lines or more.
+    const messages = [
+      '@startuml',
+      'Alice -> Bob : request',
+      'Bob -> Carol : forward',
+      'Carol -> Dave : lookup',
+      'Dave -> Carol : result',
+      'Carol -> Bob : answer',
+      'Bob -> Alice : response',
+      'Alice -> Eve : notify',
+      'Eve -> Alice : ack',
+      '@enduml',
+    ].join('\n');
+
+    await render('@startuml\nAlice -> Bob : hi\n@enduml');
+    const afterSequence = await render(messages);
+    await render('@startuml\nclass Order\nclass Line\nOrder --> Line\n@enduml');
+    const afterClass = await render(messages);
+
+    expect(afterClass).toBe(afterSequence);
+  });
+
   it('returns syntax errors as a diagram and keeps rendering afterwards', async () => {
     const broken = await render('@startuml\n@@@ not valid @@@\n@enduml');
     expect(broken).toMatch(/<svg/);
@@ -130,6 +165,98 @@ describe('render worker (dist)', () => {
   it('contains no external rendering service URLs', async () => {
     const svg = await render('@startuml\nAlice -> Bob : Hello\n@enduml');
     expect(svg).not.toMatch(/plantuml\.com|kroki|unpkg|jsdelivr/i);
+  });
+
+  describe('themes, icons and emoji', () => {
+    /** The fill colours an SVG uses. */
+    function fills(svg: string): Set<string> {
+      return new Set([...svg.matchAll(/fill="(#[0-9A-Fa-f]{3,8})"/g)].map((m) => m[1] ?? ''));
+    }
+
+    it('applies a !theme from the bundled theme library', async () => {
+      const plain = fills(await render('@startuml\nAlice -> Bob : Hello\n@enduml'));
+      const themed = fills(await render('@startuml\n!theme cerulean\nAlice -> Bob : Hello\n@enduml'));
+      expect([...themed].filter((colour) => !plain.has(colour))).not.toEqual([]);
+    });
+
+    /** The licence each theme's header declares, from a script that fills PLANTUML_THEMES. */
+    function themeLicences(path: string): Map<string, string> {
+      const sandbox: { PLANTUML_THEMES?: Record<string, string> } = {};
+      runInNewContext(readFileSync(path, 'utf8'), sandbox);
+      const licences = new Map<string, string>();
+      for (const [name, text] of Object.entries(sandbox.PLANTUML_THEMES ?? {})) {
+        const header = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text)?.[1] ?? '';
+        licences.set(name, /^license:[ \t]*(.*)$/m.exec(header)?.[1]?.trim() ?? '');
+      }
+      return licences;
+    }
+
+    it("ships only the themes under MIT or PlantUML's own", () => {
+      const shipped = themeLicences(join(__dirname, '../../dist/engine/themes.cjs'));
+      expect(shipped.size).toBeGreaterThan(0);
+      expect([...shipped].filter(([, licence]) => licence !== '' && licence !== 'MIT')).toEqual([]);
+
+      // The package's own library does hold themes under other licences, so
+      // the filter in scripts/build.mjs is doing something.
+      const all = themeLicences(createRequire(__filename).resolve('@plantuml/core/themes.js'));
+      expect([...all.keys()].filter((name) => !shipped.has(name))).not.toEqual([]);
+    });
+
+    it('reports a theme that is not shipped the way the engine reports an unknown one', async () => {
+      const svg = await render('@startuml\n!theme sunlust\nAlice -> Bob : Hello\n@enduml');
+      expect(svg).toContain('Cannot load theme sunlust');
+    });
+
+    it('draws a themed diagram in a palette its theme can be read in', async () => {
+      const palettes = new ThemePalettes(render);
+      const themed = (name: string): string =>
+        `@startuml\n!theme ${name}\nAlice -> Bob : Hello\n@enduml`;
+
+      // Made for a white page: dark text and no background of its own.
+      expect(await palettes.resolve(themed('plain'), true)).toBe(false);
+      expect(await palettes.resolve(themed('plain'), false)).toBe(false);
+      // Made for a dark page: white text and no background of its own.
+      expect(await palettes.resolve(themed('cyborg'), false)).toBe(true);
+      expect(await palettes.resolve(themed('cyborg'), true)).toBe(true);
+      // Paints its own background: the same in either palette.
+      expect(await palettes.resolve(themed('blueprint'), true)).toBe(true);
+      expect(await palettes.resolve(themed('blueprint'), false)).toBe(false);
+      // No theme, or one the engine cannot load: as asked.
+      expect(await palettes.resolve('@startuml\nAlice -> Bob : Hello\n@enduml', true)).toBe(true);
+      expect(await palettes.resolve(themed('sunlust'), true)).toBe(true);
+    });
+
+    it('never picks the palette a bundled theme is harder to read in', async () => {
+      const names = [...themeLicences(join(__dirname, '../../dist/engine/themes.cjs')).keys()];
+      expect(names.length).toBeGreaterThan(30);
+
+      for (const name of names) {
+        const probe = probeSource([`!theme ${name}`]);
+        const light = labelContrast(await render(probe, false), false);
+        const dark = labelContrast(await render(probe, true), true);
+        // The probe's label is found for every theme, so each one is measured.
+        expect(light, name).toBeDefined();
+        expect(dark, name).toBeDefined();
+        const measured = { light: light ?? 0, dark: dark ?? 0 };
+        const reachable = Math.min(MIN_TEXT_CONTRAST, Math.max(measured.light, measured.dark));
+        for (const asked of [false, true]) {
+          const used = choosePalette(asked, measured) ? measured.dark : measured.light;
+          expect(used, `${name}, ${asked ? 'dark' : 'light'} asked`).toBeGreaterThanOrEqual(reachable);
+        }
+      }
+    });
+
+    it('renders an OpenIconic icon', async () => {
+      const plain = await render('@startuml\nAlice -> Bob : done\n@enduml');
+      const icon = await render('@startuml\nAlice -> Bob : <&check> done\n@enduml');
+      expect(icon.split('<path').length).toBeGreaterThan(plain.split('<path').length);
+    });
+
+    it('fails a diagram with an emoji with the error the extension explains', async () => {
+      // The emoji images are not bundled; the preview and the export turn
+      // this error into a message of their own.
+      await expect(render('@startuml\nAlice -> Bob : <:smile:> hi\n@enduml')).rejects.toThrow(EMOJI_UNAVAILABLE);
+    });
   });
 
   describe('sprites and the bundled standard library', () => {
