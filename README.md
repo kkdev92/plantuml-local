@@ -244,6 +244,21 @@ exported SVG also carries an opaque background of its palette — the engine
 leaves the canvas transparent, and a dark host page would otherwise show
 through it.
 
+Exported SVGs do not carry the diagram source. PlantUML embeds it in every SVG
+it draws, so that an image can be decoded back into a diagram — comments,
+preprocessor variables and hidden elements included, none of which the picture
+shows — and the engine bundled here has no option to leave it out (PlantUML's
+command line has `-nometadata`). The extension removes it, together with the
+element names the engine records in `data-*` attributes. Keep the Markdown as
+the source of a diagram: an exported file cannot be turned back into one.
+
+A block that does not render is reported rather than exported. PlantUML
+answers a syntax error, an include it cannot resolve or an empty diagram with
+a drawing of the error in place of the diagram; instead of saving that as the
+block's SVG, the export commands count the block as failed and show PlantUML's
+message with the line of the document it points to. No file or reference is
+written for it.
+
 `plantumlLocal.exportDirectory` (default `images`) decides where files go,
 relative to the Markdown file rather than to the workspace root, so moving a
 document keeps its diagrams beside it. Exporting writes files, so it needs a
@@ -331,6 +346,7 @@ external rendering service.
 - **Worker Isolation**: The engine's browser shims live in a worker thread, never on the extension host globals
 - **Render Timeout**: A render exceeding 30 s is abandoned; the worker is terminated and restarted
 - **SVG Sanitisation**: Scripts, event handlers and non-fragment links are stripped before SVG reaches the preview. The one exception is a rasterised sprite, which must reach the preview as an inline `data:image/png` — it is allowed on `<image>` only, must be base64 with no other characters, and must actually begin with the PNG signature
+- **No Embedded Source**: The copy of the diagram source that PlantUML embeds in every SVG, and the element names it records in `data-*` attributes, are removed before an SVG reaches the preview or an exported file
 - **Untrusted Workspaces Supported**: No workspace files are read, no processes are spawned
 
 These controls reduce the extension's attack surface, but they have limits worth

@@ -26,6 +26,13 @@ export interface PlantUmlBlock {
   name: string | null;
   /** The block's contents, without the fence lines. */
   source: string;
+  /**
+   * Zero-based line of the document where `source` begins. Blank lines
+   * right after the opening fence are trimmed from `source`, so this can
+   * lie below `openLine + 1`; line `n` of `source` (counting from 1) is
+   * document line `sourceLine + n - 1`.
+   */
+  sourceLine: number;
   /** Zero-based line of the opening fence. */
   openLine: number;
   /** Zero-based line of the closing fence, or of the last content line. */
@@ -151,9 +158,11 @@ export function findPlantUmlBlocks(text: string): PlantUmlBlock[] {
     }
 
     const name = words[1];
+    const leadingBlank = content.findIndex((line) => line.trim() !== '');
     blocks.push({
       name: name !== undefined && name !== '' ? name : null,
       source: content.join('\n').trim(),
+      sourceLine: openLine + 1 + Math.max(leadingBlank, 0),
       openLine,
       closeLine,
     });

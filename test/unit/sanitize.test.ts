@@ -74,6 +74,55 @@ describe('sanitizeSvg', () => {
     expect(out).not.toContain('data:');
   });
 
+  describe('what the engine embeds without drawing', () => {
+    it('removes the plantuml-src processing instruction, which carries the whole source', () => {
+      // The engine appends it inside the top-level group.
+      const out = sanitizeSvg(
+        window,
+        WRAP('<defs/><g><text x="1" y="1">Hello</text><?plantuml-src Syp9J4vLqBLJSCfFKh1Iy4ZDoSa70000?></g>')
+      );
+      expect(out).not.toContain('<?');
+      expect(out).not.toContain('plantuml-src');
+      expect(out).toContain('Hello</text>');
+    });
+
+    it('removes processing instructions and comments at any depth', () => {
+      const out = sanitizeSvg(
+        window,
+        WRAP('<!--top--><?pi a?><g><!--inner--><g><?pi b?><!--deep--><rect width="1" height="1"/></g></g>')
+      );
+      expect(out).not.toMatch(/<\?|<!--/);
+      expect(out).toContain('<rect');
+    });
+
+    it('removes data-* attributes, which name hidden elements and aliases', () => {
+      const out = sanitizeSvg(
+        window,
+        WRAP(
+          '<g class="entity" data-qualified-name="internal_alias" id="ent0001" data-source-line="4">' +
+            '<title>Shown</title><text x="1" y="1">Shown</text></g>' +
+            '<g class="link" data-entity-1="ent0001" data-entity-2="ent0002" data-link-type="dependency" id="lnk3"/>'
+        )
+      );
+      expect(out).not.toMatch(/\sdata-/);
+      expect(out).not.toContain('internal_alias');
+      // What the picture shows, and what the diagram's own structure uses, stays.
+      expect(out).toContain('class="entity"');
+      expect(out).toContain('id="ent0001"');
+      expect(out).toContain('<title>Shown</title>');
+      expect(out).toContain('Shown</text>');
+    });
+
+    it('removes data-* attributes from the root <svg> element too', () => {
+      const out = sanitizeSvg(
+        window,
+        '<svg xmlns="http://www.w3.org/2000/svg" data-diagram-type="SEQUENCE" viewBox="0 0 10 10"><rect width="1" height="1"/></svg>'
+      );
+      expect(out).not.toContain('data-');
+      expect(out).toContain('viewBox="0 0 10 10"');
+    });
+  });
+
   describe('sprite PNGs', () => {
     // A 1x1 PNG produced by src/worker/raster-canvas.ts. Sprites (Azure and
     // other icon sets) reach the preview as exactly this shape.

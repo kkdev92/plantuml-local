@@ -156,6 +156,33 @@ describe('render worker (dist)', () => {
     expect(svg).not.toMatch(/\son\w+=/i);
   });
 
+  it('keeps nothing of the source that the picture does not show', async () => {
+    // The engine embeds the source in a plantuml-src processing instruction
+    // and tags elements with their names — aliases and hidden ones included.
+    const svg = await render(
+      [
+        '@startuml',
+        "' zq-line-comment",
+        "/' zq-block-comment '/",
+        '!$unused = "zq-variable"',
+        'class "Order Service" as zq_alias',
+        'class Customer',
+        'class zq_hidden',
+        'Customer --> zq_alias',
+        'hide zq_hidden',
+        '@enduml',
+      ].join('\n')
+    );
+
+    // What is drawn stays.
+    expect(svg).toContain('Order Service');
+    expect(svg).toContain('Customer');
+    // What is not drawn is gone, and so is what carried it.
+    expect(svg).not.toMatch(/zq[-_]/);
+    expect(svg).not.toMatch(/<\?|<!--/);
+    expect(svg).not.toMatch(/\sdata-/);
+  });
+
   it('produces different output in dark mode', async () => {
     const light = await render('@startuml\nAlice -> Bob : Hello\n@enduml', false);
     const dark = await render('@startuml\nAlice -> Bob : Hello\n@enduml', true);

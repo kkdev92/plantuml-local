@@ -51,6 +51,10 @@ The Markdown preview webview runs none of this extension's code — no `previewS
 - script-bearing elements (`<script>`, `<foreignObject>`, `<iframe>`, `<embed>`, `<object>`)
 - event handler attributes (`on*`) — on every element including the root `<svg>`
 - `href` / `xlink:href` / `src` values that are not in-document fragment references (`#…`) — this covers `javascript:` and `data:` URIs, and the `<a href>` / `<image href>` output of PlantUML's `[[url]]` hyperlink and `<img:url>` creole syntax
+- processing instructions and comments. The engine appends a `plantuml-src` processing instruction to every SVG, holding the diagram source compressed but not encrypted: comments, preprocessor variables and the names of elements hidden with `hide` all decode back out of it. PlantUML's command line leaves it out with `-nometadata`; the browser engine this extension bundles has no such option
+- `data-*` attributes, in which the engine records element names — aliases and elements hidden with `hide` among them — and the source line each element came from. Nothing draws them
+
+The export commands write this same sanitised SVG, which matters most there: an exported file is shared with people who never see the Markdown. What the diagram itself draws — labels, names, notes — is of course still in the file; this removes what the engine adds on top of the drawing, and is not a way to anonymise a diagram.
 
 Error messages and user source shown in error boxes are HTML-escaped.
 

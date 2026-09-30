@@ -83,6 +83,25 @@ describe('findPlantUmlBlocks', () => {
     expect(blocks[0]?.source).toBe('@startuml\nA -> B');
   });
 
+  it('records the document line the source begins on', () => {
+    const blocks = findPlantUmlBlocks(md('# Title', '```plantuml', '@startuml', '@enduml', '```'));
+    expect(blocks[0]?.sourceLine).toBe(2);
+  });
+
+  it('accounts for blank lines trimmed from the start of the source', () => {
+    // Line n of `source` must map back to its own document line, so the
+    // engine's line numbers can be reported against the document.
+    const blocks = findPlantUmlBlocks(md('```plantuml', '', '  ', '@startuml', 'A -> B', '@enduml', '```'));
+    expect(blocks[0]?.source.split('\n')[0]).toBe('@startuml');
+    expect(blocks[0]?.sourceLine).toBe(3);
+  });
+
+  it('puts the source line right after the fence when the block is blank', () => {
+    const blocks = findPlantUmlBlocks(md('intro', '```plantuml', '', '```'));
+    expect(blocks[0]?.source).toBe('');
+    expect(blocks[0]?.sourceLine).toBe(2);
+  });
+
   it('returns nothing for a document without diagrams', () => {
     expect(findPlantUmlBlocks(md('# Title', '', 'Just prose.'))).toEqual([]);
   });

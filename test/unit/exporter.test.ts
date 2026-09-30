@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 
 import { findPlantUmlBlocks } from '../../src/export/blocks';
@@ -28,6 +30,8 @@ function makeDeps(overrides?: Partial<ExporterDeps>): ExporterDeps & {
     remoteReferenceMessage: 'remote references are not supported',
     emojiUnavailableMessage: 'emoji are not available',
     invalidNameMessage: 'unusable name',
+    engineErrorMessage: (message: string, line: number | null): string =>
+      `engine: ${message} @ ${String(line)}`,
     ...overrides,
   };
   return deps as ExporterDeps & {
@@ -37,6 +41,11 @@ function makeDeps(overrides?: Partial<ExporterDeps>): ExporterDeps & {
 }
 
 const DOC = '/repo/docs/design.md';
+
+/** What the bundled engine returns for a source it cannot render (see engine-error.test.ts). */
+function engineOutput(name: string): string {
+  return readFileSync(join(__dirname, 'fixtures/engine-output', `${name}.svg`), 'utf8');
+}
 
 describe('isValidExportDirectory', () => {
   it('accepts a relative directory', () => {
@@ -134,6 +143,58 @@ describe('exportOne', () => {
     expect(deps.writeFile).not.toHaveBeenCalled();
   });
 
+  it('refuses the error diagram the engine draws for a broken source, naming the document line', async () => {
+    // The engine reports syntax errors through its success path, as a
+    // drawing; writing that out would replace the diagram with it.
+    const deps = makeDeps({ render: vi.fn(() => Promise.resolve(engineOutput('syntax-error'))) });
+    const document = [
+      '# Design',
+      '',
+      '```plantuml orders',
+      '',
+      '@startuml',
+      'Alice -> Bob',
+      'this is not valid ;;; [[[',
+      '@enduml',
+      '```',
+    ].join('\n');
+    const [block] = findPlantUmlBlocks(document);
+
+    const result = await exportOne(deps, DOC, 'images', block!, 'orders');
+
+    // The engine blames line 3 of the source. With a blank line after the
+    // fence, that is line 7 of the document.
+    expect(result.error).toBe('engine: Syntax Error? (Assumed diagram type: sequence) @ 7');
+    // Kept apart too, for a caller that moves the block afterwards.
+    expect(result.engineError).toEqual({
+      message: 'Syntax Error? (Assumed diagram type: sequence)',
+      line: 7,
+    });
+    expect(result.path).toBeNull();
+    expect(deps.writeFile).not.toHaveBeenCalled();
+  });
+
+  it('refuses a lone error message, which names no line', async () => {
+    const deps = makeDeps({ render: vi.fn(() => Promise.resolve(engineOutput('ebnf-error'))) });
+    const [block] = findPlantUmlBlocks('```plantuml grammar\n@startebnf\nrule = "a" | ;;;\n@endebnf\n```');
+
+    const result = await exportOne(deps, DOC, 'images', block!, 'grammar');
+
+    expect(result.error).toBe('engine: Syntax error! @ null');
+    expect(result.engineError).toEqual({ message: 'Syntax error!', line: null });
+    expect(deps.writeFile).not.toHaveBeenCalled();
+  });
+
+  it('still writes a diagram the engine drew with a warning', async () => {
+    const deps = makeDeps({ render: vi.fn(() => Promise.resolve(engineOutput('warning'))) });
+    const [block] = findPlantUmlBlocks('```plantuml flow\nx\n```');
+
+    const result = await exportOne(deps, DOC, 'images', block!, 'flow');
+
+    expect(result.error).toBeNull();
+    expect(deps.writeFile).toHaveBeenCalledOnce();
+  });
+
   it('explains a diagram that uses an emoji instead of passing on the engine error', async () => {
     const deps = makeDeps({
       render: vi.fn(() => Promise.reject(new Error('java.lang.RuntimeException: Failed to load emoji.js'))),
@@ -220,6 +281,21 @@ describe('exportAll', () => {
     expect(outcome.written.map((r) => r.name)).toEqual(['two']);
   });
 
+  it('counts an error diagram as a failure and writes the rest', async () => {
+    const deps = makeDeps({
+      render: vi.fn((source: string) =>
+        Promise.resolve(source === 'a' ? engineOutput('include-failure') : engineOutput('sequence'))
+      ),
+    });
+
+    const outcome = await exportAll(deps, DOC, 'images', document);
+
+    expect(outcome.failed.map((r) => r.name)).toEqual(['one']);
+    expect(outcome.failed[0]?.error).toBe('engine: cannot include shared.puml @ 3');
+    expect(outcome.written.map((r) => r.name)).toEqual(['two']);
+    expect(deps.writeFile).toHaveBeenCalledOnce();
+  });
+
   it('reports progress for each diagram', async () => {
     const seen: string[] = [];
     await exportAll(makeDeps(), DOC, 'images', document, (done, total, name) => {
@@ -255,6 +331,8 @@ describe('exportAll', () => {
     );
 
     expect(outcome.failed.map((r) => r.error)).toEqual(['remote references are not supported']);
+    // Not the engine's error: there is no engine message or line to restate.
+    expect(outcome.failed[0]?.engineError).toBeUndefined();
     expect(deps.render).not.toHaveBeenCalled();
     expect(deps.writeFile).not.toHaveBeenCalled();
   });

@@ -184,6 +184,8 @@ export interface VscodeStub {
     writtenFiles: Map<string, string>;
     /** First argument of each show*Message call. */
     notifications: { info: string[]; warn: string[]; error: string[] };
+    /** Lines written to any log output channel, as `level: message`. */
+    logs: string[];
     /**
      * Sets (or, with undefined, clears) a configuration value and fires
      * the change event — the kit caches an unscoped settings snapshot and
@@ -244,6 +246,7 @@ export function createVscodeStub(): VscodeStub {
   const contextKeys = new Map<string, unknown>();
   const writtenFiles = new Map<string, string>();
   const notifications = { info: [] as string[], warn: [] as string[], error: [] as string[] };
+  const logs: string[] = [];
   const configuration = new Map<string, unknown>();
   const configurationListeners: ((event: unknown) => void)[] = [];
   const theme = { kind: 1 };
@@ -329,12 +332,12 @@ export function createVscodeStub(): VscodeStub {
         return activeEditor === undefined ? [] : [activeEditor];
       },
       createOutputChannel: () => ({
-        trace: () => undefined,
-        debug: () => undefined,
-        info: () => undefined,
-        warn: () => undefined,
-        error: () => undefined,
-        appendLine: () => undefined,
+        trace: (message) => void logs.push(`trace: ${message}`),
+        debug: (message) => void logs.push(`debug: ${message}`),
+        info: (message) => void logs.push(`info: ${message}`),
+        warn: (message) => void logs.push(`warn: ${message}`),
+        error: (message) => void logs.push(`error: ${message}`),
+        appendLine: (message) => void logs.push(message),
         show: () => undefined,
         dispose: () => undefined,
       }),
@@ -447,8 +450,12 @@ export function createVscodeStub(): VscodeStub {
       },
     },
     l10n: {
-      // Pass-through: tests assert against the English defaults.
-      t: (message) => message,
+      // No bundle, so tests assert against the English defaults; `{0}`-style
+      // placeholders are filled in from the arguments, as vscode.l10n.t does.
+      t: (message, ...args) =>
+        message.replace(/\{(\d+)\}/g, (placeholder, index: string) =>
+          Number(index) < args.length ? String(args[Number(index)]) : placeholder
+        ),
     },
     _test: {
       executedCommands,
@@ -463,6 +470,7 @@ export function createVscodeStub(): VscodeStub {
       contextKeys,
       writtenFiles,
       notifications,
+      logs,
       get inputBoxReply() {
         return hooks.inputBoxReply;
       },
