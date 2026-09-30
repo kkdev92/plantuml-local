@@ -13,6 +13,8 @@
   "Use letters, digits, hyphens and underscores only.": "英数字とハイフン、アンダースコアだけが使えます。",
   "plantumlLocal.exportDirectory must be a relative path without \"..\": {0}": "plantumlLocal.exportDirectory は \"..\" を含まない相対パスにしてください: {0}",
   "Could not export the diagram: {0}": "図を書き出せませんでした: {0}",
+  "PlantUML reported an error: {0}": "PlantUML がエラーを報告しました: {0}",
+  "PlantUML reported an error at line {0}: {1}": "PlantUML が {0} 行目でエラーを報告しました: {1}",
   "Exported {0}": "{0} に書き出しました",
   "Exporting diagrams…": "図を書き出しています…",
   "Exported {0} diagram(s)": "{0} 個の図を書き出しました",

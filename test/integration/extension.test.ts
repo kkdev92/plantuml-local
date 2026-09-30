@@ -476,6 +476,70 @@ describe('export (dist)', () => {
     expect(editor.document.getText()).toBe(after);
   });
 
+  it('update-references links no block that the engine could not render', async () => {
+    const text = [
+      '```plantuml working',
+      '@startuml',
+      'A -> B : fine',
+      '@enduml',
+      '```',
+      '',
+      '```plantuml broken',
+      '@startuml',
+      'this is not valid ;;; [[[',
+      '@enduml',
+      '```',
+    ].join('\n');
+    const editor = makeEditor('file:///c/broken/doc.md', text, 0);
+    vscodeStub._test.setActiveEditor(editor);
+    const warningsBefore = vscodeStub._test.notifications.warn.length;
+    const logsBefore = vscodeStub._test.logs.length;
+
+    await vscodeStub._test.registeredCommands.get('plantumlLocal.exportAllAndUpdateRefs')?.();
+
+    // The engine drew its error diagram for the broken block: it must be
+    // neither written as the diagram nor linked from the document.
+    expect(vscodeStub._test.writtenFiles.get('file:///c/broken/images/working.svg')).toContain('fine');
+    expect(vscodeStub._test.writtenFiles.has('file:///c/broken/images/broken.svg')).toBe(false);
+    const after = editor.document.getText();
+    expect(after).toContain('![working](images/working.svg#plantuml-local)');
+    expect(after).not.toContain('broken.svg');
+    expect(vscodeStub._test.notifications.warn.slice(warningsBefore).some((m) => m.includes('failed'))).toBe(true);
+
+    // The reference inserted above the broken block pushed it down: the
+    // reason names the line it is on now, not the one the export read.
+    const now = after.split('\n').indexOf('this is not valid ;;; [[[') + 1;
+    expect(now).toBe(text.split('\n').indexOf('this is not valid ;;; [[[') + 1 + 2);
+    const reason = vscodeStub._test.logs
+      .slice(logsBefore)
+      .find((line) => line.startsWith('warn: Export failed for broken:'));
+    expect(reason).toContain(`PlantUML reported an error at line ${String(now)}: Syntax Error?`);
+  });
+
+  it('export-all names the line of a failed block as the document has it', async () => {
+    const text = [
+      '# Title',
+      '',
+      '```plantuml broken',
+      '@startuml',
+      'this is not valid ;;; [[[',
+      '@enduml',
+      '```',
+    ].join('\n');
+    const editor = makeEditor('file:///c/plain/doc.md', text, 0);
+    vscodeStub._test.setActiveEditor(editor);
+    const logsBefore = vscodeStub._test.logs.length;
+
+    await vscodeStub._test.registeredCommands.get('plantumlLocal.exportAllSvg')?.();
+
+    // Nothing is inserted, so the line stays where the export read it.
+    expect(editor.document.getText()).toBe(text);
+    const reason = vscodeStub._test.logs
+      .slice(logsBefore)
+      .find((line) => line.startsWith('warn: Export failed for broken:'));
+    expect(reason).toContain('PlantUML reported an error at line 5: Syntax Error?');
+  });
+
   it('exportTheme=dark renders the exported SVG in the dark palette', async () => {
     vscodeStub._test.setConfiguration('exportTheme', 'dark');
     try {

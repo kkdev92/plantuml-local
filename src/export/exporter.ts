@@ -1,4 +1,5 @@
 import { DIAGRAM_BACKDROP, EMOJI_UNAVAILABLE, REMOTE_REFERENCE } from '../core/constants';
+import { recognizeEngineError } from '../render/engine-error';
 import { findPlantUmlBlocks, isValidBlockName, type PlantUmlBlock } from './blocks';
 
 /**
@@ -35,6 +36,12 @@ export interface ExporterDeps {
   emojiUnavailableMessage: string;
   /** Localised reason given for a block name unusable as a file name. */
   invalidNameMessage: string;
+  /**
+   * Localised reason given for a diagram the engine drew as an error:
+   * `message` is the engine's own text, `line` the document line it
+   * blames (counting from 1), or null when it names none.
+   */
+  engineErrorMessage(message: string, line: number | null): string;
 }
 
 /** One diagram's outcome. */
@@ -44,6 +51,14 @@ export interface ExportResult {
   path: string | null;
   /** Failure reason, or null on success. */
   error: string | null;
+  /**
+   * For a diagram the engine drew as an error, what `error` was made
+   * from: the engine's message and the document line it blames (counting
+   * from 1, in the text that was exported), or null for no line. A caller
+   * that inserts lines above the block afterwards needs these to say
+   * where the problem is now.
+   */
+  engineError?: { message: string; line: number | null };
 }
 
 export interface ExportOutcome {
@@ -125,7 +140,26 @@ async function exportBlock(
 
   try {
     const dark = await deps.resolvePalette(block.source, deps.isDark());
-    const svg = addBackground(await deps.render(block.source, dark), dark);
+    const rendered = await deps.render(block.source, dark);
+
+    // The engine reports a syntax error, a failed include or an empty
+    // diagram by drawing it, through the same success path as a diagram.
+    // Written out, that drawing would stand in for the diagram — and the
+    // reference updater would link it from the document.
+    const failure = recognizeEngineError(rendered);
+    if (failure !== null) {
+      // sourceLine counts from 0 and the engine's line from 1, so the sum
+      // is the document line counting from 1, as an editor shows it.
+      const line = failure.line === null ? null : block.sourceLine + failure.line;
+      return {
+        name,
+        path: null,
+        error: deps.engineErrorMessage(failure.message, line),
+        engineError: { message: failure.message, line },
+      };
+    }
+
+    const svg = addBackground(rendered, dark);
     const path = deps.resolve(documentPath, `${directory}/${name}.svg`);
     await deps.writeFile(path, svg);
     return { name, path, error: null };

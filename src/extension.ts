@@ -37,7 +37,7 @@ import {
   type ExporterDeps,
   type ExportOutcome,
 } from './export/exporter';
-import { planReferenceEdits, type ReferenceEdit } from './export/references';
+import { lineAfterEdits, planReferenceEdits, type ReferenceEdit } from './export/references';
 import { createPlantUmlPlugin, type PlantUmlPlugin } from './preview/plugin';
 import type { RenderLog } from './core/types';
 import { RendererClient, defaultWorkerPath } from './render/client';
@@ -269,6 +269,38 @@ async function askForName(context: OperationContext): Promise<string | null> {
   return name ?? null;
 }
 
+/** The reason given for a diagram the engine drew as an error. */
+function engineErrorMessage(
+  context: OperationContext,
+  message: string,
+  line: number | null
+): string {
+  return line === null
+    ? context.l10n.t('PlantUML reported an error: {0}', message)
+    : context.l10n.t('PlantUML reported an error at line {0}: {1}', String(line), message);
+}
+
+/**
+ * Restates each engine error at the line it occupies once `edits` are
+ * applied: references inserted above a failed block push it down, and a
+ * reason naming the line the export read would point at the wrong one.
+ */
+function relocateEngineErrors(
+  context: OperationContext,
+  outcome: ExportOutcome,
+  edits: readonly ReferenceEdit[]
+): ExportOutcome {
+  const failed = outcome.failed.map((failure) => {
+    const blamed = failure.engineError;
+    if (blamed === undefined || blamed.line === null) {
+      return failure;
+    }
+    const line = lineAfterEdits(edits, blamed.line);
+    return { ...failure, error: engineErrorMessage(context, blamed.message, line) };
+  });
+  return { ...outcome, failed };
+}
+
 /**
  * Resolves a path against the document's own folder and writes through
  * `vscode.workspace.fs`, so exporting works on remote and virtual file
@@ -292,6 +324,7 @@ function exporterDeps(
     invalidNameMessage: context.l10n.t(
       'Use letters, digits, hyphens and underscores only.'
     ),
+    engineErrorMessage: (message, line) => engineErrorMessage(context, message, line),
     // Exports default to the light palette regardless of the editor theme:
     // the files face hosts like GitHub, whose background this extension
     // does not control, and a dark diagram on a white page reads as broken.
@@ -586,6 +619,7 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
 
       const extra: string[] = [];
       let applyFailed = false;
+      let reported = outcome;
       if (edits.length === 0) {
         if (outcome.written.length > 0) {
           extra.push(context.l10n.t('References are up to date'));
@@ -599,12 +633,13 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         if (updated > 0) {
           extra.push(context.l10n.t('{0} reference(s) updated', String(updated)));
         }
+        reported = relocateEngineErrors(context, outcome, edits);
       } else {
         applyFailed = true;
         extra.push(context.l10n.t('Could not update the references'));
       }
 
-      await reportOutcome(context, outcome, extra, applyFailed);
+      await reportOutcome(context, reported, extra, applyFailed);
     },
   });
 

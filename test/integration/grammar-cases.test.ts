@@ -4,6 +4,7 @@ import { Worker } from 'node:worker_threads';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import type { RenderResponseMessage } from '../../src/core/types';
+import { recognizeEngineError } from '../../src/render/engine-error';
 import { caseGroups } from '../unit/grammar/cases';
 import checklist from '../unit/grammar/checklist.json';
 
@@ -55,7 +56,15 @@ function outcome(message: RenderResponseMessage): { ok: boolean; text: string; w
     return { ok: false, text: message.error, warnings: [] };
   }
   const text = svgText(message.svg ?? '');
-  return { ok: !ERROR_MARKERS.test(text), text, warnings: warnings(message.svg ?? '') };
+  const ok = !ERROR_MARKERS.test(text);
+  // Exports rely on src/render/engine-error.ts to refuse the engine's error
+  // drawings. It must reach the verdict this oracle reaches, on every
+  // drawing the engine makes here — errors and diagrams alike.
+  expect(
+    recognizeEngineError(message.svg ?? '') === null,
+    `recognizeEngineError disagrees with the oracle on: ${text.slice(0, 200)}`
+  ).toBe(ok);
+  return { ok, text, warnings: warnings(message.svg ?? '') };
 }
 
 beforeAll(() => {

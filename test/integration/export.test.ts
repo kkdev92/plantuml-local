@@ -53,6 +53,8 @@ const deps: ExporterDeps = {
   remoteReferenceMessage: 'URL-based external references are not supported.',
   emojiUnavailableMessage: 'Emoji are not supported.',
   invalidNameMessage: 'Use letters, digits, hyphens and underscores only.',
+  engineErrorMessage: (message, line) =>
+    line === null ? `PlantUML reported an error: ${message}` : `PlantUML reported an error at line ${String(line)}: ${message}`,
   resolve: (documentPath, relative) => resolve(dirname(documentPath), relative),
   writeFile: (path, content) =>
     import('node:fs/promises').then(async (fs) => {
@@ -144,6 +146,53 @@ describe('export (dist worker)', () => {
     // XML, and a browser shows a broken image for the whole file.
     expect(svg).toContain('xmlns:xlink="http://www.w3.org/1999/xlink"');
     expect(hasUndeclaredPrefix(svg)).toBe(false);
+  });
+
+  it('writes nothing of the source that the picture does not show', async () => {
+    const document = join(workspace, 'docs/hidden.md');
+    const text = [
+      '```plantuml hidden',
+      '@startuml',
+      "' zq-line-comment",
+      '!$unused = "zq-variable"',
+      'class "Order Service" as zq_alias',
+      'class zq_hidden',
+      'hide zq_hidden',
+      '@enduml',
+      '```',
+    ].join('\n');
+
+    const outcome = await exportAll(deps, document, 'images', text);
+
+    expect(outcome.written.map((r) => r.name)).toEqual(['hidden']);
+    const svg = readFileSync(join(workspace, 'docs/images/hidden.svg'), 'utf8');
+    expect(svg).toContain('Order Service');
+    expect(svg).not.toMatch(/zq[-_]/);
+    expect(svg).not.toMatch(/<\?|<!--|\sdata-/);
+  });
+
+  it.each([
+    ['a syntax error', ['@startuml', 'Alice -> Bob', 'this is not valid ;;; [[[', '@enduml'], /at line 5: Syntax Error\?/],
+    ['a local include', ['@startuml', '!include shared.puml', 'Alice -> Bob', '@enduml'], /at line 4: cannot include shared\.puml/],
+    ['an empty diagram', ['@startuml', '@enduml'], /at line 4: Empty description/],
+    ['a source without @startuml', ['Alice -> Bob : no start line'], /error: Diagram not supported by this release of PlantUML/],
+    ['a library that is not bundled', ['@startuml', '!include <C4/C4_Context>', '@enduml'], /at line 4: Fatal parsing error/],
+    ['unreadable JSON', ['@startjson', '{ "a": ', '@endjson'], /error: Your data does not sound like JSON data/],
+    ['an EBNF syntax error', ['@startebnf', 'rule = "a" | ;;;', '@endebnf'], /error: Syntax error!/],
+  ])('refuses the drawing the engine makes for %s instead of writing it', async (_what, lines, reason) => {
+    const document = join(workspace, 'docs/broken.md');
+    // Two lines above the source, so a located error lands on source line + 2.
+    const text = ['# Broken', '```plantuml broken', ...lines, '```'].join('\n');
+
+    for (const dark of [false, true]) {
+      rmSync(join(workspace, 'docs/images/broken.svg'), { force: true });
+      const outcome = await exportAll({ ...deps, isDark: () => dark }, document, 'images', text);
+
+      expect(outcome.written, `dark=${String(dark)}`).toHaveLength(0);
+      expect(outcome.failed.map((r) => r.name)).toEqual(['broken']);
+      expect(outcome.failed[0]?.error).toMatch(reason);
+      expect(existsSync(join(workspace, 'docs/images/broken.svg'))).toBe(false);
+    }
   });
 
   it('refuses a URL-based include instead of writing the engine error diagram', async () => {

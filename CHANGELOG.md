@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **Exported SVGs no longer carry the diagram source.** PlantUML embeds the
+  whole source of a diagram in the SVG it draws — a `plantuml-src` processing
+  instruction, compressed but not encrypted — and tags elements with their
+  names in `data-*` attributes. Comments, preprocessor variables, aliases and
+  elements hidden with `hide` could all be read back out of an exported file,
+  though the picture shows none of them. Both are now removed before an SVG
+  reaches the preview or a file, and the drawing is unchanged. SVGs exported
+  with earlier versions still contain them; export again to replace them.
+
+### Fixed
+
+- **Export no longer saves PlantUML's error drawing as the diagram.** The
+  engine answers a syntax error, an include it cannot resolve or an empty
+  diagram with a drawing of the error in place of the diagram, and the export
+  commands wrote that drawing out as the block's SVG — *Export All Diagrams
+  and Update References* then linked it from the document. Such a block now
+  fails with PlantUML's message and the document line it points to, and no
+  file or reference is written for it.
+
 ## [0.11.0] - 2026-09-29
 
 ### Added

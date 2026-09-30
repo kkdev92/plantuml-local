@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { planReferenceEdits, type ReferenceEdit } from '../../src/export/references';
+import { lineAfterEdits, planReferenceEdits, type ReferenceEdit } from '../../src/export/references';
 
 const md = (...lines: string[]): string => lines.join('\n');
 const exported = (...names: string[]): Set<string> => new Set(names);
@@ -139,5 +139,54 @@ describe('planReferenceEdits', () => {
     const result = apply(text, planReferenceEdits(text, exported('orders'), '.'));
 
     expect(result).toContain('![orders](orders.svg#plantuml-local)');
+  });
+});
+
+describe('lineAfterEdits', () => {
+  // A reference inserted with a separating blank line (content follows the
+  // fence), a block that failed and gets none, a managed line rewritten in
+  // place, and a reference inserted at the end of the file.
+  const text = md(
+    '# doc',
+    ...BLOCK,
+    'prose right after the fence',
+    '',
+    '```plantuml failed',
+    '@startuml',
+    'this is not valid ;;; [[[',
+    '@enduml',
+    '```',
+    '',
+    '```plantuml renamed',
+    'A -> B',
+    '```',
+    '',
+    '![old](images/old.svg#plantuml-local)',
+    '',
+    '```plantuml last',
+    'A -> B',
+    '```'
+  );
+  const edits = planReferenceEdits(text, exported('orders', 'renamed', 'last'), 'images');
+
+  it('follows every line of the planned-from text into the edited text', () => {
+    expect(edits.map((edit) => edit.kind)).toEqual(['insert-after', 'replace-line', 'insert-after']);
+    const before = text.split('\n');
+    const after = apply(text, edits).split('\n');
+
+    for (const [index, content] of before.entries()) {
+      const replaced = edits.find((edit) => edit.kind === 'replace-line' && edit.line === index);
+      const moved = lineAfterEdits(edits, index + 1);
+      expect(after[moved - 1], `line ${String(index + 1)}`).toBe(replaced?.text ?? content);
+    }
+  });
+
+  it('moves a failed block down by the lines inserted above it', () => {
+    const broken = text.split('\n').indexOf('this is not valid ;;; [[[') + 1;
+
+    // The reference after `orders`, its blank line, and the blank line
+    // that separates it from the prose.
+    expect(lineAfterEdits(edits, broken)).toBe(broken + 3);
+    expect(lineAfterEdits([], broken)).toBe(broken);
   });
 });

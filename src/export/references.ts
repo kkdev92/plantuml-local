@@ -128,3 +128,20 @@ export function planReferenceEdits(
 
   return edits;
 }
+
+/**
+ * Where line `line` (counting from 1) of the planned-from text sits once
+ * `edits` are applied. Each insertion pushes down the lines below it;
+ * replacing a line moves nothing.
+ */
+export function lineAfterEdits(edits: readonly ReferenceEdit[], line: number): number {
+  let moved = line;
+  for (const edit of edits) {
+    // An insertion lands after edit.line, which counts from 0, so the
+    // line it follows and everything above stay put.
+    if (edit.kind === 'insert-after' && edit.line < line - 1) {
+      moved += edit.text.split('\n').length - 1;
+    }
+  }
+  return moved;
+}

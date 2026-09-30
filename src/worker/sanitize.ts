@@ -14,6 +14,20 @@ import type { Window } from 'happy-dom';
  *   fragment references (`#…`) within the document, or an inline sprite
  *   PNG (see {@link isSpritePng})
  *
+ * The same SVG is what an export writes to disk, and a file is shared with
+ * people who were never meant to see the source. So everything the engine
+ * embeds without drawing it goes too:
+ *
+ * - processing instructions and comments. The engine appends a
+ *   `plantuml-src` processing instruction holding the whole diagram
+ *   source, compressed but not encrypted: comments, preprocessor
+ *   variables and the names of elements hidden with `hide` all decode
+ *   back out of it. PlantUML's command line has `-nometadata` to leave it
+ *   out; the browser engine has no such option.
+ * - `data-*` attributes. The engine tags elements with `data-qualified-name`
+ *   and `data-source-line`, and the names include aliases and elements
+ *   hidden with `hide`. Nothing draws them.
+ *
  * DOMPurify is deliberately not used here: under happy-dom its
  * innerHTML-based parsing mangles SVG structure (the root `<svg>` element
  * disappears and sibling shapes are dropped — verified empirically).
@@ -62,12 +76,22 @@ function isSpritePng(element: ElementLike, attributeName: string, value: string)
   );
 }
 
-/** Element shape shared by happy-dom's HTML and XML element classes. */
-interface ElementLike {
-  nodeName: string;
-  children: ArrayLike<ElementLike>;
-  attributes: ArrayLike<{ name: string; value: string }>;
+/** DOM node types the walk distinguishes (standard `Node.nodeType` values). */
+const ELEMENT_NODE = 1;
+const PROCESSING_INSTRUCTION_NODE = 7;
+const COMMENT_NODE = 8;
+
+/** Node shape shared by happy-dom's element, text, comment and PI classes. */
+interface NodeLike {
+  nodeType: number;
   remove(): void;
+}
+
+/** Element shape shared by happy-dom's HTML and XML element classes. */
+interface ElementLike extends NodeLike {
+  nodeName: string;
+  childNodes: ArrayLike<NodeLike>;
+  attributes: ArrayLike<{ name: string; value: string }>;
   removeAttribute(name: string): void;
   setAttribute(name: string, value: string): void;
 }
@@ -80,7 +104,7 @@ interface StripState {
 function stripAttributes(element: ElementLike, state: StripState): void {
   for (const attribute of Array.from(element.attributes)) {
     const name = attribute.name.toLowerCase();
-    if (name.startsWith('on')) {
+    if (name.startsWith('on') || name.startsWith('data-')) {
       element.removeAttribute(attribute.name);
     } else if (
       LINK_ATTRIBUTES.has(name) &&
@@ -95,7 +119,17 @@ function stripAttributes(element: ElementLike, state: StripState): void {
 }
 
 function walk(element: ElementLike, state: StripState): void {
-  for (const child of Array.from(element.children)) {
+  // childNodes rather than children: the embedded source is a processing
+  // instruction, which is a node but not an element.
+  for (const node of Array.from(element.childNodes)) {
+    if (node.nodeType === PROCESSING_INSTRUCTION_NODE || node.nodeType === COMMENT_NODE) {
+      node.remove();
+      continue;
+    }
+    if (node.nodeType !== ELEMENT_NODE) {
+      continue;
+    }
+    const child = node as ElementLike;
     if (DANGEROUS_ELEMENTS.has(child.nodeName.toLowerCase())) {
       child.remove();
       continue;
