@@ -17,6 +17,7 @@ assets/**
 # into the repo root ships unless it is listed here.
 .claude/**
 .clipshot/**
+.mcp.json
 
 # Development configuration
 .vscode/**
