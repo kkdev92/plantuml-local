@@ -160,8 +160,8 @@ theme applies, and `editor.tokenColorCustomizations` can adjust them.
 
 Files ending in `.puml`, `.plantuml`, `.pu`, `.iuml` or `.wsd` open as the
 language PlantUML, with the same colouring. *Toggle Line Comment* uses `'` and
-*Toggle Block Comment* uses `/' … '/`. Diagrams are previewed and exported from
-Markdown only; a `.puml` file is not rendered yet.
+*Toggle Block Comment* uses `/' … '/`. A `.puml` file has no preview yet, but
+its diagrams can be exported to SVG (see below).
 
 ### Problems
 
@@ -256,6 +256,12 @@ required for the bulk commands, and the single-diagram one asks when the block
 has none — or when its name could not be a file name, since names are limited
 to 128 letters, digits, hyphens and underscores. The bulk commands report such
 a block as failed.
+
+The first two commands also work in a `.puml` file, which writes each of its
+diagrams to a file of its own. A diagram is named by an id on its start line,
+`@startuml(id=orders-api)`; a file holding a single diagram may leave it out,
+and the diagram is named after the file. References are inserted into Markdown
+only.
 
 A file already at the target is replaced only when you say so. If it holds the
 diagram already, nothing is written; if it holds something else — a file put

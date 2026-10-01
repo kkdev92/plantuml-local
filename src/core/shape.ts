@@ -26,8 +26,10 @@ export type DiagramShape =
   /** `newpage` inside the diagram, at `line`: only the first page would be drawn. */
   | { kind: 'pages'; line: number };
 
-const START = /^\s*([@\\])start([A-Za-z0-9_]+)/;
-const END = /^\s*[@\\]end/;
+/** A diagram's first line, capturing its marker (`@` or `\`) and its kind. */
+export const START = /^\s*([@\\])start([A-Za-z0-9_]+)/;
+/** A diagram's last line. */
+export const END = /^\s*[@\\]end/;
 const NEWPAGE = /^\s*newpage(?:\s|$)/i;
 
 /**

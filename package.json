@@ -44,7 +44,8 @@
   "main": "./dist/extension.js",
   "l10n": "./l10n",
   "activationEvents": [
-    "onLanguage:markdown"
+    "onLanguage:markdown",
+    "onLanguage:plantuml"
   ],
   "capabilities": {
     "untrustedWorkspaces": {
@@ -152,12 +153,12 @@
       "editor/context": [
         {
           "command": "plantumlLocal.exportSvg",
-          "when": "editorLangId == markdown && plantumlLocal.cursorInDiagram",
+          "when": "editorLangId =~ /^(markdown|plantuml)$/ && plantumlLocal.cursorInDiagram",
           "group": "2_plantuml@1"
         },
         {
           "command": "plantumlLocal.exportAllSvg",
-          "when": "editorLangId == markdown && plantumlLocal.hasDiagrams",
+          "when": "editorLangId =~ /^(markdown|plantuml)$/ && plantumlLocal.hasDiagrams",
           "group": "2_plantuml@2"
         },
         {

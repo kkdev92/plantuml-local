@@ -295,7 +295,11 @@ function makeEditor(
       languageId: options?.languageId ?? 'markdown',
       version: 1,
       isUntitled: options?.isUntitled ?? false,
-      uri: { toString: () => path, scheme: path.slice(0, path.indexOf(':')) },
+      uri: {
+        toString: () => path,
+        scheme: path.slice(0, path.indexOf(':')),
+        path: path.replace(/^[a-z][\w+.-]*:(\/\/[^/]*)?/i, ''),
+      },
       getText: () => current,
       lineAt: (at: number) => ({ text: current.split('\n')[at] ?? '' }),
       setText: (next: string) => {
@@ -873,6 +877,76 @@ describe('export (dist)', () => {
     expect(vscodeStub._test.writtenFiles.get('file:///c/other/images/orders.svg')).toBe(
       vscodeStub._test.writtenFiles.get('file:///c/docs/images/orders.svg')
     );
+  });
+
+  describe('PlantUML files', () => {
+    const FLOWS = [
+      '@startuml(id=orders)',
+      'Alice -> Bob : orders',
+      '@enduml',
+      '',
+      '@startuml',
+      'Carol -> Dave : unnamed',
+      '@enduml',
+      '',
+      '@startuml(id=billing)',
+      'Erin -> Frank : billing',
+      '@enduml',
+    ].join('\n');
+    const pumlEditor = (path: string, text: string, line: number): TextEditorStub =>
+      makeEditor(path, text, line, { languageId: 'plantuml' });
+
+    it('tracks the context keys behind the editor menu', () => {
+      const editor = pumlEditor('file:///c/puml/flows.puml', FLOWS, 1);
+      vscodeStub._test.setActiveEditor(editor);
+
+      expect(vscodeStub._test.contextKeys.get('plantumlLocal.hasDiagrams')).toBe(true);
+      expect(vscodeStub._test.contextKeys.get('plantumlLocal.cursorInDiagram')).toBe(true);
+
+      // The blank line between two diagrams belongs to neither.
+      editor.selection.active.line = 3;
+      vscodeStub._test.fireSelection(editor);
+      expect(vscodeStub._test.contextKeys.get('plantumlLocal.cursorInDiagram')).toBe(false);
+    });
+
+    it('export writes the diagram under the cursor, named by its id', async () => {
+      vscodeStub._test.setActiveEditor(pumlEditor('file:///c/puml/flows.puml', FLOWS, 9));
+
+      await vscodeStub._test.registeredCommands.get('plantumlLocal.exportSvg')?.();
+
+      expect(vscodeStub._test.writtenFiles.get('file:///c/puml/images/billing.svg')).toContain(
+        'billing'
+      );
+      expect(vscodeStub._test.writtenFiles.has('file:///c/puml/images/orders.svg')).toBe(false);
+    });
+
+    it('export names the only diagram of a file after the file', async () => {
+      vscodeStub._test.setActiveEditor(
+        pumlEditor('file:///c/puml/sequence.puml', '@startuml\nAlice -> Bob : single\n@enduml\n', 5)
+      );
+
+      await vscodeStub._test.registeredCommands.get('plantumlLocal.exportSvg')?.();
+
+      expect(vscodeStub._test.writtenFiles.get('file:///c/puml/images/sequence.svg')).toContain(
+        'single'
+      );
+    });
+
+    it('export-all writes the named diagrams and says how to name the rest', async () => {
+      vscodeStub._test.setActiveEditor(pumlEditor('file:///c/pumlall/flows.puml', FLOWS, 0));
+
+      await vscodeStub._test.registeredCommands.get('plantumlLocal.exportAllSvg')?.();
+
+      expect(vscodeStub._test.writtenFiles.get('file:///c/pumlall/images/orders.svg')).toContain(
+        'orders'
+      );
+      expect(vscodeStub._test.writtenFiles.get('file:///c/pumlall/images/billing.svg')).toContain(
+        'billing'
+      );
+      expect(vscodeStub._test.notifications.warn.at(-1)).toBe(
+        'Exported 2 diagram(s) · 1 unnamed diagram(s) skipped — name one with @startuml(id=my-diagram)'
+      );
+    });
   });
 
   describe('existing files', () => {

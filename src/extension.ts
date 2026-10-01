@@ -28,6 +28,7 @@ import {
 } from './core/constants';
 import {
   blockAtLine,
+  findFileDiagrams,
   findPlantUmlBlocks,
   isValidBlockName,
   type PlantUmlBlock,
@@ -196,8 +197,8 @@ function isDark(theme: 'auto' | 'light' | 'dark'): boolean {
   return kind === vscode.ColorThemeKind.Dark || kind === vscode.ColorThemeKind.HighContrast;
 }
 
-/** The Markdown document to export from: its text, path and cursor line. */
-interface ActiveMarkdown {
+/** The document to export from: its text, path and cursor line. */
+interface ActiveDocument {
   text: string;
   path: string;
   /** The cursor line in the document's editor, or null when none is visible. */
@@ -226,6 +227,19 @@ function toDiagnostic(problem: BlockProblem, lines: readonly string[], container
   diagnostic.code = problem.code;
   diagnostic.source = EXTENSION_NAME;
   return diagnostic;
+}
+
+/**
+ * The diagrams of `document`: the diagrams of a PlantUML file, named after
+ * the file when there is one, or the diagram blocks of a Markdown document.
+ */
+function diagramsOf(document: vscode.TextDocument, text: string): PlantUmlBlock[] {
+  if (document.languageId !== 'plantuml') {
+    return findPlantUmlBlocks(text);
+  }
+  const file = document.uri.path.slice(document.uri.path.lastIndexOf('/') + 1);
+  const dot = file.lastIndexOf('.');
+  return findFileDiagrams(text, dot > 0 ? file.slice(0, dot) : file);
 }
 
 /**
@@ -285,14 +299,18 @@ async function chooseMarkdownDocument(
 }
 
 /**
- * The Markdown document to export from, or null after explaining why
- * there is none.
+ * The document to export from, or null after explaining why there is
+ * none: a Markdown document, or with `plantUml`, the PlantUML file in the
+ * active editor.
  *
  * `vscode.window` rather than the kit's editor service because export
  * needs the document's own URI to resolve a relative directory against,
  * and the cursor's line number rather than its text.
  */
-async function activeMarkdown(context: OperationContext): Promise<ActiveMarkdown | null> {
+async function activeDocument(
+  context: OperationContext,
+  plantUml: boolean
+): Promise<ActiveDocument | null> {
   // Writing files is the one thing this extension promises not to do in
   // an untrusted workspace. Checked here rather than through a command
   // `enablement` clause: that only hides the command, leaving someone who
@@ -304,13 +322,15 @@ async function activeMarkdown(context: OperationContext): Promise<ActiveMarkdown
     return null;
   }
 
-  const document = await chooseMarkdownDocument(context);
+  const active = vscode.window.activeTextEditor?.document;
+  const document =
+    plantUml && active?.languageId === 'plantuml' ? active : await chooseMarkdownDocument(context);
   if (document === null) {
     return null;
   }
   if (document.isUntitled) {
     // There is no folder to write beside.
-    void context.notify.warn(context.l10n.t('Save the Markdown file before exporting.'));
+    void context.notify.warn(context.l10n.t('Save the file before exporting.'));
     return null;
   }
   const editor = vscode.window.visibleTextEditors.find(
@@ -515,7 +535,7 @@ function runBulkExport(
   renderer: RendererClient,
   palettes: ThemePalettes,
   settings: SettingsReader,
-  document: ActiveMarkdown,
+  document: ActiveDocument,
   directory: string
 ): Promise<ExportOutcome | null> {
   return context.progress.run({ title: context.l10n.t('Exporting diagrams…') }, (report) =>
@@ -523,7 +543,7 @@ function runBulkExport(
       exporterDeps(context, renderer, palettes, settings, document.textDocument.uri),
       document.path,
       directory,
-      document.text,
+      diagramsOf(document.textDocument, document.text),
       (done, total, name) => {
         report.report({
           message: `${name} (${String(done + 1)}/${String(total)})`,
@@ -534,12 +554,17 @@ function runBulkExport(
   );
 }
 
-/** One summary notification for a bulk export, warnings when warranted. */
+/**
+ * One summary notification for a bulk export, warnings when warranted.
+ * `plantUml` says the document was a PlantUML file, which names its
+ * diagrams differently.
+ */
 async function reportOutcome(
   context: OperationContext,
   outcome: ExportOutcome,
   extra: readonly string[],
-  forceWarn: boolean
+  forceWarn: boolean,
+  plantUml = false
 ): Promise<void> {
   const messages: string[] = [];
   if (outcome.written.length > 0) {
@@ -559,10 +584,15 @@ async function reportOutcome(
     // Naming is what keeps a file tied to its block across edits; a
     // positional name would move the moment a block is inserted above.
     messages.push(
-      context.l10n.t(
-        '{0} unnamed block(s) skipped — name one with ```plantuml my-diagram',
-        String(outcome.unnamed)
-      )
+      plantUml
+        ? context.l10n.t(
+            '{0} unnamed diagram(s) skipped — name one with @startuml(id=my-diagram)',
+            String(outcome.unnamed)
+          )
+        : context.l10n.t(
+            '{0} unnamed block(s) skipped — name one with ```plantuml my-diagram',
+            String(outcome.unnamed)
+          )
     );
   }
   if (messages.length === 0) {
@@ -696,19 +726,21 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
       _args,
       { renderer, palettes, settings }
     ): Promise<void> => {
-      const document = await activeMarkdown(context);
+      const document = await activeDocument(context, true);
       if (document === null) {
         return;
       }
 
-      const blocks = findPlantUmlBlocks(document.text);
+      const blocks = diagramsOf(document.textDocument, document.text);
       // The block under the cursor, or the only block when there is nothing
       // to choose between — a document picked from a list has no cursor.
       const atCursor = document.line === null ? null : blockAtLine(blocks, document.line);
       const block = atCursor ?? (blocks.length === 1 ? (blocks[0] ?? null) : null);
       if (block === null) {
         await context.notify.warn(
-          context.l10n.t('Put the cursor inside a ```plantuml block first.')
+          document.textDocument.languageId === 'plantuml'
+            ? context.l10n.t('Put the cursor inside a diagram first.')
+            : context.l10n.t('Put the cursor inside a ```plantuml block first.')
         );
         return;
       }
@@ -756,7 +788,7 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
       _args,
       { renderer, palettes, settings }
     ): Promise<void> => {
-      const document = await activeMarkdown(context);
+      const document = await activeDocument(context, true);
       if (document === null) {
         return;
       }
@@ -770,7 +802,13 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
       if (outcome === null) {
         return;
       }
-      await reportOutcome(context, outcome, [], false);
+      await reportOutcome(
+        context,
+        outcome,
+        [],
+        false,
+        document.textDocument.languageId === 'plantuml'
+      );
     },
   });
 
@@ -781,7 +819,7 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
       _args,
       { renderer, palettes, settings }
     ): Promise<void> => {
-      const document = await activeMarkdown(context);
+      const document = await activeDocument(context, false);
       if (document === null) {
         return;
       }
@@ -1007,9 +1045,9 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
     start: (context) => {
       // Keeps the context keys behind the editor context-menu entries
       // current: "Export Diagram" shows only with the cursor inside a
-      // ```plantuml block, "Export All" only when the document has one.
-      // Blocks are rescanned only when the document itself changes; a
-      // plain cursor move reuses the previous scan.
+      // ```plantuml block or a diagram of a PlantUML file, "Export All"
+      // only when the document has one. Blocks are rescanned only when the
+      // document itself changes; a plain cursor move reuses the previous scan.
       let scanned = '';
       let blocks: readonly PlantUmlBlock[] = [];
       const state = { hasDiagrams: false, inDiagram: false };
@@ -1018,10 +1056,11 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         let hasDiagrams = false;
         let inDiagram = false;
 
-        if (editor !== undefined && editor.document.languageId === 'markdown') {
+        const language = editor?.document.languageId;
+        if (editor !== undefined && (language === 'markdown' || language === 'plantuml')) {
           const stamp = `${editor.document.uri.toString()}#${String(editor.document.version)}`;
           if (stamp !== scanned) {
-            blocks = findPlantUmlBlocks(editor.document.getText());
+            blocks = diagramsOf(editor.document, editor.document.getText());
             scanned = stamp;
           }
           hasDiagrams = blocks.length > 0;

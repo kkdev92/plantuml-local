@@ -5,7 +5,8 @@
  * what to call the files. The document is parsed with markdown-it 14, the
  * parser and options of VS Code's Markdown preview, so they find exactly
  * the blocks the preview draws: fences in block quotes and list items too,
- * and nothing inside an HTML comment or another code block.
+ * and nothing inside an HTML comment or another code block. A PlantUML
+ * file holds its diagrams directly; {@link findFileDiagrams} finds those.
  *
  * This module deliberately has no dependency on the `vscode` module, so
  * the scan is unit-testable on plain strings.
@@ -14,8 +15,9 @@
 import MarkdownIt from 'markdown-it';
 
 import { isDiagramFence } from '../core/constants';
+import { END, START, forEachCodeLine } from '../core/shape';
 
-/** A `plantuml` fenced block found in a document. */
+/** A `plantuml` fenced block found in a document, or a diagram of a PlantUML file. */
 export interface PlantUmlBlock {
   /**
    * The word after the language in the info string
@@ -164,4 +166,51 @@ export function findPlantUmlBlocks(text: string): PlantUmlBlock[] {
 /** The block containing `line`, or null when the cursor is outside one. */
 export function blockAtLine(blocks: readonly PlantUmlBlock[], line: number): PlantUmlBlock | null {
   return blocks.find((block) => line >= block.openLine && line <= block.closeLine) ?? null;
+}
+
+/** The `(id=…)` right after `@start…`: the name a diagram declares for itself. */
+const DECLARED_ID = /^\s*[@\\]start[A-Za-z0-9_]+\(id=([^)]*)\)/;
+
+/**
+ * Returns the diagrams of a PlantUML file, in order, each from its
+ * `@start…` line (`openLine`) to its `@end…` line (`closeLine`); the engine
+ * reads nothing between diagrams. A diagram is named by the `(id=…)` right
+ * after `@start…`, or, as the only diagram of the file, by `fileName`. A
+ * file with no `@start…` line is one diagram.
+ */
+export function findFileDiagrams(text: string, fileName: string): PlantUmlBlock[] {
+  const lines = text.split(/\r?\n/);
+  const found: { start: number; end: number; closed: boolean; id: string | null }[] = [];
+  let open: (typeof found)[number] | null = null;
+  let code = false;
+
+  forEachCodeLine(text, (line, index) => {
+    code ||= line.trim() !== '';
+    if (START.test(line)) {
+      // A second start before an end: the first diagram runs up to it.
+      if (open !== null) {
+        open.end = index - 1;
+      }
+      const id = DECLARED_ID.exec(line)?.[1] ?? null;
+      open = { start: index, end: lines.length - 1, closed: false, id };
+      found.push(open);
+    } else if (open !== null && END.test(line)) {
+      open.end = index;
+      open.closed = true;
+      open = null;
+    }
+  });
+  if (found.length === 0 && code) {
+    found.push({ start: 0, end: lines.length - 1, closed: false, id: null });
+  }
+
+  return found.map((diagram) => ({
+    name: diagram.id ?? (found.length === 1 ? fileName : null),
+    source: lines.slice(diagram.start, diagram.end + 1).join('\n'),
+    sourceLine: diagram.start,
+    openLine: diagram.start,
+    closeLine: diagram.end,
+    container: '',
+    closed: diagram.closed,
+  }));
 }

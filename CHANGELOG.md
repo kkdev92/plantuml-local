@@ -12,8 +12,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`.puml` files open as PlantUML.** Files ending in `.puml`, `.plantuml`,
   `.pu`, `.iuml` or `.wsd` get the language PlantUML and the same colouring
   as ```` ```plantuml ```` blocks, with `'` and `/' … '/` for the comment
-  commands. They are not rendered yet: diagrams are still previewed and
-  exported from Markdown.
+  commands. They have no preview yet.
+- **Export from `.puml` files.** *Export Diagram as SVG* and *Export All
+  Diagrams as SVG* work in a PlantUML file too, writing each of its diagrams
+  to a file of its own: the one under the cursor, or every named one. A
+  diagram is named by an id on its start line, `@startuml(id=orders-api)`,
+  and the only diagram of a file may go by the file's name instead.
 - **Problems panel.** The diagrams of open Markdown files are checked, with or
   without a preview, and their problems are listed on the line they are on:
   the engine's errors and warnings, what the bundled engine cannot do

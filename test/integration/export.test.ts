@@ -5,6 +5,7 @@ import { Worker } from 'node:worker_threads';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import type { RenderResponseMessage } from '../../src/core/types';
+import { findFileDiagrams, findPlantUmlBlocks } from '../../src/export/blocks';
 import { exportAll, type ExporterDeps } from '../../src/export/exporter';
 
 /**
@@ -120,7 +121,7 @@ describe('export (dist worker)', () => {
       '```',
     ].join('\n');
 
-    const outcome = await exportAll(deps, document, 'images', text);
+    const outcome = await exportAll(deps, document, 'images', findPlantUmlBlocks(text));
 
     expect(outcome?.failed).toHaveLength(0);
     expect(outcome?.written).toHaveLength(2);
@@ -148,7 +149,7 @@ describe('export (dist worker)', () => {
       '```',
     ].join('\n');
 
-    const outcome = await exportAll(deps, document, 'images', text);
+    const outcome = await exportAll(deps, document, 'images', findPlantUmlBlocks(text));
 
     expect(outcome?.written.map((r) => r.name)).toEqual(['orders-api']);
     const svg = readFileSync(join(workspace, 'docs/images/orders-api.svg'), 'utf8');
@@ -175,7 +176,7 @@ describe('export (dist worker)', () => {
       '```',
     ].join('\n');
 
-    const outcome = await exportAll(deps, document, 'images', text);
+    const outcome = await exportAll(deps, document, 'images', findPlantUmlBlocks(text));
 
     expect(outcome?.written.map((r) => r.name)).toEqual(['hidden']);
     const svg = readFileSync(join(workspace, 'docs/images/hidden.svg'), 'utf8');
@@ -199,7 +200,7 @@ describe('export (dist worker)', () => {
 
     for (const dark of [false, true]) {
       rmSync(join(workspace, 'docs/images/broken.svg'), { force: true });
-      const outcome = await exportAll({ ...deps, isDark: () => dark }, document, 'images', text);
+      const outcome = await exportAll({ ...deps, isDark: () => dark }, document, 'images', findPlantUmlBlocks(text));
 
       expect(outcome?.written, `dark=${String(dark)}`).toHaveLength(0);
       expect(outcome?.failed.map((r) => r.name)).toEqual(['broken']);
@@ -212,7 +213,7 @@ describe('export (dist worker)', () => {
     const document = join(workspace, 'docs/remote.md');
     const text = '```plantuml remote\n@startuml\n!include https://evil.example/x.puml\n@enduml\n```';
 
-    const outcome = await exportAll(deps, document, 'images', text);
+    const outcome = await exportAll(deps, document, 'images', findPlantUmlBlocks(text));
 
     // The preview refuses these before the engine sees them; export has to
     // agree, or the block that shows an explanation on screen would write
@@ -224,7 +225,7 @@ describe('export (dist worker)', () => {
 
   it('writes a diagram missing its end line, which the engine alone fails on', async () => {
     const document = join(workspace, 'docs/open.md');
-    const outcome = await exportAll(deps, document, 'images', '```plantuml open\n@startuml\nAlice -> Bob : unterminated\n```');
+    const outcome = await exportAll(deps, document, 'images', findPlantUmlBlocks('```plantuml open\n@startuml\nAlice -> Bob : unterminated\n```'));
 
     expect(outcome?.failed).toHaveLength(0);
     expect(readFileSync(join(workspace, 'docs/images/open.svg'), 'utf8')).toContain('unterminated');
@@ -251,11 +252,35 @@ describe('export (dist worker)', () => {
       '```',
     ].join('\n');
 
-    const outcome = await exportAll(deps, document, 'images', text);
+    const outcome = await exportAll(deps, document, 'images', findPlantUmlBlocks(text));
 
     expect(outcome?.written).toHaveLength(0);
     expect(outcome?.failed.map((r) => r.name)).toEqual(['two', 'paged']);
     expect(existsSync(join(workspace, 'docs/images/two.svg'))).toBe(false);
     expect(existsSync(join(workspace, 'docs/images/paged.svg'))).toBe(false);
+  });
+
+  it('writes each diagram of a PlantUML file to a file of its own', async () => {
+    const document = join(workspace, 'docs/flows.puml');
+    const text = [
+      '@startuml(id=orders)',
+      'Alice -> Bob : first diagram',
+      '@enduml',
+      '',
+      '@startuml(id=billing)',
+      'Carol -> Dave : second diagram',
+      '@enduml',
+    ].join('\n');
+
+    const outcome = await exportAll(deps, document, 'images', findFileDiagrams(text, 'flows'));
+
+    expect(outcome?.failed).toHaveLength(0);
+    // Given the whole file, the engine would draw the first diagram twice.
+    const orders = readFileSync(join(workspace, 'docs/images/orders.svg'), 'utf8');
+    const billing = readFileSync(join(workspace, 'docs/images/billing.svg'), 'utf8');
+    expect(orders).toContain('first diagram');
+    expect(orders).not.toContain('second diagram');
+    expect(billing).toContain('second diagram');
+    expect(billing).not.toContain('first diagram');
   });
 });

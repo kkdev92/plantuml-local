@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { blockAtLine, findPlantUmlBlocks, isValidBlockName } from '../../src/export/blocks';
+import { blockAtLine, findFileDiagrams, findPlantUmlBlocks, isValidBlockName } from '../../src/export/blocks';
 
 const md = (...lines: string[]): string => lines.join('\n');
 
@@ -223,5 +223,86 @@ describe('isValidBlockName', () => {
     for (const name of ['console', 'nullable', 'com10', 'aux-service']) {
       expect(isValidBlockName(name), name).toBe(true);
     }
+  });
+});
+
+describe('findFileDiagrams', () => {
+  it('takes a file with one diagram as one block, named after the file', () => {
+    const diagrams = findFileDiagrams(md("' a comment", '@startuml', 'A -> B', '@enduml', ''), 'orders');
+
+    expect(diagrams).toEqual([
+      {
+        name: 'orders',
+        source: '@startuml\nA -> B\n@enduml',
+        sourceLine: 1,
+        openLine: 1,
+        closeLine: 3,
+        container: '',
+        closed: true,
+      },
+    ]);
+  });
+
+  it('names each diagram of a longer file by its id, and leaves the rest unnamed', () => {
+    const diagrams = findFileDiagrams(
+      md(
+        '@startuml(id=orders)',
+        'A -> B',
+        '@enduml',
+        'text between diagrams is not read',
+        '@startuml',
+        'C -> D',
+        '@enduml',
+        '@startmindmap(id=map)',
+        '* root',
+        '@endmindmap'
+      ),
+      'flows'
+    );
+
+    expect(diagrams.map((d) => [d.name, d.openLine, d.closeLine])).toEqual([
+      ['orders', 0, 2],
+      [null, 4, 6],
+      ['map', 7, 9],
+    ]);
+    expect(diagrams[2]?.source).toBe('@startmindmap(id=map)\n* root\n@endmindmap');
+  });
+
+  it('reads an id only right after the start, and keeps one that cannot be a file name', () => {
+    const diagrams = findFileDiagrams(
+      md('@startuml (id=spaced)', '@enduml', '@startuml(id=a b)', '@enduml'),
+      'flows'
+    );
+
+    // The exporter refuses the second rather than finding it unnamed.
+    expect(diagrams.map((d) => d.name)).toEqual([null, 'a b']);
+  });
+
+  it('skips start lines in comments, as the engine does', () => {
+    const diagrams = findFileDiagrams(
+      md("' @startuml(id=commented)", "/'", '@startuml(id=hidden)', "'/", '@startuml', 'A -> B', '@enduml'),
+      'flows'
+    );
+
+    expect(diagrams.map((d) => [d.name, d.openLine])).toEqual([['flows', 4]]);
+  });
+
+  it('runs a diagram without an end line up to the next start, or the end of the file', () => {
+    const diagrams = findFileDiagrams(
+      md('@startuml(id=one)', 'A -> B', '@startuml(id=two)', 'C -> D'),
+      'flows'
+    );
+
+    expect(diagrams.map((d) => [d.name, d.openLine, d.closeLine, d.closed])).toEqual([
+      ['one', 0, 1, false],
+      ['two', 2, 3, false],
+    ]);
+  });
+
+  it('takes a file without a start line as one diagram, and an empty one as none', () => {
+    expect(findFileDiagrams(md('Alice -> Bob', ''), 'loose').map((d) => [d.name, d.source])).toEqual([
+      ['loose', 'Alice -> Bob\n'],
+    ]);
+    expect(findFileDiagrams(md('', "' only a comment", ''), 'empty')).toEqual([]);
   });
 });
