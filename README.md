@@ -211,13 +211,15 @@ reference whose target is `images/orders-api.svg#plantuml-local`.
 
 | Command | What it does |
 | --- | --- |
-| `PlantUML Local: Export Diagram as SVG` | Writes the block under the cursor |
+| `PlantUML Local: Export Diagram as SVG` | Writes the block under the cursor, or the only block in the file |
 | `PlantUML Local: Export All Diagrams as SVG` | Writes every **named** block in the file |
 | `PlantUML Local: Export All Diagrams and Update References` | The above, then inserts or updates the image line after each block |
 
 All three are also in the editor's right-click menu: the single export appears
 with the cursor inside a block, the other two whenever the file contains a
-diagram — so the menu of an ordinary Markdown file stays untouched.
+diagram — so the menu of an ordinary Markdown file stays untouched. Run from
+the command palette while the preview has focus, they use the only open
+Markdown document, or ask which one when several are open.
 
 The word after the language — `orders-api` above — names the output file. It is
 what ties a block to its SVG across edits, which a position could not: inserting

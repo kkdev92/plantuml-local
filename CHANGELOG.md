@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The export commands no longer guess the document when no Markdown editor
+  has focus.** With the preview focused there is no active text editor, and
+  the commands took the first visible Markdown editor instead — which could be
+  a different file from the one being previewed. They now use the only open
+  Markdown document, or ask which one when several are open. *Export Diagram
+  as SVG* also takes the only block of a document without needing the cursor
+  inside it.
+
 ## [0.11.1] - 2026-09-30
 
 ### Security

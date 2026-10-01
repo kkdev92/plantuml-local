@@ -173,31 +173,59 @@ function isDark(theme: 'auto' | 'light' | 'dark'): boolean {
   return kind === vscode.ColorThemeKind.Dark || kind === vscode.ColorThemeKind.HighContrast;
 }
 
-/** The active Markdown document's text, path and cursor line. */
+/** The Markdown document to export from: its text, path and cursor line. */
 interface ActiveMarkdown {
   text: string;
   path: string;
-  line: number;
+  /** The cursor line in the document's editor, or null when none is visible. */
+  line: number | null;
   /** Kept for the reference updater, which edits the buffer. */
-  editor: vscode.TextEditor;
+  textDocument: vscode.TextDocument;
 }
 
 /**
- * The Markdown editor to export from.
+ * The Markdown document to export from, or null when there is none or
+ * the user declined to choose one.
  *
- * Not simply `activeTextEditor`: the obvious moment to export is while
- * looking at the preview, and a focused webview means there is no active
- * text editor at all. Falling back to a visible one makes the command
- * work from either pane.
+ * The active editor's document when that is Markdown. Otherwise — the
+ * obvious moment to export is while looking at the preview, and a
+ * focused webview leaves no active text editor at all — the previewed
+ * document cannot be read from the API, so the choice is put to the user
+ * rather than guessed from whichever Markdown editor happens to be
+ * visible: that one may well be another document. A single open Markdown
+ * document is taken without asking.
  */
-function markdownEditor(): vscode.TextEditor | undefined {
+async function chooseMarkdownDocument(
+  context: OperationContext
+): Promise<vscode.TextDocument | null> {
   const active = vscode.window.activeTextEditor;
   if (active?.document.languageId === 'markdown') {
-    return active;
+    return active.document;
   }
-  return vscode.window.visibleTextEditors.find(
-    (editor) => editor.document.languageId === 'markdown'
+
+  const open = vscode.workspace.textDocuments.filter(
+    (document) => document.languageId === 'markdown'
   );
+  if (open.length === 0) {
+    void context.notify.warn(context.l10n.t('Open a Markdown file first.'));
+    return null;
+  }
+  if (open.length === 1) {
+    return open[0] ?? null;
+  }
+
+  // Visible documents first: the previewed one is usually among them.
+  const visible = new Set(
+    vscode.window.visibleTextEditors.map((editor) => editor.document.uri.toString())
+  );
+  const items = [
+    ...open.filter((document) => visible.has(document.uri.toString())),
+    ...open.filter((document) => !visible.has(document.uri.toString())),
+  ].map((document) => ({ label: vscode.workspace.asRelativePath(document.uri), document }));
+  const picked = await context.ask.one(items, {
+    title: context.l10n.t('Choose the Markdown document to export from'),
+  });
+  return picked?.document ?? null;
 }
 
 /**
@@ -208,7 +236,7 @@ function markdownEditor(): vscode.TextEditor | undefined {
  * needs the document's own URI to resolve a relative directory against,
  * and the cursor's line number rather than its text.
  */
-function activeMarkdown(context: OperationContext): ActiveMarkdown | null {
+async function activeMarkdown(context: OperationContext): Promise<ActiveMarkdown | null> {
   // Writing files is the one thing this extension promises not to do in
   // an untrusted workspace. Checked here rather than through a command
   // `enablement` clause: that only hides the command, leaving someone who
@@ -220,21 +248,23 @@ function activeMarkdown(context: OperationContext): ActiveMarkdown | null {
     return null;
   }
 
-  const editor = markdownEditor();
-  if (editor === undefined) {
-    void context.notify.warn(context.l10n.t('Open a Markdown file first.'));
+  const document = await chooseMarkdownDocument(context);
+  if (document === null) {
     return null;
   }
-  if (editor.document.isUntitled) {
+  if (document.isUntitled) {
     // There is no folder to write beside.
     void context.notify.warn(context.l10n.t('Save the Markdown file before exporting.'));
     return null;
   }
+  const editor = vscode.window.visibleTextEditors.find(
+    (candidate) => candidate.document.uri.toString() === document.uri.toString()
+  );
   return {
-    text: editor.document.getText(),
-    path: editor.document.uri.toString(),
-    line: editor.selection.active.line,
-    editor,
+    text: document.getText(),
+    path: document.uri.toString(),
+    line: editor?.selection.active.line ?? null,
+    textDocument: document,
   };
 }
 
@@ -521,13 +551,16 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
       _args,
       { renderer, palettes, settings }
     ): Promise<void> => {
-      const document = activeMarkdown(context);
+      const document = await activeMarkdown(context);
       if (document === null) {
         return;
       }
 
       const blocks = findPlantUmlBlocks(document.text);
-      const block = blockAtLine(blocks, document.line);
+      // The block under the cursor, or the only block when there is nothing
+      // to choose between — a document picked from a list has no cursor.
+      const atCursor = document.line === null ? null : blockAtLine(blocks, document.line);
+      const block = atCursor ?? (blocks.length === 1 ? (blocks[0] ?? null) : null);
       if (block === null) {
         await context.notify.warn(
           context.l10n.t('Put the cursor inside a ```plantuml block first.')
@@ -575,7 +608,7 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
       _args,
       { renderer, palettes, settings }
     ): Promise<void> => {
-      const document = activeMarkdown(context);
+      const document = await activeMarkdown(context);
       if (document === null) {
         return;
       }
@@ -597,7 +630,7 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
       _args,
       { renderer, palettes, settings }
     ): Promise<void> => {
-      const document = activeMarkdown(context);
+      const document = await activeMarkdown(context);
       if (document === null) {
         return;
       }
@@ -615,7 +648,7 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
       // Only successfully exported names get one — a failed block must
       // not gain a link to a file that is stale or absent.
       const exported = new Set(outcome.written.map((result) => result.name));
-      const edits = planReferenceEdits(document.editor.document.getText(), exported, directory);
+      const edits = planReferenceEdits(document.textDocument.getText(), exported, directory);
 
       const extra: string[] = [];
       let applyFailed = false;
@@ -624,7 +657,7 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         if (outcome.written.length > 0) {
           extra.push(context.l10n.t('References are up to date'));
         }
-      } else if (await applyReferenceEdits(document.editor.document, edits)) {
+      } else if (await applyReferenceEdits(document.textDocument, edits)) {
         const inserted = edits.filter((edit) => edit.kind === 'insert-after').length;
         const updated = edits.length - inserted;
         if (inserted > 0) {
