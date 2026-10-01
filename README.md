@@ -39,7 +39,7 @@ Your diagram source is processed locally and is not sent to a rendering service.
 ## Features
 
 - **Built-in Preview**: Diagrams appear in the same Markdown preview you already use
-- **Syntax Highlighting**: ```` ```plantuml ```` blocks are coloured in the editor, following the syntax the bundled engine accepts
+- **Syntax Highlighting**: ```` ```plantuml ```` blocks and `.puml` files are coloured in the editor, following the syntax the bundled engine accepts
 - **Offline Rendering**: No Java, no PlantUML server, no network connection required — nothing to install besides the extension
 - **Fault-Tolerant**: A syntax error shows up inline at the broken diagram; the rest of the page stays intact
 - **Multi-Diagram Pages**: Any number of diagrams per page; renders are serialised so results never mix
@@ -153,6 +153,11 @@ diagram type that engine renders:
 Tokens carry the usual TextMate scope names with a `.plantuml` suffix
 (`keyword.other.plantuml`, `entity.name.type.plantuml`, …), so any colour
 theme applies, and `editor.tokenColorCustomizations` can adjust them.
+
+Files ending in `.puml`, `.plantuml`, `.pu`, `.iuml` or `.wsd` open as the
+language PlantUML, with the same colouring. *Toggle Line Comment* uses `'` and
+*Toggle Block Comment* uses `/' … '/`. Diagrams are previewed and exported from
+Markdown only; a `.puml` file is not rendered yet.
 
 ### Icons and sprites
 
@@ -295,6 +300,10 @@ and would show the referenced image as a second copy.
   into, so it colours the syntax of all of them: a line the engine rejects in
   one diagram type can still be coloured. Nor can it tell which names
   `!procedure` and `!function` define: a call written without `$` stays plain
+- Other PlantUML extensions register the same language for the same file
+  extensions. With one of them installed too, which grammar colours a `.puml`
+  file depends on the order VS Code loads the extensions; disable one of them
+  to choose
 
 ---
 

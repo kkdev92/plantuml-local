@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`.puml` files open as PlantUML.** Files ending in `.puml`, `.plantuml`,
+  `.pu`, `.iuml` or `.wsd` get the language PlantUML and the same colouring
+  as ```` ```plantuml ```` blocks, with `'` and `/' … '/` for the comment
+  commands. They are not rendered yet: diagrams are still previewed and
+  exported from Markdown.
+
 ### Fixed
 
 - **The export commands no longer guess the document when no Markdown editor

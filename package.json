@@ -58,10 +58,32 @@
     "markdown.previewStyles": [
       "./media/plantuml.css"
     ],
+    "languages": [
+      {
+        "id": "plantuml",
+        "aliases": [
+          "PlantUML",
+          "plantuml"
+        ],
+        "extensions": [
+          ".puml",
+          ".plantuml",
+          ".pu",
+          ".iuml",
+          ".wsd"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
     "grammars": [
       {
+        "language": "plantuml",
         "scopeName": "source.plantuml-local",
-        "path": "./dist/syntaxes/plantuml.tmLanguage.json"
+        "path": "./dist/syntaxes/plantuml.tmLanguage.json",
+        "embeddedLanguages": {
+          "meta.embedded.block.json": "json",
+          "meta.embedded.block.yaml": "yaml"
+        }
       },
       {
         "scopeName": "markdown.plantuml-local.codeblock",

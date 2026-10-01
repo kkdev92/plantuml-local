@@ -42,6 +42,7 @@ const REQUIRED = [
   'extension/dist/engine/themes.cjs',
   'extension/dist/engine/openiconic.cjs',
   'extension/dist/engine/package.json',
+  'extension/language-configuration.json',
   'extension/dist/syntaxes/plantuml.tmLanguage.json',
   'extension/dist/syntaxes/markdown-plantuml.tmLanguage.json',
   'extension/dist/syntaxes/markdown-plantuml-fallback.tmLanguage.json',
