@@ -171,7 +171,9 @@ the cursor. The panel stays with that file while the focus moves elsewhere,
 lists the file's diagrams when it holds several, and draws the diagram again as
 the file changes. Running the command again in the same file brings its panel
 back rather than opening another. *Open Diagram Preview* does the same in the
-editor's own group (or hold Alt on the button).
+editor's own group (or hold Alt on the button). A panel left open comes back
+when VS Code restarts, on the same diagram when that diagram has a name, and
+otherwise asking which one to show.
 
 The panel shows the SVG as an image, so nothing in it can run, and loads
 nothing but its own script and stylesheet.

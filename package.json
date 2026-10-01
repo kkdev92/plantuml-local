@@ -45,7 +45,8 @@
   "l10n": "./l10n",
   "activationEvents": [
     "onLanguage:markdown",
-    "onLanguage:plantuml"
+    "onLanguage:plantuml",
+    "onWebviewPanel:plantumlLocal.viewer"
   ],
   "capabilities": {
     "untrustedWorkspaces": {

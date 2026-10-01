@@ -1,8 +1,9 @@
 // The diagram viewer's page (src/viewer/viewer.ts is the extension side).
 // The SVG arrives as text and is shown through an <img> holding a Blob URL:
-// as an image, nothing in it can run. The page keeps no state of its own;
-// it asks for everything again whenever it is created, as it is each time
-// the panel comes back into view.
+// as an image, nothing in it can run. The page asks for everything again
+// whenever it is created, as it is each time the panel comes back into
+// view. All it keeps is which file and diagram it shows, which VS Code
+// hands back to bring the panel back after a restart.
 (function () {
   const vscode = acquireVsCodeApi();
   const select = document.getElementById('diagrams');
@@ -32,7 +33,8 @@
         })
       );
       select.value = String(message.selected);
-      select.hidden = message.items.length < 2;
+      select.hidden = message.items.length < 2 && message.selected === 0;
+      vscode.setState(message.keep);
     } else if (message.type === 'render') {
       const url = URL.createObjectURL(new Blob([message.svg], { type: 'image/svg+xml' }));
       image.src = url;

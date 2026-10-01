@@ -1239,8 +1239,12 @@ describe('viewer (dist)', () => {
     const panel = vscodeStub._test.webviewPanels[before];
     expect(panel).toMatchObject({ viewType: 'plantumlLocal.viewer', title: 'Preview flows.puml' });
     expect(panel?.column).toBe(vscodeStub.ViewColumn.Beside);
-    expect(panel?.options).toMatchObject({ enableScripts: true, enableForms: false });
-    expect(panel?.options.localResourceRoots?.map(String)).toEqual(['file:///ext/media/viewer']);
+    expect(panel?.webview.options).toMatchObject({ enableScripts: true, enableForms: false });
+    // The extension's own media/viewer, and nothing else.
+    expect(panel?.webview.options.localResourceRoots?.map(String)).toEqual([
+      expect.stringMatching(/^file:\/\/\/.*\/media\/viewer$/),
+    ]);
+    expect(String(panel?.webview.options.localResourceRoots?.[0])).not.toContain('/dist');
     // Scripts run only with the page's nonce, and the drawing comes in as a
     // Blob URL image.
     // The attribute is HTML-escaped, as an attribute value has to be.
@@ -1250,7 +1254,7 @@ describe('viewer (dist)', () => {
     expect(csp).toMatch(/default-src 'none'/);
     expect(csp).toMatch(/script-src 'nonce-[^' ]+'(;|$)/);
     expect(csp).toMatch(/img-src [^;]*blob:/);
-    expect(panel?.webview.html).toContain('/ext/media/viewer/viewer.js');
+    expect(panel?.webview.html).toContain('/media/viewer/viewer.js');
     // Nothing is sent before the page says it runs.
     expect(panel?.webview.posted).toEqual([]);
 
@@ -1260,6 +1264,8 @@ describe('viewer (dist)', () => {
       type: 'diagrams',
       items: ['orders (line 1)', 'Diagram 2 (line 5)'],
       selected: 1,
+      // The second diagram has no name: a restart could not tell which it was.
+      keep: { uri: 'file:///c/view/flows.puml', name: null },
     });
     expect(posted(panel!, 'render')[0]?.svg).toContain('second');
   });
@@ -1303,5 +1309,78 @@ describe('viewer (dist)', () => {
 
     expect(vscodeStub._test.webviewPanels).toHaveLength(panels);
     expect(vscodeStub._test.notifications.warn.at(-1)).toBe('Open a PlantUML file first.');
+  });
+
+  describe('after a restart', () => {
+    const restore = async (state: unknown, title = 'Preview kept.puml'): Promise<WebviewPanelStub> => {
+      const panel = vscodeStub._test.restoredPanel('plantumlLocal.viewer', title);
+      await vscodeStub._test.webviewSerializers.get('plantumlLocal.viewer')?.deserializeWebviewPanel(panel, state);
+      return panel;
+    };
+    const kept = makeEditor('file:///c/view/kept.puml', FLOWS, 0, { languageId: 'plantuml' }).document;
+
+    it('brings a panel back on the diagram it showed, with options of this version', async () => {
+      vscodeStub._test.openDocument(kept);
+      let panel: WebviewPanelStub | undefined;
+      try {
+        panel = await restore({ uri: 'file:///c/view/kept.puml', name: 'orders' });
+
+        // A restored panel keeps the options of the session that saved it.
+        expect(panel.webview.options).toMatchObject({ enableScripts: true, enableForms: false });
+        expect(panel.webview.options.localResourceRoots?.map(String)).toEqual([
+          expect.stringMatching(/\/media\/viewer$/),
+        ]);
+        expect(panel.webview.html).toContain('/media/viewer/viewer.js');
+
+        const shown = panel;
+        shown.receive({ type: 'ready' });
+        await waitFor(() => posted(shown, 'render').length > 0);
+        expect(posted(shown, 'render')[0]?.svg).toContain('orders');
+        // What the page is given to keep for the next restart.
+        expect(posted(shown, 'diagrams')[0]).toMatchObject({
+          keep: { uri: 'file:///c/view/kept.puml', name: 'orders' },
+        });
+      } finally {
+        panel?.dispose();
+        vscodeStub._test.closeDocument(kept);
+      }
+    });
+
+    it('asks for a choice rather than guessing a diagram that had no name', async () => {
+      vscodeStub._test.openDocument(kept);
+      let panel: WebviewPanelStub | undefined;
+      try {
+        panel = await restore({ uri: 'file:///c/view/kept.puml', name: null });
+        const shown = panel;
+        shown.receive({ type: 'ready' });
+
+        await waitFor(() => shown.webview.posted.length >= 2);
+        expect(posted(shown, 'render')).toEqual([]);
+        expect(shown.webview.posted.at(-1)).toEqual({
+          type: 'status',
+          text: 'Choose a diagram in the list.',
+          error: false,
+          clear: true,
+        });
+      } finally {
+        panel?.dispose();
+        vscodeStub._test.closeDocument(kept);
+      }
+    });
+
+    it('closes a panel whose file is gone, or whose state cannot be read', async () => {
+      for (const state of [{ uri: 'file:///c/view/missing.puml', name: 'x' }, { uri: 42 }, null, 'kept.puml']) {
+        const panel = vscodeStub._test.restoredPanel('plantumlLocal.viewer', 'Preview gone.puml');
+        let disposed = false;
+        panel.onDidDispose(() => {
+          disposed = true;
+        });
+
+        await vscodeStub._test.webviewSerializers.get('plantumlLocal.viewer')?.deserializeWebviewPanel(panel, state);
+
+        expect(disposed, JSON.stringify(state)).toBe(true);
+        expect(panel.webview.html).toBe('');
+      }
+    });
   });
 });

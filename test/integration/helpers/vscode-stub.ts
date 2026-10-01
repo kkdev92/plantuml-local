@@ -159,6 +159,8 @@ export interface WebviewPanelStub {
   revealed: number;
   webview: {
     html: string;
+    /** As set after creation, which a restored panel needs. */
+    options: WebviewPanelStub['options'];
     readonly cspSource: string;
     /** Every message posted to the page, in order. */
     posted: unknown[];
@@ -248,6 +250,10 @@ export interface VscodeStub {
       column: unknown,
       options?: WebviewPanelStub['options']
     ) => WebviewPanelStub;
+    registerWebviewPanelSerializer: (
+      viewType: string,
+      serializer: { deserializeWebviewPanel(panel: WebviewPanelStub, state: unknown): Promise<void> }
+    ) => { dispose(): void };
     /** A modal one answers with `_test.messageReply`; the others are dismissed. */
     showInformationMessage: (...args: unknown[]) => Promise<unknown>;
     showWarningMessage: (...args: unknown[]) => Promise<unknown>;
@@ -296,6 +302,8 @@ export interface VscodeStub {
     workspaceFolders: unknown[] | undefined;
     /** `_test.openDocuments`, which is empty unless a test fills it. */
     textDocuments: TextEditorStub['document'][];
+    /** One of `_test.openDocuments`, or a FileNotFound error. */
+    openTextDocument: (uri: { toString(): string }) => Promise<TextEditorStub['document']>;
     asRelativePath: (uri: { toString(): string }) => string;
     /**
      * Backed by `_test.writtenFiles`. A path with files below it is a folder,
@@ -356,6 +364,10 @@ export interface VscodeStub {
     completionProviders: CompletionRegistrationStub[];
     /** Webview panels created, in order. */
     webviewPanels: WebviewPanelStub[];
+    /** Panel serializers registered, by view type. */
+    webviewSerializers: Map<string, { deserializeWebviewPanel(panel: WebviewPanelStub, state: unknown): Promise<void> }>;
+    /** A panel as VS Code hands one back after a restart, before anything set it up. */
+    restoredPanel(viewType: string, title: string): WebviewPanelStub;
     /**
      * What the next input box answers with: a string accepts, `null`
      * dismisses. Defaults to dismissal, so a test that did not expect a
@@ -538,6 +550,10 @@ export function createVscodeStub(): VscodeStub {
   const completionProviders: CompletionRegistrationStub[] = [];
 
   const webviewPanels: WebviewPanelStub[] = [];
+  const webviewSerializers = new Map<
+    string,
+    { deserializeWebviewPanel(panel: WebviewPanelStub, state: unknown): Promise<void> }
+  >();
   function createWebviewPanel(
     viewType: string,
     title: string,
@@ -555,6 +571,7 @@ export function createVscodeStub(): VscodeStub {
       revealed: 0,
       webview: {
         html: '',
+        options,
         cspSource: 'https://*.vscode-cdn.net',
         posted: [],
         asWebviewUri: (uri) => ({ toString: () => `https://file+.vscode-resource.vscode-cdn.net${String(uri).replace(/^file:\/\//, '')}` }),
@@ -650,7 +667,8 @@ export function createVscodeStub(): VscodeStub {
     Uri: {
       parse: makeUri,
       joinPath: (base, ...parts) => joinUri(base, parts),
-      file: (path: string) => makeUri(`file://${path}`),
+      // As VS Code builds one: forward slashes, and a leading slash before a drive.
+      file: (path: string) => makeUri(`file://${path.replace(/\\/g, '/').replace(/^(?!\/)/, '/')}`),
     },
     env: { uiKind: 1, language: 'en' },
     window: {
@@ -676,6 +694,10 @@ export function createVscodeStub(): VscodeStub {
         dispose: () => undefined,
       }),
       createWebviewPanel,
+      registerWebviewPanelSerializer: (viewType, serializer) => {
+        webviewSerializers.set(viewType, serializer);
+        return { dispose: () => webviewSerializers.delete(viewType) };
+      },
       showInformationMessage: async (...args) => {
         notifications.info.push(String(args[0]));
         return answer(args);
@@ -827,6 +849,13 @@ export function createVscodeStub(): VscodeStub {
       get textDocuments() {
         return [...hooks.openDocuments];
       },
+      openTextDocument: async (uri) => {
+        const document = hooks.openDocuments.find((candidate) => candidate.uri.toString() === uri.toString());
+        if (document === undefined) {
+          throw new FileSystemError(`${uri.toString()} not found`, 'FileNotFound');
+        }
+        return document;
+      },
       // Enough of the real rule for labels: the workspace is taken to be /c.
       asRelativePath: (uri) => uri.toString().replace(/^file:\/\/\/c\//, ''),
       fs: {
@@ -940,6 +969,9 @@ export function createVscodeStub(): VscodeStub {
       fileWrites,
       completionProviders,
       webviewPanels,
+      webviewSerializers,
+      // Restored panels come with whatever options were saved: none here.
+      restoredPanel: (viewType, title) => createWebviewPanel(viewType, title, 1, {}),
       openDocuments: hooks.openDocuments,
       visibleEditors: hooks.visibleEditors,
       setConfiguration: (key, value, folder) => {

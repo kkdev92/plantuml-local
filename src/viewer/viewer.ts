@@ -32,6 +32,8 @@ export interface ViewerLabels {
   rendering: string;
   /** The diagram shown is no longer in the file. */
   gone: string;
+  /** No diagram is chosen yet: one is to be picked from the list. */
+  choose: string;
   /** The file holds no diagram. */
   empty: string;
   remoteReference: string;
@@ -82,8 +84,19 @@ export class DiagramViewer {
     private readonly panel: ViewerPanel,
     private readonly deps: ViewerDeps,
     /** The file's name without its extension, which names a lone diagram. */
-    private readonly fileName: string
+    private readonly fileName: string,
+    /** The file's URI, which the page keeps so the panel can come back after a restart. */
+    private readonly uri: string
   ) {}
+
+  /**
+   * Makes the diagram named `name` the one shown, for a panel brought back
+   * after a restart. Without a name there is nothing to go by — the
+   * diagram had none — so the page asks for a choice rather than guessing.
+   */
+  restore(name: string | null): void {
+    this.target = { name, index: name === null ? -1 : 0 };
+  }
 
   /**
    * Makes the diagram of `text` at `line` (the cursor) the one shown, or
@@ -130,11 +143,15 @@ export class DiagramViewer {
       items: diagrams.map((candidate, position) =>
         labels.entry(candidate.name ?? labels.diagram(position + 1), candidate.openLine + 1)
       ),
-      selected: Math.max(index, 0),
+      selected: diagram === undefined ? -1 : index,
+      keep: { uri: this.uri, name: diagram?.name ?? this.target.name },
     });
     if (diagram === undefined) {
-      // Not another diagram in its place: the one asked for has gone.
-      await this.status(diagrams.length === 0 ? labels.empty : labels.gone, true, true);
+      // Not another diagram in its place: the one asked for has gone, or
+      // none was chosen yet.
+      const unchosen = this.target.name === null && this.target.index === -1;
+      const reason = diagrams.length === 0 ? labels.empty : unchosen ? labels.choose : labels.gone;
+      await this.status(reason, !unchosen, true);
       return;
     }
     this.target = { name: diagram.name, index };

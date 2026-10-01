@@ -53,6 +53,7 @@
   "Diagram {0}": "図 {0}",
   "{0} (line {1})": "{0} ({1} 行目)",
   "The diagram shown is no longer in the file. Choose another.": "表示していた図はファイルにありません。別の図を選んでください。",
+  "Choose a diagram in the list.": "一覧から図を選んでください。",
   "The file holds no diagram.": "このファイルには図がありません。",
   "Pages after newpage cannot be drawn, so only the first page would be. Give each page a diagram of its own.": "newpage 以降のページは描けないため、最初のページしか描かれません。ページごとに図を分けてください。",
   "Open a PlantUML file first.": "先に PlantUML ファイルを開いてください。"

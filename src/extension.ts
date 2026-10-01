@@ -1,7 +1,6 @@
 import {
   Localization,
   Log,
-  Webviews,
   createWebviewHtml,
   debounce,
   defineCommandContract,
@@ -175,6 +174,8 @@ const Plugin: ServiceToken<PlantUmlPlugin> = serviceToken<PlantUmlPlugin>('plant
 interface ViewerSet {
   /** Shows the diagram at `line` of `document`, reusing the file's viewer if it has one. */
   open(document: vscode.TextDocument, line: number | null, column: number): void;
+  /** Takes over a panel VS Code brought back after a restart, with what its page kept. */
+  restore(panel: vscode.WebviewPanel, state: unknown): Promise<void>;
   /** Draws again what a viewer of `document` shows, after the file changed. */
   update(document: vscode.TextDocument): void;
   /** Draws every viewer again, after the palette changed. */
@@ -758,13 +759,12 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
 
   module.services.singleton(Viewers, {
     inject: {
-      webviews: Webviews,
       renders: Renders,
       palettes: Palettes,
       l10n: Localization,
       settings: Settings.token,
     },
-    create: ({ webviews, renders, palettes, l10n, settings }): ViewerSet => {
+    create: ({ renders, palettes, l10n, settings }): ViewerSet => {
       const deps: ViewerDeps = {
         render: renders,
         resolvePalette: (source, dark) => palettes.resolve(source, dark),
@@ -774,6 +774,7 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
           entry: (name, line) => l10n.t('{0} (line {1})', name, String(line)),
           rendering: l10n.t('Rendering diagram…'),
           gone: l10n.t('The diagram shown is no longer in the file. Choose another.'),
+          choose: l10n.t('Choose a diagram in the list.'),
           empty: l10n.t('The file holds no diagram.'),
           remoteReference: l10n.t(
             'URL-based external references (!include, !theme) are not supported.'
@@ -791,55 +792,86 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         },
       };
       const open = new Map<string, { viewer: DiagramViewer; document: vscode.TextDocument; reveal(): void }>();
+      const media = vscode.Uri.joinPath(vscode.Uri.file(__dirname), '..', 'media', 'viewer');
+
+      /** Takes over `panel` for `document`: its options, its page and its messages. */
+      const attach = (panel: vscode.WebviewPanel, document: vscode.TextDocument): DiagramViewer => {
+        const key = document.uri.toString();
+        const name = fileNameOf(document);
+        // Set on a restored panel too: it comes back with the options of the
+        // session that saved it, naming the folder that version was installed in.
+        panel.webview.options = { enableScripts: true, enableForms: false, localResourceRoots: [media] };
+        const nonce = generateNonce();
+        panel.webview.html = createWebviewHtml({
+          title: name,
+          // Blob URLs are how the page shows the SVG, as an image.
+          csp: generateCSP(panel.webview, { nonce, imgSrc: ['blob:'] }),
+          styles: [panel.webview.asWebviewUri(vscode.Uri.joinPath(media, 'viewer.css')).toString()],
+          scripts: [panel.webview.asWebviewUri(vscode.Uri.joinPath(media, 'viewer.js')).toString()],
+          nonce,
+          body: VIEWER_BODY,
+        });
+        const viewer = new DiagramViewer(
+          { post: (message): Promise<boolean> => Promise.resolve(panel.webview.postMessage(message)) },
+          deps,
+          withoutExtension(name),
+          key
+        );
+        const entry = {
+          viewer,
+          document,
+          reveal: (): void => {
+            panel.reveal();
+          },
+        };
+        open.set(key, entry);
+        panel.webview.onDidReceiveMessage((message: unknown) => {
+          void viewer.receive(message, entry.document.getText());
+        });
+        panel.onDidDispose(() => {
+          open.delete(key);
+        });
+        return viewer;
+      };
 
       return {
         open: (document, line, column): void => {
-          const key = document.uri.toString();
-          const existing = open.get(key);
+          const existing = open.get(document.uri.toString());
           if (existing !== undefined) {
             existing.document = document;
             existing.reveal();
             void existing.viewer.show(document.getText(), line);
             return;
           }
-
-          const name = fileNameOf(document);
-          const panel = webviews.openPanel({
-            viewType: VIEWER_TYPE,
-            title: l10n.t('Preview {0}', name),
-            column,
-            enableScripts: true,
-            enableForms: false,
-            localResourceRoots: ['media/viewer'],
-          });
-          const nonce = generateNonce();
-          panel.setHtml(
-            createWebviewHtml({
-              title: name,
-              // Blob URLs are how the page shows the SVG, as an image.
-              csp: generateCSP(panel, { nonce, imgSrc: ['blob:'] }),
-              styles: [panel.asWebviewUri('media/viewer/viewer.css')],
-              scripts: [panel.asWebviewUri('media/viewer/viewer.js')],
-              nonce,
-              body: VIEWER_BODY,
-            })
+          const panel = vscode.window.createWebviewPanel(
+            VIEWER_TYPE,
+            l10n.t('Preview {0}', fileNameOf(document)),
+            column
           );
-          const entry = {
-            viewer: new DiagramViewer(panel, deps, withoutExtension(name)),
-            document,
-            reveal: (): void => {
-              panel.reveal();
-            },
-          };
           // Drawn once the page asks, as it does each time it is created.
-          entry.viewer.select(document.getText(), line);
-          open.set(key, entry);
-          panel.onMessage((message) => {
-            void entry.viewer.receive(message, entry.document.getText());
-          });
-          panel.onDidDispose(() => {
-            open.delete(key);
-          });
+          attach(panel, document).select(document.getText(), line);
+        },
+        restore: async (panel, state): Promise<void> => {
+          // What the page kept, which is no more trusted than the page.
+          const kept = (typeof state === 'object' && state !== null ? state : {}) as {
+            uri?: unknown;
+            name?: unknown;
+          };
+          const name = typeof kept.name === 'string' ? kept.name : null;
+          let document: vscode.TextDocument | undefined;
+          if (typeof kept.uri === 'string') {
+            try {
+              document = await vscode.workspace.openTextDocument(vscode.Uri.parse(kept.uri));
+            } catch {
+              document = undefined;
+            }
+          }
+          // A file that is gone, or already has its panel, gets none back.
+          if (document === undefined || open.has(document.uri.toString())) {
+            panel.dispose();
+            return;
+          }
+          attach(panel, document).restore(name);
         },
         update: (document): void => {
           const entry = open.get(document.uri.toString());
@@ -856,7 +888,6 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
       };
     },
   });
-
   module.commands.handle(ClearCache, {
     inject: { plugin: Plugin, renders: Renders, viewers: Viewers },
     execute: async (context: OperationContext, _args, { plugin, renders, viewers }): Promise<void> => {
@@ -918,10 +949,16 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
           viewers.updateAll();
         }
       });
+      // Registered during activation, as VS Code requires, so the panels open
+      // when the window closed come back with it.
+      const restorer = vscode.window.registerWebviewPanelSerializer(VIEWER_TYPE, {
+        deserializeWebviewPanel: (panel, state: unknown) => viewers.restore(panel, state),
+      });
       context.signal.addEventListener('abort', () => {
         changed.dispose();
         themed.dispose();
         configured.dispose();
+        restorer.dispose();
         for (const timer of timers.values()) {
           clearTimeout(timer);
         }
