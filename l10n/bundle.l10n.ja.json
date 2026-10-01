@@ -25,5 +25,6 @@
   "References are up to date": "参照は最新です",
   "{0} reference(s) inserted": "参照 {0} 件を挿入しました",
   "{0} reference(s) updated": "参照 {0} 件を更新しました",
-  "Could not update the references": "参照を更新できませんでした"
+  "Could not update the references": "参照を更新できませんでした",
+  "The document changed during the export, so the references were not updated": "書き出しの間に文書が変わったため、参照は更新しませんでした"
 }

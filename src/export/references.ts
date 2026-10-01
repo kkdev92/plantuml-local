@@ -11,7 +11,8 @@ import { findPlantUmlBlocks } from './blocks';
  * everything a person wrote by hand is out of bounds by construction.
  *
  * A block and its reference are paired by position — the first non-blank
- * line after the closing fence — not by searching the document for a
+ * line after the closing fence, inside the same block quote or list item
+ * as the block — not by searching the document for a
  * matching name. Position survives the edits that break the
  * alternatives: renaming the block updates the line in place, and a
  * reference left behind by a deleted block is simply no longer in any
@@ -60,6 +61,26 @@ function managedLine(directory: string, name: string): string {
   return `![${name}](${wrapped})`;
 }
 
+/**
+ * Reads lines as the block's container sees them: the rest of a line once
+ * the container's quote markers are taken off, or null for a line outside
+ * the quote. A list item has no markers to check, so every line is inside.
+ */
+function insideContainer(container: string): (line: string) => string | null {
+  const depth = (container.match(/>/g) ?? []).length;
+  return (line) => {
+    let rest = line;
+    for (let level = 0; level < depth; level++) {
+      const marker = /^ {0,3}> ?/.exec(rest);
+      if (marker === null) {
+        return null;
+      }
+      rest = rest.slice(marker[0].length);
+    }
+    return rest;
+  };
+}
+
 /** The image target of a full-line reference, or null. */
 function imageTarget(line: string): string | null {
   const match = IMAGE_LINE.exec(line);
@@ -87,29 +108,38 @@ export function planReferenceEdits(
   const edits: ReferenceEdit[] = [];
 
   for (const block of findPlantUmlBlocks(text)) {
-    if (block.name === null || !exportedNames.has(block.name)) {
-      continue;
-    }
-    // A reference line inside a block quote or a nested list item needs the
-    // container's markers in front of it; until it gets them, only blocks
-    // at the start of a line (indented by at most three spaces) get one.
-    if (!/^ {0,3}$/.test(block.prefix)) {
+    // A fence that never closes runs to the end of its container: a line
+    // written "after" it would be part of the code.
+    if (block.name === null || !exportedNames.has(block.name) || !block.closed) {
       continue;
     }
     const wanted = managedLine(directory, block.name);
+    const { container } = block;
+    const inside = insideContainer(container);
 
-    // The block's slot: the first non-blank line after the closing fence.
+    // The block's slot: the first non-blank line after the closing fence,
+    // within the block's container.
     let slot = block.closeLine + 1;
-    while (slot < lines.length && (lines[slot] ?? '').trim() === '') {
-      slot++;
+    let occupant: string | null = null;
+    for (; slot < lines.length; slot++) {
+      const body = inside(lines[slot] ?? '');
+      if (body === null) {
+        break;
+      }
+      if (body.trim() !== '') {
+        occupant = body;
+        break;
+      }
     }
-    const occupant = slot < lines.length ? (lines[slot] ?? '') : null;
     const target = occupant === null ? null : imageTarget(occupant);
 
     if (target !== null && target.endsWith(EXPORT_FRAGMENT)) {
-      // Ours. Rewrite only if the name or directory moved under it.
-      if (occupant !== wanted) {
-        edits.push({ kind: 'replace-line', line: slot, text: wanted });
+      // Ours. Rewrite only if the name or directory moved under it, keeping
+      // whatever the line starts with.
+      const line = lines[slot] ?? '';
+      const kept = `${line.slice(0, line.indexOf('!['))}${wanted}`;
+      if (line !== kept) {
+        edits.push({ kind: 'replace-line', line: slot, text: kept });
       }
       continue;
     }
@@ -122,13 +152,16 @@ export function planReferenceEdits(
     }
 
     // Empty slot (or occupied by unrelated content): insert after the
-    // fence, keeping one blank line on each side that needs one.
+    // fence, keeping one blank line on each side that needs one. Inside a
+    // block quote, the blank lines keep the quote's marker.
+    const blank = container.trimEnd();
     const next = lines[block.closeLine + 1];
-    const separator = next !== undefined && next.trim() !== '' ? '\n' : '';
+    const nextBody = next === undefined ? null : inside(next);
+    const separator = nextBody !== null && nextBody.trim() !== '' ? `\n${blank}` : '';
     edits.push({
       kind: 'insert-after',
       line: block.closeLine,
-      text: `\n\n${wanted}${separator}`,
+      text: `\n${blank}\n${container}${wanted}${separator}`,
     });
   }
 

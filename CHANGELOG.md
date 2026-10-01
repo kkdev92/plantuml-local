@@ -25,8 +25,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   commands scanned the document on their own, so they missed blocks in a
   block quote or deeper in a list, and took a block written inside an HTML
   comment, which the preview does not draw. They now parse the document as
-  VS Code's preview does. A block in a block quote or a nested list item is
-  exported but does not get a reference line yet.
+  VS Code's preview does.
+- **References go inside block quotes and list items.** *Export All Diagrams
+  and Update References* writes the reference of a block in a quote or a list
+  item inside that quote or item, keeping the quote's `>` on the lines it
+  adds, and recognises a reference an earlier version put at the start of
+  the line. It no longer writes one after a fence that is never closed, where
+  the line would have become part of the code.
+- **An edit during the export no longer gets references planned against
+  it.** If the document changes while *Export All Diagrams and Update
+  References* runs, the files are written but the references are left alone,
+  with a message saying so.
 
 - **The export commands no longer guess the document when no Markdown editor
   has focus.** With the preview focused there is no active text editor, and

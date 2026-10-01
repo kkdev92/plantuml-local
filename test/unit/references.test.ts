@@ -1,3 +1,4 @@
+import MarkdownIt from 'markdown-it';
 import { describe, expect, it } from 'vitest';
 
 import { lineAfterEdits, planReferenceEdits, type ReferenceEdit } from '../../src/export/references';
@@ -134,13 +135,54 @@ describe('planReferenceEdits', () => {
     expect(planReferenceEdits(text, exported('orders'), 'my diagrams')).toEqual([]);
   });
 
-  it('references a block in a block quote or a nested list only once that is supported', () => {
-    // Exported like any other block, but a reference line there needs the
-    // container's markers, so for now none is planned.
-    const quoted = md('> ```plantuml quoted', '> @startuml', '> A -> B', '> @enduml', '> ```', '', 'after');
-    const nested = md('1. item', '', '    ```plantuml nested', '    @startuml', '    @enduml', '    ```');
-    expect(planReferenceEdits(quoted, exported('quoted'), 'images')).toEqual([]);
-    expect(planReferenceEdits(nested, exported('nested'), 'images')).toEqual([]);
+  describe('inside block quotes and list items', () => {
+    /** The image's place in the parsed document: the containers around it. */
+    function containersOfImage(text: string, name: string): string[] {
+      const stack: string[] = [];
+      for (const token of new MarkdownIt().parse(text, {})) {
+        if (token.type === 'blockquote_open' || token.type === 'list_item_open') {
+          stack.push(token.type);
+        } else if (token.type === 'blockquote_close' || token.type === 'list_item_close') {
+          stack.pop();
+        } else if (token.children?.some((child) => child.type === 'image' && child.attrGet('src')?.includes(`${name}.svg`))) {
+          return [...stack];
+        }
+      }
+      throw new Error(`no image for ${name}`);
+    }
+
+    it.each([
+      ['a block quote', md('> ```plantuml q', '> @startuml', '> @enduml', '> ```', '> more of the quote'), 'q', ['blockquote_open']],
+      ['a list item', md('- item', '', '  ```plantuml l', '  @startuml', '  @enduml', '  ```', '- next'), 'l', ['list_item_open']],
+      ['a nested list item', md('1. item', '', '    ```plantuml n', '    @startuml', '    @enduml', '    ```'), 'n', ['list_item_open']],
+      ['a list item in a block quote', md('> - ```plantuml b', '>   @startuml', '>   ```'), 'b', ['blockquote_open', 'list_item_open']],
+    ])('puts the reference inside %s, once', (_where, text, name, containers) => {
+      const once = apply(text, planReferenceEdits(text, exported(name), 'images'));
+      expect(containersOfImage(once, name)).toEqual(containers);
+      expect(planReferenceEdits(once, exported(name), 'images')).toEqual([]);
+    });
+
+    it('keeps the quote marker on the blank lines it adds', () => {
+      const text = md('> ```plantuml q', '> @startuml', '> ```', '> after');
+      expect(apply(text, planReferenceEdits(text, exported('q'), 'images'))).toBe(
+        md('> ```plantuml q', '> @startuml', '> ```', '>', '> ![q](images/q.svg#plantuml-local)', '>', '> after')
+      );
+    });
+
+    it('recognises a reference an earlier version put at the start of the line', () => {
+      const text = md('- item', '', '  ```plantuml l', '  @startuml', '  ```', '', '![l](images/l.svg#plantuml-local)');
+      expect(planReferenceEdits(text, exported('l'), 'images')).toEqual([]);
+    });
+
+    it('does not take a line outside the quote as the slot', () => {
+      const text = md('> ```plantuml q', '> @startuml', '> ```', '', '![q](images/q.svg#plantuml-local)');
+      const once = apply(text, planReferenceEdits(text, exported('q'), 'images'));
+      expect(containersOfImage(once, 'q')).toEqual(['blockquote_open']);
+    });
+  });
+
+  it('gives an unclosed fence no reference, since a line after it would be code', () => {
+    expect(planReferenceEdits(md('```plantuml open', '@startuml', 'A -> B'), exported('open'), 'images')).toEqual([]);
   });
 
   it('writes next to the document when the directory is "."', () => {

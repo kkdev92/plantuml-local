@@ -181,6 +181,8 @@ interface ActiveMarkdown {
   line: number | null;
   /** Kept for the reference updater, which edits the buffer. */
   textDocument: vscode.TextDocument;
+  /** The document's version when `text` was read. */
+  version: number;
 }
 
 /**
@@ -265,6 +267,7 @@ async function activeMarkdown(context: OperationContext): Promise<ActiveMarkdown
     path: document.uri.toString(),
     line: editor?.selection.active.line ?? null,
     textDocument: document,
+    version: document.version,
   };
 }
 
@@ -642,13 +645,24 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
 
       const outcome = await runBulkExport(context, renderer, palettes, settings, document, directory);
 
-      // Plan against the buffer as it is *now*, not the snapshot the
-      // exports rendered from: they take time, and an edit meanwhile
-      // would shift every line a reference is about to be anchored to.
-      // Only successfully exported names get one — a failed block must
-      // not gain a link to a file that is stale or absent.
+      // The exports take time. If the document changed meanwhile, the files
+      // no longer match its blocks and every line a reference would be
+      // anchored to may have moved, so the references are left alone.
+      if (document.textDocument.version !== document.version) {
+        await reportOutcome(
+          context,
+          outcome,
+          [context.l10n.t('The document changed during the export, so the references were not updated')],
+          true
+        );
+        return;
+      }
+
+      // Only successfully exported names get a reference — a failed block
+      // must not gain a link to a file that is stale or absent. A change
+      // between this plan and the edit makes VS Code refuse the edit.
       const exported = new Set(outcome.written.map((result) => result.name));
-      const edits = planReferenceEdits(document.textDocument.getText(), exported, directory);
+      const edits = planReferenceEdits(document.text, exported, directory);
 
       const extra: string[] = [];
       let applyFailed = false;
