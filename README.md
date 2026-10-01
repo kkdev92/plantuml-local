@@ -254,7 +254,16 @@ what ties a block to its SVG across edits, which a position could not: inserting
 a diagram above would silently repoint everything below it. Naming is therefore
 required for the bulk commands, and the single-diagram one asks when the block
 has none — or when its name could not be a file name, since names are limited
-to letters, digits, hyphens and underscores.
+to 128 letters, digits, hyphens and underscores. The bulk commands report such
+a block as failed.
+
+A file already at the target is replaced only when you say so. If it holds the
+diagram already, nothing is written; if it holds something else — a file put
+there by hand, or another block's export — the command asks first, once for all
+the files it would replace, and the bulk commands can keep those files and
+write the rest. Each file is written under a temporary name beside the target
+and then renamed over it, so an export that fails part way never leaves half an
+image behind.
 
 The `#plantuml-local` fragment on the inserted reference does two jobs. GitHub
 ignores it and renders the SVG, while this extension's preview hides marked
@@ -351,8 +360,8 @@ and would show the referenced image as a second copy.
 | --- | --- | --- |
 | `plantumlLocal.theme` | `auto` | Diagram palette. `auto` follows the VS Code theme; `light` / `dark` pin it |
 | `plantumlLocal.logLevel` | `info` | Floor for the *PlantUML Local* output channel. VS Code's own channel level applies first — see [Troubleshooting](#troubleshooting) |
-| `plantumlLocal.exportDirectory` | `images` | Where exported SVGs are written, relative to the Markdown file. `.` for the same folder; absolute paths and `..` are rejected |
-| `plantumlLocal.exportTheme` | `light` | Palette for exported SVGs. `preview` follows the palette the preview currently uses |
+| `plantumlLocal.exportDirectory` | `images` | Where exported SVGs are written, relative to the Markdown file. `.` for the same folder; absolute paths and `..` are rejected. Can be set per folder |
+| `plantumlLocal.exportTheme` | `light` | Palette for exported SVGs. `preview` follows the palette the preview currently uses. Can be set per folder |
 | `plantumlLocal.hideExportedImages` | `true` | Hide images marked `#plantuml-local` in the preview, so an exported diagram is not shown next to its block's render |
 | `plantumlLocal.diagnostics.enabled` | `true` | List the problems of the diagrams in open Markdown files in the Problems panel; can be set per folder |
 

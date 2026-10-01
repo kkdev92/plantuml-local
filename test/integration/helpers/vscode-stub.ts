@@ -117,8 +117,16 @@ class WorkspaceEditStub {
 /** The slice of `vscode.Uri` the export commands read. */
 export interface UriStub {
   scheme: string;
+  path: string;
   fsPath: string;
   toString(): string;
+}
+
+/** A modal message as shown: its text, detail and the buttons offered. */
+export interface ModalStub {
+  message: string;
+  detail: string | undefined;
+  buttons: string[];
 }
 
 /** A `vscode.Diagnostic` as the extension builds it. */
@@ -160,6 +168,8 @@ export interface VscodeStub {
     endCharacter: number
   ) => { start: PositionStub; end: PositionStub };
   WorkspaceEdit: new () => WorkspaceEditStub;
+  FileType: Record<'Unknown' | 'File' | 'Directory' | 'SymbolicLink', number>;
+  FileSystemError: new (message: string, code: string) => Error & { code: string };
   Uri: {
     parse: (value: string) => UriStub;
     joinPath: (base: UriStub | { toString(): string }, ...parts: string[]) => UriStub;
@@ -171,9 +181,10 @@ export interface VscodeStub {
     activeTextEditor: TextEditorStub | undefined;
     visibleTextEditors: TextEditorStub[];
     createOutputChannel: (name: string, options?: { log?: boolean }) => LogOutputChannelStub;
-    showInformationMessage: (...args: unknown[]) => Promise<undefined>;
-    showWarningMessage: (...args: unknown[]) => Promise<undefined>;
-    showErrorMessage: (...args: unknown[]) => Promise<undefined>;
+    /** A modal one answers with `_test.messageReply`; the others are dismissed. */
+    showInformationMessage: (...args: unknown[]) => Promise<unknown>;
+    showWarningMessage: (...args: unknown[]) => Promise<unknown>;
+    showErrorMessage: (...args: unknown[]) => Promise<unknown>;
     onDidChangeActiveColorTheme: (listener: () => void) => { dispose(): void };
     onDidChangeActiveTextEditor: (
       listener: (editor: TextEditorStub | undefined) => void
@@ -219,9 +230,17 @@ export interface VscodeStub {
     /** `_test.openDocuments`, which is empty unless a test fills it. */
     textDocuments: TextEditorStub['document'][];
     asRelativePath: (uri: { toString(): string }) => string;
+    /**
+     * Backed by `_test.writtenFiles`. A path with files below it is a folder,
+     * and anything else not in the map does not exist.
+     */
     fs: {
       createDirectory: (uri: UriStub) => Promise<void>;
       writeFile: (uri: UriStub, content: Uint8Array) => Promise<void>;
+      stat: (uri: UriStub) => Promise<{ type: number; ctime: number; mtime: number; size: number }>;
+      readFile: (uri: UriStub) => Promise<Uint8Array>;
+      rename: (source: UriStub, target: UriStub, options?: { overwrite?: boolean }) => Promise<void>;
+      delete: (uri: UriStub) => Promise<void>;
       isWritableFileSystem: (scheme: string) => boolean | undefined;
     };
     applyEdit: (edit: WorkspaceEditStub) => Promise<boolean>;
@@ -250,9 +269,22 @@ export interface VscodeStub {
     /**
      * Sets (or, with undefined, clears) a configuration value and fires
      * the change event — the kit caches an unscoped settings snapshot and
-     * only rebuilds it on that event, exactly like real VS Code.
+     * only rebuilds it on that event, exactly like real VS Code. With
+     * `folder`, the value applies only to resources under that URI, as a
+     * folder's own settings do.
      */
-    setConfiguration(key: string, value: unknown): void;
+    setConfiguration(key: string, value: unknown, folder?: string): void;
+    /**
+     * The button title a modal message answers with; `null`, or a title not
+     * offered, dismisses it. Defaults to dismissal.
+     */
+    messageReply: string | null;
+    /** Modal messages shown, in order. */
+    modals: ModalStub[];
+    /** Makes `workspace.fs.rename` fail, as a write that cannot complete would. */
+    failRename: boolean;
+    /** URIs passed to `workspace.fs.writeFile`, in order. */
+    fileWrites: string[];
     /**
      * What the next input box answers with: a string accepts, `null`
      * dismisses. Defaults to dismissal, so a test that did not expect a
@@ -291,6 +323,7 @@ export interface VscodeStub {
 function makeUri(full: string): UriStub {
   return {
     scheme: full.split(':')[0] ?? '',
+    path: full.replace(/^[a-z][\w+.-]*:(\/\/[^/]*)?/i, ''),
     fsPath: full.replace(/^[a-z][\w+.-]*:\/\//i, ''),
     toString: () => full,
   };
@@ -328,7 +361,10 @@ export function createVscodeStub(): VscodeStub {
   const notifications = { info: [] as string[], warn: [] as string[], error: [] as string[] };
   const logs: string[] = [];
   const configuration = new Map<string, unknown>();
+  /** Folder URI → that folder's own values. */
+  const folderConfiguration = new Map<string, Map<string, unknown>>();
   const configurationListeners: ((event: unknown) => void)[] = [];
+  const fileWrites: string[] = [];
   const diagnostics = new Map<string, readonly DiagnosticStub[]>();
   type DocumentStub = TextEditorStub['document'];
   const openListeners: ((document: DocumentStub) => void)[] = [];
@@ -362,7 +398,35 @@ export function createVscodeStub(): VscodeStub {
     quickPicksShown: [] as { title: string | undefined; labels: string[] }[],
     openDocuments: [] as TextEditorStub['document'][],
     visibleEditors: [] as TextEditorStub[],
+    messageReply: null as string | null,
+    modals: [] as ModalStub[],
+    failRename: false,
   };
+
+  class FileSystemError extends Error {
+    constructor(
+      message: string,
+      readonly code: string
+    ) {
+      super(message);
+    }
+  }
+  const FileType = { Unknown: 0, File: 1, Directory: 2, SymbolicLink: 64 };
+
+  /** What a message call resolves to: the item a modal is answered with. */
+  function answer(args: unknown[]): unknown {
+    const options = args[1] as { modal?: boolean; detail?: string } | undefined;
+    if (options?.modal !== true) {
+      return undefined;
+    }
+    const items = args.slice(2) as { title: string }[];
+    hooks.modals.push({
+      message: String(args[0]),
+      detail: options.detail,
+      buttons: items.map((item) => item.title),
+    });
+    return items.find((item) => item.title === hooks.messageReply);
+  }
 
   class Position implements PositionStub {
     constructor(
@@ -432,6 +496,8 @@ export function createVscodeStub(): VscodeStub {
     Position,
     Range,
     WorkspaceEdit: WorkspaceEditStub,
+    FileType,
+    FileSystemError,
     UIKind: { Desktop: 1, Web: 2 },
     ProgressLocation: { SourceControl: 1, Window: 10, Notification: 15 },
     StatusBarAlignment: { Left: 1, Right: 2 },
@@ -468,15 +534,15 @@ export function createVscodeStub(): VscodeStub {
       }),
       showInformationMessage: async (...args) => {
         notifications.info.push(String(args[0]));
-        return undefined;
+        return answer(args);
       },
       showWarningMessage: async (...args) => {
         notifications.warn.push(String(args[0]));
-        return undefined;
+        return answer(args);
       },
       showErrorMessage: async (...args) => {
         notifications.error.push(String(args[0]));
-        return undefined;
+        return answer(args);
       },
       onDidChangeActiveColorTheme: (listener) => {
         themeListeners.push(listener);
@@ -593,9 +659,16 @@ export function createVscodeStub(): VscodeStub {
       },
     },
     workspace: {
-      getConfiguration: () => ({
-        get: <T>(key: string, fallback?: T) =>
-          configuration.has(key) ? (configuration.get(key) as T) : fallback,
+      getConfiguration: (_section, scope) => ({
+        get: <T>(key: string, fallback?: T) => {
+          const resource = scope === undefined ? undefined : String(scope);
+          for (const [folder, values] of folderConfiguration) {
+            if (resource?.startsWith(`${folder}/`) === true && values.has(key)) {
+              return values.get(key) as T;
+            }
+          }
+          return configuration.has(key) ? (configuration.get(key) as T) : fallback;
+        },
         update: async () => undefined,
       }),
       onDidChangeConfiguration: (listener) => {
@@ -615,7 +688,42 @@ export function createVscodeStub(): VscodeStub {
       fs: {
         createDirectory: async () => undefined,
         writeFile: async (uri, content) => {
+          fileWrites.push(uri.toString());
           writtenFiles.set(uri.toString(), Buffer.from(content).toString('utf8'));
+        },
+        stat: async (uri) => {
+          const key = uri.toString();
+          const content = writtenFiles.get(key);
+          if (content !== undefined) {
+            return { type: FileType.File, ctime: 0, mtime: 0, size: content.length };
+          }
+          if ([...writtenFiles.keys()].some((file) => file.startsWith(`${key}/`))) {
+            return { type: FileType.Directory, ctime: 0, mtime: 0, size: 0 };
+          }
+          throw new FileSystemError(`${key} not found`, 'FileNotFound');
+        },
+        readFile: async (uri) => {
+          const content = writtenFiles.get(uri.toString());
+          if (content === undefined) {
+            throw new FileSystemError(`${uri.toString()} not found`, 'FileNotFound');
+          }
+          return Buffer.from(content, 'utf8');
+        },
+        rename: async (source, target, options) => {
+          const content = writtenFiles.get(source.toString());
+          if (hooks.failRename || content === undefined) {
+            throw new FileSystemError(`cannot rename ${source.toString()}`, 'Unavailable');
+          }
+          if (writtenFiles.has(target.toString()) && options?.overwrite !== true) {
+            throw new FileSystemError(`${target.toString()} already exists`, 'FileExists');
+          }
+          writtenFiles.delete(source.toString());
+          writtenFiles.set(target.toString(), content);
+        },
+        delete: async (uri) => {
+          if (!writtenFiles.delete(uri.toString())) {
+            throw new FileSystemError(`${uri.toString()} not found`, 'FileNotFound');
+          }
         },
         // As VS Code answers: files are writable, git's documents are not, and
         // a scheme with no file system behind it (a notebook cell) is unknown.
@@ -672,13 +780,32 @@ export function createVscodeStub(): VscodeStub {
         hooks.quickPickReply = value;
       },
       quickPicksShown: hooks.quickPicksShown,
+      get messageReply() {
+        return hooks.messageReply;
+      },
+      set messageReply(value: string | null) {
+        hooks.messageReply = value;
+      },
+      modals: hooks.modals,
+      get failRename() {
+        return hooks.failRename;
+      },
+      set failRename(value: boolean) {
+        hooks.failRename = value;
+      },
+      fileWrites,
       openDocuments: hooks.openDocuments,
       visibleEditors: hooks.visibleEditors,
-      setConfiguration: (key, value) => {
+      setConfiguration: (key, value, folder) => {
+        let values = configuration;
+        if (folder !== undefined) {
+          values = folderConfiguration.get(folder) ?? new Map<string, unknown>();
+          folderConfiguration.set(folder, values);
+        }
         if (value === undefined) {
-          configuration.delete(key);
+          values.delete(key);
         } else {
-          configuration.set(key, value);
+          values.set(key, value);
         }
         for (const listener of configurationListeners) {
           listener({ affectsConfiguration: () => true });

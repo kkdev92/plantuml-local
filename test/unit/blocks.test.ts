@@ -204,6 +204,13 @@ describe('isValidBlockName', () => {
     }
   });
 
+  it('accepts up to 128 characters', () => {
+    // A file name has room for 255 on most file systems; the export writes
+    // a temporary file whose name is longer than the final one.
+    expect(isValidBlockName('a'.repeat(128))).toBe(true);
+    expect(isValidBlockName('a'.repeat(129))).toBe(false);
+  });
+
   it('rejects Windows device names, whatever their case', () => {
     // `nul.svg` opens the null device: the export would claim success and
     // leave no file behind.

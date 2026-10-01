@@ -853,4 +853,161 @@ describe('export (dist)', () => {
     expect(dark).not.toBe(light);
     expect(dark).toContain('#FFFFFF');
   });
+
+  it('reads the export settings for the document, so a folder can have its own', async () => {
+    vscodeStub._test.setConfiguration('exportDirectory', 'diagrams', 'file:///c/own');
+    vscodeStub._test.setConfiguration('exportTheme', 'dark', 'file:///c/own');
+    try {
+      vscodeStub._test.setActiveEditor(makeEditor('file:///c/own/doc.md', NAMED_BLOCK, 1));
+      await vscodeStub._test.registeredCommands.get('plantumlLocal.exportSvg')?.();
+      vscodeStub._test.setActiveEditor(makeEditor('file:///c/other/doc.md', NAMED_BLOCK, 1));
+      await vscodeStub._test.registeredCommands.get('plantumlLocal.exportSvg')?.();
+    } finally {
+      vscodeStub._test.setConfiguration('exportDirectory', undefined, 'file:///c/own');
+      vscodeStub._test.setConfiguration('exportTheme', undefined, 'file:///c/own');
+    }
+
+    expect(vscodeStub._test.writtenFiles.get('file:///c/own/diagrams/orders.svg')).toBe(
+      vscodeStub._test.writtenFiles.get('file:///c/dark/images/orders.svg')
+    );
+    expect(vscodeStub._test.writtenFiles.get('file:///c/other/images/orders.svg')).toBe(
+      vscodeStub._test.writtenFiles.get('file:///c/docs/images/orders.svg')
+    );
+  });
+
+  describe('existing files', () => {
+    const exportSvg = async (): Promise<void> => {
+      await vscodeStub._test.registeredCommands.get('plantumlLocal.exportSvg')?.();
+    };
+
+    it('writes a temporary file beside the target and renames it over the target', async () => {
+      vscodeStub._test.setActiveEditor(makeEditor('file:///c/staged/doc.md', NAMED_BLOCK, 1));
+      const writesBefore = vscodeStub._test.fileWrites.length;
+
+      await exportSvg();
+
+      // Never the target itself: a write that stopped part way would leave
+      // half an image under the name the document links to.
+      expect(vscodeStub._test.fileWrites.slice(writesBefore)).toEqual([
+        expect.stringMatching(/^file:\/\/\/c\/staged\/images\/\.orders\.svg\.[0-9a-f]{8}\.tmp$/),
+      ]);
+      expect(vscodeStub._test.writtenFiles.get('file:///c/staged/images/orders.svg')).toContain('hi');
+      expect([...vscodeStub._test.writtenFiles.keys()].filter((key) => key.endsWith('.tmp'))).toEqual(
+        []
+      );
+    });
+
+    it('asks before replacing a file that holds something else, and keeps it unless told to', async () => {
+      const target = 'file:///c/handmade/images/orders.svg';
+      vscodeStub._test.writtenFiles.set(target, '<svg>drawn by hand</svg>');
+      vscodeStub._test.setActiveEditor(makeEditor('file:///c/handmade/doc.md', NAMED_BLOCK, 1));
+      const modalsBefore = vscodeStub._test.modals.length;
+
+      // Dismissed, as the stub answers by default.
+      await exportSvg();
+
+      expect(vscodeStub._test.modals.slice(modalsBefore)).toEqual([
+        {
+          message: 'handmade/images/orders.svg already exists with different contents. Replace it?',
+          detail: undefined,
+          buttons: ['Replace'],
+        },
+      ]);
+      expect(vscodeStub._test.writtenFiles.get(target)).toBe('<svg>drawn by hand</svg>');
+
+      vscodeStub._test.messageReply = 'Replace';
+      try {
+        await exportSvg();
+      } finally {
+        vscodeStub._test.messageReply = null;
+      }
+      expect(vscodeStub._test.writtenFiles.get(target)).toContain('hi');
+
+      // Now the file holds the diagram: exporting again neither asks nor writes.
+      const modalsAfter = vscodeStub._test.modals.length;
+      const writesAfter = vscodeStub._test.fileWrites.length;
+      await exportSvg();
+      expect(vscodeStub._test.modals.length).toBe(modalsAfter);
+      expect(vscodeStub._test.fileWrites.length).toBe(writesAfter);
+    });
+
+    it('export-all asks once for every file it would replace, and can keep them', async () => {
+      const text = [
+        '```plantuml kept-a',
+        '@startuml',
+        'A -> B : a',
+        '@enduml',
+        '```',
+        '',
+        '```plantuml kept-b',
+        '@startuml',
+        'A -> B : b',
+        '@enduml',
+        '```',
+        '',
+        '```plantuml fresh',
+        '@startuml',
+        'A -> B : new',
+        '@enduml',
+        '```',
+      ].join('\n');
+      vscodeStub._test.writtenFiles.set('file:///c/bulk/images/kept-a.svg', 'old a');
+      vscodeStub._test.writtenFiles.set('file:///c/bulk/images/kept-b.svg', 'old b');
+      vscodeStub._test.setActiveEditor(makeEditor('file:///c/bulk/doc.md', text, 0));
+      const modalsBefore = vscodeStub._test.modals.length;
+
+      vscodeStub._test.messageReply = 'Keep Existing';
+      try {
+        await vscodeStub._test.registeredCommands.get('plantumlLocal.exportAllSvg')?.();
+      } finally {
+        vscodeStub._test.messageReply = null;
+      }
+
+      expect(vscodeStub._test.modals.slice(modalsBefore)).toEqual([
+        {
+          message: '2 files already exist with different contents. Replace them?',
+          detail: 'bulk/images/kept-a.svg\nbulk/images/kept-b.svg',
+          buttons: ['Replace', 'Keep Existing'],
+        },
+      ]);
+      expect(vscodeStub._test.writtenFiles.get('file:///c/bulk/images/kept-a.svg')).toBe('old a');
+      expect(vscodeStub._test.writtenFiles.get('file:///c/bulk/images/kept-b.svg')).toBe('old b');
+      expect(vscodeStub._test.writtenFiles.get('file:///c/bulk/images/fresh.svg')).toContain('new');
+      expect(vscodeStub._test.notifications.info.at(-1)).toBe(
+        'Exported 1 diagram(s) · 2 existing file(s) kept'
+      );
+    });
+
+    it('never writes over a folder of the same name', async () => {
+      vscodeStub._test.writtenFiles.set('file:///c/folder/images/orders.svg/inside.txt', 'kept');
+      vscodeStub._test.setActiveEditor(makeEditor('file:///c/folder/doc.md', NAMED_BLOCK, 1));
+
+      await exportSvg();
+
+      // Renaming over it would have deleted the folder and what it holds.
+      expect(vscodeStub._test.writtenFiles.get('file:///c/folder/images/orders.svg/inside.txt')).toBe(
+        'kept'
+      );
+      expect(vscodeStub._test.writtenFiles.has('file:///c/folder/images/orders.svg')).toBe(false);
+      expect(vscodeStub._test.notifications.error.at(-1)).toBe(
+        'Could not export the diagram: folder/images/orders.svg is a folder, not a file.'
+      );
+    });
+
+    it('removes the temporary file when the rename fails', async () => {
+      vscodeStub._test.setActiveEditor(makeEditor('file:///c/failing/doc.md', NAMED_BLOCK, 1));
+
+      vscodeStub._test.failRename = true;
+      try {
+        await exportSvg();
+      } finally {
+        vscodeStub._test.failRename = false;
+      }
+
+      expect(
+        [...vscodeStub._test.writtenFiles.keys()].filter((key) => key.startsWith('file:///c/failing/'))
+      ).toEqual([]);
+      expect(vscodeStub._test.notifications.error.at(-1)).toMatch(/^Could not export the diagram: /);
+    });
+  });
 });

@@ -58,6 +58,17 @@ const deps: ExporterDeps = {
   engineErrorMessage: (message, line) =>
     line === null ? `PlantUML reported an error: ${message}` : `PlantUML reported an error at line ${String(line)}: ${message}`,
   resolve: (documentPath, relative) => resolve(dirname(documentPath), relative),
+  readExisting: (path) =>
+    import('node:fs/promises').then((fs) =>
+      fs.readFile(path, 'utf8').catch((error: NodeJS.ErrnoException) => {
+        if (error.code === 'ENOENT') {
+          return null;
+        }
+        throw error;
+      })
+    ),
+  // Every test writes under a name of its own.
+  confirmReplace: () => Promise.reject(new Error('unexpected question: a file already exists')),
   writeFile: (path, content) =>
     import('node:fs/promises').then(async (fs) => {
       await fs.mkdir(dirname(path), { recursive: true });
@@ -111,8 +122,8 @@ describe('export (dist worker)', () => {
 
     const outcome = await exportAll(deps, document, 'images', text);
 
-    expect(outcome.failed).toHaveLength(0);
-    expect(outcome.written).toHaveLength(2);
+    expect(outcome?.failed).toHaveLength(0);
+    expect(outcome?.written).toHaveLength(2);
 
     const svg = readFileSync(join(workspace, 'docs/images/sequence.svg'), 'utf8');
     expect(svg).toMatch(/^<svg/);
@@ -139,7 +150,7 @@ describe('export (dist worker)', () => {
 
     const outcome = await exportAll(deps, document, 'images', text);
 
-    expect(outcome.written.map((r) => r.name)).toEqual(['orders-api']);
+    expect(outcome?.written.map((r) => r.name)).toEqual(['orders-api']);
     const svg = readFileSync(join(workspace, 'docs/images/orders-api.svg'), 'utf8');
     // Survives export only because the sanitiser keeps sprite PNGs.
     expect(svg).toMatch(/<image[^>]*href="data:image\/png;base64,iVBORw0KGg/);
@@ -166,7 +177,7 @@ describe('export (dist worker)', () => {
 
     const outcome = await exportAll(deps, document, 'images', text);
 
-    expect(outcome.written.map((r) => r.name)).toEqual(['hidden']);
+    expect(outcome?.written.map((r) => r.name)).toEqual(['hidden']);
     const svg = readFileSync(join(workspace, 'docs/images/hidden.svg'), 'utf8');
     expect(svg).toContain('Order Service');
     expect(svg).not.toMatch(/zq[-_]/);
@@ -190,9 +201,9 @@ describe('export (dist worker)', () => {
       rmSync(join(workspace, 'docs/images/broken.svg'), { force: true });
       const outcome = await exportAll({ ...deps, isDark: () => dark }, document, 'images', text);
 
-      expect(outcome.written, `dark=${String(dark)}`).toHaveLength(0);
-      expect(outcome.failed.map((r) => r.name)).toEqual(['broken']);
-      expect(outcome.failed[0]?.error).toMatch(reason);
+      expect(outcome?.written, `dark=${String(dark)}`).toHaveLength(0);
+      expect(outcome?.failed.map((r) => r.name)).toEqual(['broken']);
+      expect(outcome?.failed[0]?.error).toMatch(reason);
       expect(existsSync(join(workspace, 'docs/images/broken.svg'))).toBe(false);
     }
   });
@@ -206,8 +217,8 @@ describe('export (dist worker)', () => {
     // The preview refuses these before the engine sees them; export has to
     // agree, or the block that shows an explanation on screen would write
     // out PlantUML's "cannot include" error diagram as a real file.
-    expect(outcome.written).toHaveLength(0);
-    expect(outcome.failed.map((r) => r.name)).toEqual(['remote']);
+    expect(outcome?.written).toHaveLength(0);
+    expect(outcome?.failed.map((r) => r.name)).toEqual(['remote']);
     expect(existsSync(join(workspace, 'docs/images/remote.svg'))).toBe(false);
   });
 
@@ -215,7 +226,7 @@ describe('export (dist worker)', () => {
     const document = join(workspace, 'docs/open.md');
     const outcome = await exportAll(deps, document, 'images', '```plantuml open\n@startuml\nAlice -> Bob : unterminated\n```');
 
-    expect(outcome.failed).toHaveLength(0);
+    expect(outcome?.failed).toHaveLength(0);
     expect(readFileSync(join(workspace, 'docs/images/open.svg'), 'utf8')).toContain('unterminated');
   });
 
@@ -242,8 +253,8 @@ describe('export (dist worker)', () => {
 
     const outcome = await exportAll(deps, document, 'images', text);
 
-    expect(outcome.written).toHaveLength(0);
-    expect(outcome.failed.map((r) => r.name)).toEqual(['two', 'paged']);
+    expect(outcome?.written).toHaveLength(0);
+    expect(outcome?.failed.map((r) => r.name)).toEqual(['two', 'paged']);
     expect(existsSync(join(workspace, 'docs/images/two.svg'))).toBe(false);
     expect(existsSync(join(workspace, 'docs/images/paged.svg'))).toBe(false);
   });

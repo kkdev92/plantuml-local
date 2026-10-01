@@ -195,6 +195,7 @@
         "plantumlLocal.exportDirectory": {
           "type": "string",
           "default": "images",
+          "scope": "resource",
           "description": "%config.exportDirectory.description%"
         },
         "plantumlLocal.exportTheme": {
@@ -205,6 +206,7 @@
             "preview"
           ],
           "default": "light",
+          "scope": "resource",
           "description": "%config.exportTheme.description%"
         },
         "plantumlLocal.hideExportedImages": {

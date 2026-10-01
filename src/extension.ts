@@ -13,6 +13,7 @@ import {
   type ServiceToken,
 } from '@kkdev92/vscode-ext-kit';
 import type MarkdownIt from 'markdown-it';
+import { randomBytes } from 'node:crypto';
 import * as vscode from 'vscode';
 
 import {
@@ -71,8 +72,16 @@ const Settings = defineSettings({
       values: ['trace', 'debug', 'info', 'warn', 'error'],
       default: 'info',
     }),
-    [CONFIG.EXPORT_DIRECTORY]: setting.string({ default: DEFAULT_EXPORT_DIRECTORY }),
-    [CONFIG.EXPORT_THEME]: setting.enum({ values: ['light', 'dark', 'preview'], default: 'light' }),
+    // Resource-scoped, so a folder can set its own: read for the document.
+    [CONFIG.EXPORT_DIRECTORY]: setting.string({
+      default: DEFAULT_EXPORT_DIRECTORY,
+      scope: 'resource',
+    }),
+    [CONFIG.EXPORT_THEME]: setting.enum({
+      values: ['light', 'dark', 'preview'],
+      default: 'light',
+      scope: 'resource',
+    }),
     [CONFIG.HIDE_EXPORTED_IMAGES]: setting.boolean({ default: true }),
     // Resource-scoped: the diagnostics read it per document instead.
     [CONFIG.DIAGNOSTICS_ENABLED]: setting.boolean({ default: true }),
@@ -316,12 +325,21 @@ async function activeMarkdown(context: OperationContext): Promise<ActiveMarkdown
   };
 }
 
-/** The configured export directory, or null after rejecting a bad one. */
+/** How the settings accessor is seen by the helpers below. */
+type SettingsReader = {
+  read(scope?: { resource: vscode.Uri }): { values: Record<string, unknown> };
+};
+
+/**
+ * The export directory configured for `document`, or null after rejecting
+ * a bad one.
+ */
 function exportDirectory(
   context: OperationContext,
-  settings: { read(): { values: Record<string, unknown> } }
+  settings: SettingsReader,
+  document: vscode.Uri
 ): string | null {
-  const directory = String(settings.read().values[CONFIG.EXPORT_DIRECTORY]);
+  const directory = String(settings.read({ resource: document }).values[CONFIG.EXPORT_DIRECTORY]);
   if (!isValidExportDirectory(directory)) {
     void context.notify.error(
       context.l10n.t(
@@ -342,7 +360,7 @@ async function askForName(context: OperationContext): Promise<string | null> {
     validate: (value: string) =>
       isValidBlockName(value)
         ? undefined
-        : context.l10n.t('Use letters, digits, hyphens and underscores only.'),
+        : context.l10n.t('Use up to 128 letters, digits, hyphens and underscores.'),
   });
   return name ?? null;
 }
@@ -388,7 +406,8 @@ function exporterDeps(
   context: OperationContext,
   renderer: RendererClient,
   palettes: ThemePalettes,
-  settings: { read(): { values: Record<string, unknown> } }
+  settings: SettingsReader,
+  document: vscode.Uri
 ): ExporterDeps {
   return {
     render: (source, dark) => renderer.render(source, dark),
@@ -400,7 +419,7 @@ function exporterDeps(
       'Emoji (<:name:>) are not supported: the emoji images are not bundled.'
     ),
     invalidNameMessage: context.l10n.t(
-      'Use letters, digits, hyphens and underscores only.'
+      'Use up to 128 letters, digits, hyphens and underscores.'
     ),
     severalDiagramsMessage: context.l10n.t(
       'This block holds more than one diagram, and only the first would be drawn. Give each diagram a block of its own.'
@@ -414,7 +433,10 @@ function exporterDeps(
     // does not control, and a dark diagram on a white page reads as broken.
     // `preview` restores the old follow-the-editor behaviour.
     isDark: (): boolean => {
-      const mode = settings.read().values[CONFIG.EXPORT_THEME] as 'light' | 'dark' | 'preview';
+      const mode = settings.read({ resource: document }).values[CONFIG.EXPORT_THEME] as
+        | 'light'
+        | 'dark'
+        | 'preview';
       if (mode === 'dark') {
         return true;
       }
@@ -425,18 +447,69 @@ function exporterDeps(
     },
     resolve: (documentPath, relative) =>
       vscode.Uri.joinPath(vscode.Uri.parse(documentPath), '..', relative).toString(),
-    writeFile: async (path, content): Promise<void> => {
+    readExisting: async (path): Promise<string | null> => {
       const uri = vscode.Uri.parse(path);
-      await vscode.workspace.fs.createDirectory(vscode.Uri.joinPath(uri, '..'));
-      await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(content));
+      let stat: vscode.FileStat;
+      try {
+        stat = await vscode.workspace.fs.stat(uri);
+      } catch (error: unknown) {
+        if (error instanceof vscode.FileSystemError && error.code === 'FileNotFound') {
+          return null;
+        }
+        throw error;
+      }
+      // Renaming a file over a folder deletes the folder and all it holds.
+      if ((stat.type & vscode.FileType.Directory) !== 0) {
+        throw new Error(
+          context.l10n.t('{0} is a folder, not a file.', vscode.workspace.asRelativePath(uri))
+        );
+      }
+      return new TextDecoder().decode(await vscode.workspace.fs.readFile(uri));
+    },
+    confirmReplace: (paths, canKeep): Promise<'replace' | 'keep' | undefined> => {
+      const files = paths.map((path) => vscode.workspace.asRelativePath(vscode.Uri.parse(path)));
+      const replace = { title: context.l10n.t('Replace'), value: 'replace' as const };
+      const keep = { title: context.l10n.t('Keep Existing'), value: 'keep' as const };
+      const actions = canKeep ? [replace, keep] : [replace];
+      // VS Code adds a Cancel button to a modal, which answers undefined.
+      if (files.length === 1) {
+        return context.notify.warn(
+          context.l10n.t('{0} already exists with different contents. Replace it?', files[0] ?? ''),
+          { modal: true, actions }
+        );
+      }
+      return context.notify.warn(
+        context.l10n.t(
+          '{0} files already exist with different contents. Replace them?',
+          String(files.length)
+        ),
+        { modal: true, detail: files.join('\n'), actions }
+      );
+    },
+    // Written beside the target first and renamed over it, so a write that
+    // fails part way leaves the old file in place, not half an image.
+    writeFile: async (path, content, replace): Promise<void> => {
+      const target = vscode.Uri.parse(path);
+      const folder = vscode.Uri.joinPath(target, '..');
+      const name = target.path.slice(target.path.lastIndexOf('/') + 1);
+      const random = randomBytes(4).toString('hex');
+      const temporary = vscode.Uri.joinPath(folder, `.${name}.${random}.tmp`);
+      await vscode.workspace.fs.createDirectory(folder);
+      try {
+        await vscode.workspace.fs.writeFile(temporary, new TextEncoder().encode(content));
+        await vscode.workspace.fs.rename(temporary, target, { overwrite: replace });
+      } catch (error: unknown) {
+        await Promise.resolve(vscode.workspace.fs.delete(temporary)).catch(() => undefined);
+        throw error;
+      }
     },
   };
 }
 
-/** How the settings accessor is seen by the helpers below. */
-type SettingsReader = { read(): { values: Record<string, unknown> } };
-
-/** The bulk export with progress, shared by both Export All commands. */
+/**
+ * The bulk export with progress, shared by both Export All commands. Null
+ * when replacing existing files is declined.
+ */
 function runBulkExport(
   context: OperationContext,
   renderer: RendererClient,
@@ -444,10 +517,10 @@ function runBulkExport(
   settings: SettingsReader,
   document: ActiveMarkdown,
   directory: string
-): Promise<ExportOutcome> {
+): Promise<ExportOutcome | null> {
   return context.progress.run({ title: context.l10n.t('Exporting diagrams…') }, (report) =>
     exportAll(
-      exporterDeps(context, renderer, palettes, settings),
+      exporterDeps(context, renderer, palettes, settings, document.textDocument.uri),
       document.path,
       directory,
       document.text,
@@ -473,6 +546,9 @@ async function reportOutcome(
     messages.push(context.l10n.t('Exported {0} diagram(s)', String(outcome.written.length)));
   }
   messages.push(...extra);
+  if (outcome.kept > 0) {
+    messages.push(context.l10n.t('{0} existing file(s) kept', String(outcome.kept)));
+  }
   if (outcome.failed.length > 0) {
     messages.push(context.l10n.t('{0} failed', String(outcome.failed.length)));
     for (const failure of outcome.failed) {
@@ -647,19 +723,22 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         return;
       }
 
-      const directory = exportDirectory(context, settings);
+      const directory = exportDirectory(context, settings, document.textDocument.uri);
       if (directory === null) {
         return;
       }
 
       const result = await exportOne(
-        exporterDeps(context, renderer, palettes, settings),
+        exporterDeps(context, renderer, palettes, settings, document.textDocument.uri),
         document.path,
         directory,
         block,
         name
       );
 
+      if (result === null) {
+        return;
+      }
       if (result.error !== null) {
         context.logger.warn(`Export failed: ${result.error}`);
         await context.notify.error(context.l10n.t('Could not export the diagram: {0}', result.error));
@@ -682,12 +761,15 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         return;
       }
 
-      const directory = exportDirectory(context, settings);
+      const directory = exportDirectory(context, settings, document.textDocument.uri);
       if (directory === null) {
         return;
       }
 
       const outcome = await runBulkExport(context, renderer, palettes, settings, document, directory);
+      if (outcome === null) {
+        return;
+      }
       await reportOutcome(context, outcome, [], false);
     },
   });
@@ -704,12 +786,15 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         return;
       }
 
-      const directory = exportDirectory(context, settings);
+      const directory = exportDirectory(context, settings, document.textDocument.uri);
       if (directory === null) {
         return;
       }
 
       const outcome = await runBulkExport(context, renderer, palettes, settings, document, directory);
+      if (outcome === null) {
+        return;
+      }
 
       // The exports take time. If the document changed meanwhile, the files
       // no longer match its blocks and every line a reference would be
