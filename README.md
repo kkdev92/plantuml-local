@@ -288,9 +288,21 @@ and would show the referenced image as a second copy.
 - `!include` of a URL or of a file is not supported: URL-based directives are
   rejected with an inline message, and file includes are not available in the
   bundled browser build of the engine
-- Remote themes, images and other network resources are not supported
+- Remote themes and other network resources are not supported
+- Images (`<img:…>`) are not loaded, local or remote: the engine draws an
+  `[img TBD…]` placeholder in their place
 - Emoji (`<:smile:>`) are not supported: their images are not bundled, and a
   diagram using one shows an inline message instead
+- A block draws one diagram: a second `@startuml` … `@enduml` in the same
+  block, and the pages after `newpage`, are left out without an error
+- `!includesub` is ignored without an error
+- Functions that read the machine return nothing: `%getenv()`, `%filename()`
+  and `%dirpath()` are empty and `%file_exists()` is `0`
+- Hyperlinks (`[[https://…]]`) are drawn as text, not as links
+- A diagram wider or taller than 8192 pixels is not drawn; an error is shown
+  instead
+- Only the first error in a diagram is reported
+- Start and end lines must be lowercase: `@StartUml` fails
 - Four `!theme` themes are not bundled: `mars`, `sunlust`, `toy` and `vibrant`
 - Features excluded from the bundled PlantUML browser build are unavailable.
   Among them: embedded diagrams (`{{ … }}` inside a note, a legend or a class
