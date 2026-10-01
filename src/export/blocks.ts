@@ -37,11 +37,13 @@ export interface PlantUmlBlock {
   /** Zero-based line of the closing fence, or of the last content line. */
   closeLine: number;
   /**
-   * What precedes the opening fence on its line: indentation, and the
-   * markers of a block quote or a list item (`> `, `- `) when the block is
-   * inside one.
+   * What starts a new line inside the block quotes and list items that hold
+   * the block: `> ` for a quote, the item's indentation for a list. Empty for
+   * a block at the top level of the document.
    */
-  prefix: string;
+  container: string;
+  /** Whether the block ends with a closing fence, rather than running on. */
+  closed: boolean;
 }
 
 /**
@@ -110,6 +112,21 @@ function withoutFrontMatter(lines: string[]): string[] {
 }
 
 /**
+ * The start of a new line inside the containers that hold a fence, from
+ * what precedes the fence on its own line: quote markers stay, list markers
+ * become the spaces they occupy.
+ */
+function containerOf(before: string): string {
+  return before.replace(/(?:[-*+]|\d{1,9}[.)])(?=[ \t]|$)/g, (marker) => ' '.repeat(marker.length));
+}
+
+/** Whether `line` closes a fence opened with `markup`, inside any container. */
+function closesFence(line: string | undefined, markup: string): boolean {
+  const run = /^(`{3,}|~{3,})[ \t]*$/.exec((line ?? '').replace(/^[ \t>]*/, ''))?.[1];
+  return run !== undefined && run[0] === markup[0] && run.length >= markup.length;
+}
+
+/**
  * Returns every diagram block in `text`, in document order.
  *
  * Blocks in other languages are skipped — a ` ```markdown ` block
@@ -134,7 +151,8 @@ export function findPlantUmlBlocks(text: string): PlantUmlBlock[] {
       sourceLine: openLine + 1 + Math.max(leadingBlank, 0),
       openLine,
       closeLine: end - 1,
-      prefix: opening.slice(0, Math.max(opening.indexOf(token.markup), 0)),
+      container: token.level === 0 ? '' : containerOf(opening.slice(0, Math.max(opening.indexOf(token.markup), 0))),
+      closed: end - 1 > openLine && closesFence(lines[end - 1], token.markup),
     });
   }
 

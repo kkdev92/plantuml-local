@@ -599,6 +599,26 @@ describe('export (dist)', () => {
     expect(editor.document.getText()).toBe(after);
   });
 
+  it('update-references leaves the references alone when the document changed during the export', async () => {
+    const text = ['```plantuml moving', '@startuml', 'A -> B : m', '@enduml', '```'].join('\n');
+    const editor = makeEditor('file:///c/moving/doc.md', text, 0);
+    // An edit while the export runs: the version moves once the SVG is written.
+    const svg = 'file:///c/moving/images/moving.svg';
+    Object.defineProperty(editor.document, 'version', {
+      get: () => (vscodeStub._test.writtenFiles.has(svg) ? 2 : 1),
+    });
+    vscodeStub._test.setActiveEditor(editor);
+    const warningsBefore = vscodeStub._test.notifications.warn.length;
+
+    await vscodeStub._test.registeredCommands.get('plantumlLocal.exportAllAndUpdateRefs')?.();
+
+    expect(vscodeStub._test.writtenFiles.get(svg)).toContain('m');
+    expect(editor.document.getText()).toBe(text);
+    const warning = vscodeStub._test.notifications.warn.slice(warningsBefore).join('\n');
+    expect(warning).toContain('Exported 1 diagram(s)');
+    expect(warning).toContain('The document changed during the export, so the references were not updated');
+  });
+
   it('update-references links no block that the engine could not render', async () => {
     const text = [
       '```plantuml working',

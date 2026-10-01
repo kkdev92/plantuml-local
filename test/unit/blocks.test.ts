@@ -127,13 +127,13 @@ describe('findPlantUmlBlocks', () => {
       )
     );
 
-    expect(blocks.map((b) => [b.name, b.prefix])).toEqual([
-      ['top', ''],
-      ['quoted', '> '],
-      ['listed', '  '],
-      ['deeplisted', '    '],
-      ['alias', ''],
-      ['tilde', ''],
+    expect(blocks.map((b) => [b.name, b.container, b.closed])).toEqual([
+      ['top', '', true],
+      ['quoted', '> ', true],
+      ['listed', '  ', true],
+      ['deeplisted', '    ', true],
+      ['alias', '', true],
+      ['tilde', '', true],
     ]);
     for (const block of blocks) {
       expect(block.source, String(block.name)).toBe('@startuml\nA -> B\n@enduml');
@@ -141,6 +141,17 @@ describe('findPlantUmlBlocks', () => {
     expect(blocks[1]?.openLine).toBe(8);
     expect(blocks[1]?.sourceLine).toBe(9);
     expect(blocks[1]?.closeLine).toBe(12);
+  });
+
+  it('turns list markers into spaces in the container, and tells an unclosed fence', () => {
+    const blocks = findPlantUmlBlocks(
+      md('- ```plantuml marker', '  @startuml', '  ```', '', '> 1. ```plantuml both', '>    @startuml', '>    ```', '', '```plantuml open', '@startuml')
+    );
+    expect(blocks.map((b) => [b.name, b.container, b.closed])).toEqual([
+      ['marker', '  ', true],
+      ['both', '>    ', true],
+      ['open', '', false],
+    ]);
   });
 
   it('takes only plantuml and puml, exactly', () => {

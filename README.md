@@ -242,8 +242,9 @@ machine-managed: renaming a block or changing the export directory rewrites the
 line on the next run, while every line without the marker — including a
 hand-written reference to the same file — is never touched. The update command
 is idempotent: running it twice changes nothing, and one Undo reverts whatever
-it wrote. A block inside a block quote or a nested list item is exported like
-any other, but gets no reference line yet.
+it wrote. A block inside a block quote or a list item gets its reference inside
+the same quote or item. If the document changes while the export runs, the files
+are written but the references are left alone; run the command again.
 
 Exports use the light palette regardless of your editor theme, since the files
 face hosts whose background this extension does not control;
