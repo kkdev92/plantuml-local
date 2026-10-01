@@ -31,7 +31,7 @@ export interface TextEditorStub {
     languageId: string;
     version: number;
     isUntitled: boolean;
-    uri: { toString(): string; scheme: string };
+    uri: { toString(): string; scheme: string; path: string };
     getText(): string;
     lineAt(line: number): { text: string };
     /** Applied by the stub's `workspace.applyEdit`. */

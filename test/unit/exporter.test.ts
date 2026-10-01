@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 
-import { findPlantUmlBlocks } from '../../src/export/blocks';
+import { findFileDiagrams, findPlantUmlBlocks } from '../../src/export/blocks';
 import {
   addBackground,
   exportAll,
@@ -52,6 +52,17 @@ function makeDeps(
 }
 
 const DOC = '/repo/docs/design.md';
+
+/** Exports the diagram blocks of a Markdown text. */
+function exportMarkdown(
+  deps: ExporterDeps,
+  documentPath: string,
+  directory: string,
+  text: string,
+  onProgress?: (done: number, total: number, name: string) => void
+): ReturnType<typeof exportAll> {
+  return exportAll(deps, documentPath, directory, findPlantUmlBlocks(text), onProgress);
+}
 
 /** What the bundled engine returns for a source it cannot render (see engine-error.test.ts). */
 function engineOutput(name: string): string {
@@ -326,7 +337,7 @@ describe('exportAll', () => {
   it('exports every named block and counts the unnamed ones', async () => {
     const deps = makeDeps();
 
-    const outcome = await exportAll(deps, DOC, 'images', document);
+    const outcome = await exportMarkdown(deps, DOC, 'images', document);
 
     expect(outcome?.written.map((r) => r.name)).toEqual(['one', 'two']);
     expect(outcome?.failed).toHaveLength(0);
@@ -343,7 +354,7 @@ describe('exportAll', () => {
       ),
     });
 
-    const outcome = await exportAll(deps, DOC, 'images', document);
+    const outcome = await exportMarkdown(deps, DOC, 'images', document);
 
     expect(outcome?.failed.map((r) => r.name)).toEqual(['one']);
     expect(outcome?.written.map((r) => r.name)).toEqual(['two']);
@@ -356,7 +367,7 @@ describe('exportAll', () => {
       ),
     });
 
-    const outcome = await exportAll(deps, DOC, 'images', document);
+    const outcome = await exportMarkdown(deps, DOC, 'images', document);
 
     expect(outcome?.failed.map((r) => r.name)).toEqual(['one']);
     expect(outcome?.failed[0]?.error).toBe('engine: cannot include shared.puml @ 3');
@@ -366,7 +377,7 @@ describe('exportAll', () => {
 
   it('reports progress for each diagram', async () => {
     const seen: string[] = [];
-    await exportAll(makeDeps(), DOC, 'images', document, (done, total, name) => {
+    await exportMarkdown(makeDeps(), DOC, 'images', document, (done, total, name) => {
       seen.push(`${String(done)}/${String(total)} ${name}`);
     });
 
@@ -375,7 +386,7 @@ describe('exportAll', () => {
 
   it('refuses a name that could escape the export directory, rather than counting it as no name', async () => {
     const deps = makeDeps();
-    const outcome = await exportAll(
+    const outcome = await exportMarkdown(
       deps,
       DOC,
       'images',
@@ -395,7 +406,7 @@ describe('exportAll', () => {
       { '/repo/docs/images/one.svg': 'old one', '/repo/docs/images/two.svg': 'old two' }
     );
 
-    const outcome = await exportAll(deps, DOC, 'images', document);
+    const outcome = await exportMarkdown(deps, DOC, 'images', document);
 
     expect(deps.confirmReplace).toHaveBeenCalledOnce();
     expect(deps.confirmReplace).toHaveBeenCalledWith(
@@ -415,7 +426,7 @@ describe('exportAll', () => {
       { '/repo/docs/images/one.svg': 'old one' }
     );
 
-    const outcome = await exportAll(deps, DOC, 'images', document);
+    const outcome = await exportMarkdown(deps, DOC, 'images', document);
 
     // One file to replace, but another diagram to write: keeping is a choice.
     expect(deps.confirmReplace).toHaveBeenCalledWith(['/repo/docs/images/one.svg'], true);
@@ -432,7 +443,7 @@ describe('exportAll', () => {
   it('writes nothing at all when replacing is declined', async () => {
     const deps = makeDeps({}, { '/repo/docs/images/two.svg': 'old two' });
 
-    const outcome = await exportAll(deps, DOC, 'images', document);
+    const outcome = await exportMarkdown(deps, DOC, 'images', document);
 
     expect(outcome).toBeNull();
     expect(deps.writeFile).not.toHaveBeenCalled();
@@ -444,7 +455,7 @@ describe('exportAll', () => {
       { '/repo/docs/images/one.svg': '<svg><rect width="100%" height="100%" fill="#FFFFFF"/>a</svg>' }
     );
 
-    const outcome = await exportAll(deps, DOC, 'images', document);
+    const outcome = await exportMarkdown(deps, DOC, 'images', document);
 
     expect(deps.confirmReplace).not.toHaveBeenCalled();
     expect(outcome?.written.map((r) => r.name)).toEqual(['one', 'two']);
@@ -452,7 +463,7 @@ describe('exportAll', () => {
   });
 
   it('returns an empty outcome for a document with no diagrams', async () => {
-    const outcome = await exportAll(makeDeps(), DOC, 'images', '# Title\n\nProse only.');
+    const outcome = await exportMarkdown(makeDeps(), DOC, 'images', '# Title\n\nProse only.');
     expect(outcome).toEqual({ written: [], failed: [], unnamed: 0, kept: 0 });
   });
 
@@ -460,7 +471,7 @@ describe('exportAll', () => {
     // The preview rejects these before the engine sees them; export has to
     // agree, or the same block would write out an error diagram as a file.
     const deps = makeDeps();
-    const outcome = await exportAll(
+    const outcome = await exportMarkdown(
       deps,
       DOC,
       'images',
@@ -476,7 +487,7 @@ describe('exportAll', () => {
 
   it('refuses a block with two diagrams or with pages, rather than writing part of it', async () => {
     const deps = makeDeps();
-    const outcome = await exportAll(
+    const outcome = await exportMarkdown(
       deps,
       DOC,
       'images',
@@ -510,9 +521,66 @@ describe('exportAll', () => {
 
   it('exports a diagram missing its end line with the line added', async () => {
     const deps = makeDeps();
-    const outcome = await exportAll(deps, DOC, 'images', '```plantuml open\n@startuml\nA -> B\n```');
+    const outcome = await exportMarkdown(deps, DOC, 'images', '```plantuml open\n@startuml\nA -> B\n```');
 
     expect(outcome?.written.map((r) => r.name)).toEqual(['open']);
     expect(deps.render).toHaveBeenCalledWith('@startuml\nA -> B\n@enduml', false);
+  });
+
+  it('exports each diagram of a PlantUML file on its own, under its id', async () => {
+    const file = [
+      "' the order flow",
+      '@startuml(id=orders)',
+      'A -> B',
+      '@enduml',
+      '',
+      '@startuml',
+      'C -> D',
+      '@enduml',
+      '',
+      '@startuml(id=billing)',
+      'E -> F',
+      '@enduml',
+    ].join('\n');
+    const deps = makeDeps();
+
+    const outcome = await exportAll(deps, '/repo/docs/flows.puml', 'images', findFileDiagrams(file, 'flows'));
+
+    // One diagram at a time: given the whole file, the engine draws the first only.
+    expect(deps.render.mock.calls.map((call) => call[0])).toEqual([
+      '@startuml(id=orders)\nA -> B\n@enduml',
+      '@startuml(id=billing)\nE -> F\n@enduml',
+    ]);
+    expect(outcome?.written.map((r) => r.path)).toEqual([
+      '/repo/docs/images/orders.svg',
+      '/repo/docs/images/billing.svg',
+    ]);
+    expect(outcome?.unnamed).toBe(1);
+  });
+
+  it('names the line of the PlantUML file an engine error points to', async () => {
+    const file = [
+      '@startuml(id=first)',
+      'A -> B',
+      '@enduml',
+      '',
+      '@startuml(id=broken)',
+      'Alice -> Bob',
+      'this is not valid ;;; [[[',
+      '@enduml',
+    ].join('\n');
+    const deps = makeDeps({
+      render: vi.fn((source: string) =>
+        Promise.resolve(source.includes('broken') ? engineOutput('syntax-error') : '<svg/>')
+      ),
+    });
+
+    const outcome = await exportAll(deps, '/repo/docs/flows.puml', 'images', findFileDiagrams(file, 'flows'));
+
+    // The engine blames line 3 of the diagram, which is line 7 of the file.
+    expect(outcome?.failed.map((r) => [r.name, r.error])).toEqual([
+      ['broken', 'engine: Syntax Error? (Assumed diagram type: sequence) @ 7'],
+    ]);
+    expect(outcome?.written.map((r) => r.name)).toEqual(['first']);
   });
 });

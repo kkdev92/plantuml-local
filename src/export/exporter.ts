@@ -1,7 +1,7 @@
 import { DIAGRAM_BACKDROP, EMOJI_UNAVAILABLE, hasRemoteReference } from '../core/constants';
 import { diagramShape } from '../core/shape';
 import { recognizeEngineError } from '../render/engine-error';
-import { findPlantUmlBlocks, isValidBlockName, type PlantUmlBlock } from './blocks';
+import { isValidBlockName, type PlantUmlBlock } from './blocks';
 
 /**
  * Renders diagrams to SVG files next to the document.
@@ -301,8 +301,10 @@ export async function exportOne(
 }
 
 /**
- * Exports every named block in `text`. Null when replacing the files
- * already there is declined, in which case nothing is written.
+ * Exports every named block of a document: its ` ```plantuml ` blocks
+ * (findPlantUmlBlocks) or the diagrams of a PlantUML file
+ * (findFileDiagrams). Null when replacing the files already there is
+ * declined, in which case nothing is written.
  *
  * Unnamed blocks are counted rather than guessed at: a positional name
  * would move the moment a block is inserted above it, silently orphaning
@@ -313,10 +315,9 @@ export async function exportAll(
   deps: ExporterDeps,
   documentPath: string,
   directory: string,
-  text: string,
+  blocks: readonly PlantUmlBlock[],
   onProgress?: (done: number, total: number, name: string) => void
 ): Promise<ExportOutcome | null> {
-  const blocks = findPlantUmlBlocks(text);
   const named = blocks.filter(
     (block): block is PlantUmlBlock & { name: string } => block.name !== null
   );
