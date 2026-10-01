@@ -14,6 +14,8 @@ import {
 } from '@kkdev92/vscode-ext-kit';
 import type MarkdownIt from 'markdown-it';
 import { randomBytes } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import * as vscode from 'vscode';
 
 import {
@@ -41,6 +43,13 @@ import {
   type ExportOutcome,
 } from './export/exporter';
 import { lineAfterEdits, planReferenceEdits, type ReferenceEdit } from './export/references';
+import {
+  lineContext,
+  mightSuggest,
+  readCompletionData,
+  suggest,
+  type CompletionData,
+} from './language/completion';
 import {
   checkSource,
   renderProblems,
@@ -1093,6 +1102,104 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
       context.signal.addEventListener('abort', () => {
         selectionChanged.dispose();
         editorChanged.dispose();
+      });
+    },
+  });
+
+  module.hostedServices.add({
+    id: 'plantuml.completion',
+    start: (context) => {
+      // Suggestions in the diagrams of Markdown documents and PlantUML files
+      // (src/language/completion.ts). Markdown turns quick suggestions off,
+      // so there they open on the characters a suggestion starts after.
+      let data: CompletionData | undefined;
+      let scanned = '';
+      let blocks: readonly PlantUmlBlock[] = [];
+
+      const provide = (
+        document: vscode.TextDocument,
+        position: vscode.Position
+      ): vscode.CompletionItem[] | undefined => {
+        const text = document.lineAt(position.line).text;
+        if (!mightSuggest(text.slice(0, position.character))) {
+          return undefined;
+        }
+
+        // The diagram text up to the cursor line, without the block's quote
+        // markers, in which the line is `line`.
+        let container = '';
+        let source = document.getText();
+        let line = position.line;
+        if (document.languageId !== 'plantuml') {
+          const stamp = `${document.uri.toString()}#${String(document.version)}`;
+          if (stamp !== scanned) {
+            blocks = findPlantUmlBlocks(source);
+            scanned = stamp;
+          }
+          const block = blocks.find(
+            (candidate) =>
+              position.line > candidate.openLine &&
+              (position.line < candidate.closeLine ||
+                (!candidate.closed && position.line === candidate.closeLine))
+          );
+          if (block === undefined) {
+            return undefined;
+          }
+          container = block.container;
+          const lines: string[] = [];
+          for (let at = block.openLine + 1; at <= position.line; at++) {
+            const body = document.lineAt(at).text;
+            lines.push(body.startsWith(container) ? body.slice(container.length) : body);
+          }
+          source = lines.join('\n');
+          line = lines.length - 1;
+        }
+        const where = lineContext(source, line);
+        if (where === null) {
+          return undefined;
+        }
+
+        data ??= readCompletionData(
+          readFileSync(join(__dirname, 'engine', 'themes.cjs'), 'utf8'),
+          readFileSync(join(__dirname, 'engine', 'openiconic.cjs'), 'utf8')
+        );
+        const offset = text.startsWith(container) ? container.length : 0;
+        const found = suggest(
+          text.slice(offset, position.character),
+          text.slice(position.character),
+          where.open,
+          data
+        );
+        if (found === null) {
+          return undefined;
+        }
+        const start = new vscode.Position(position.line, offset + found.start);
+        const end = new vscode.Position(position.line, offset + found.end);
+        const kind =
+          found.kind === 'keyword' ? vscode.CompletionItemKind.Keyword : vscode.CompletionItemKind.Value;
+        return found.items.map((suggestion, index) => {
+          const item = new vscode.CompletionItem(suggestion.label, kind);
+          item.insertText = suggestion.insert;
+          item.range = {
+            inserting: new vscode.Range(start, position),
+            replacing: new vscode.Range(start, end),
+          };
+          // In the order given: `@startuml` first, directives grouped.
+          item.sortText = String(index).padStart(4, '0');
+          return item;
+        });
+      };
+
+      const registration = vscode.languages.registerCompletionItemProvider(
+        [{ language: 'markdown' }, { language: 'plantuml' }],
+        { provideCompletionItems: provide },
+        '@',
+        '!',
+        '&',
+        ' '
+      );
+      context.signal.addEventListener('abort', () => {
+        registration.dispose();
       });
     },
   });
