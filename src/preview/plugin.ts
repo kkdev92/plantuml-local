@@ -17,8 +17,9 @@ import type { RenderLog } from '../core/types';
  * cycle:
  *
  * 1. `fence` is called; if the SVG for this source is cached, return it.
- * 2. Otherwise return a placeholder and start rendering in the
- *    background.
+ * 2. Otherwise start rendering in the background, and return the diagram
+ *    last shown at this place in the document (or a placeholder the first
+ *    time), so editing a block does not make the preview flicker.
  * 3. When the render settles, store the result and ask VS Code to
  *    refresh the preview (`requestRefresh`).
  * 4. The refreshed preview calls `fence` again; the cache hits and the
@@ -32,7 +33,7 @@ import type { RenderLog } from '../core/types';
 
 /** User-visible strings, localised by the caller (vscode.l10n). */
 export interface PluginLabels {
-  /** Placeholder shown while a diagram renders. */
+  /** Placeholder shown while a diagram renders for the first time. */
   loading: string;
   /** Heading of the error box. */
   failedTitle: string;
@@ -132,9 +133,43 @@ export function createPlantUmlPlugin(deps: PluginDeps): PlantUmlPlugin {
   const failed = createBoundedStore(MAX_CACHE_ENTRIES, MAX_CACHE_BYTES);
   /** Keys currently rendering, so a preview refresh does not re-enqueue. */
   const inFlight = new Set<string>();
+  /**
+   * Document and block position → the diagram last shown there. A source
+   * that changed by one character is a cache miss; showing what was there
+   * until the new render lands keeps the preview from flickering while the
+   * author types.
+   */
+  const shown = createBoundedStore(MAX_CACHE_ENTRIES, MAX_CACHE_BYTES);
 
   function cacheKey(source: string, dark: boolean): string {
     return `${dark ? 'dark' : 'light'}\n${source}`;
+  }
+
+  function isPlantUmlFence(token: { type?: string; info: string } | undefined): boolean {
+    return token !== undefined && token.info.trim().split(/\s+/)[0] === 'plantuml';
+  }
+
+  /**
+   * Where a block sits: the document VS Code is previewing and how many
+   * ```plantuml blocks come before it. Undefined when the document is not
+   * known (markdown-it rendering a plain string), so a diagram is never
+   * carried over to another document.
+   */
+  function positionKey(tokens: { type: string; info: string }[], index: number, env: unknown): string | undefined {
+    // A vscode.Uri, whose toString() is the URI.
+    const document = (env as { currentDocument?: { toString(): string } | null } | undefined)
+      ?.currentDocument;
+    if (document === undefined || document === null) {
+      return undefined;
+    }
+    let ordinal = 0;
+    for (let i = 0; i < index; i++) {
+      const token = tokens[i];
+      if (token?.type === 'fence' && isPlantUmlFence(token)) {
+        ordinal++;
+      }
+    }
+    return `${document.toString()}\n${String(ordinal)}`;
   }
 
   function startRender(source: string, dark: boolean, key: string): void {
@@ -188,6 +223,7 @@ export function createPlantUmlPlugin(deps: PluginDeps): PlantUmlPlugin {
     clearCache(): void {
       rendered.clear();
       failed.clear();
+      shown.clear();
       deps.requestRefresh();
     },
 
@@ -219,10 +255,8 @@ export function createPlantUmlPlugin(deps: PluginDeps): PlantUmlPlugin {
         if (token === undefined) {
           return '';
         }
-        const language = token.info.trim().split(/\s+/)[0];
-
         // Everything that is not ```plantuml stays untouched.
-        if (language !== 'plantuml') {
+        if (!isPlantUmlFence(token)) {
           return fallback !== undefined
             ? fallback(tokens, index, options, env, self)
             : self.renderToken(tokens, index, options);
@@ -241,8 +275,13 @@ export function createPlantUmlPlugin(deps: PluginDeps): PlantUmlPlugin {
         const dark = deps.isDark();
         const key = cacheKey(source, dark);
 
+        const position = positionKey(tokens, index, env);
+
         const html = rendered.get(key);
         if (html !== undefined) {
+          if (position !== undefined) {
+            shown.set(position, html);
+          }
           return html;
         }
 
@@ -252,7 +291,11 @@ export function createPlantUmlPlugin(deps: PluginDeps): PlantUmlPlugin {
         }
 
         startRender(source, dark, key);
-        return `<div class="plantuml-diagram plantuml-loading">${deps.escapeHtml(deps.labels.loading)}</div>`;
+        const previous = position !== undefined ? shown.get(position) : undefined;
+        return (
+          previous ??
+          `<div class="plantuml-diagram plantuml-loading">${deps.escapeHtml(deps.labels.loading)}</div>`
+        );
       };
 
       return md;
