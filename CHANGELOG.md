@@ -34,6 +34,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and only the first page of a diagram, and dropped the rest without a word.
   The preview now explains that each diagram or page needs a block of its
   own, and export refuses the block rather than writing part of it.
+- `markdown-it` 14.3.2 ships with the extension, with its dependencies
+  linkify-it, mdurl, punycode.js and uc.micro. The export commands use it to
+  find the diagram blocks of a document the way VS Code's preview does. Their
+  licences are listed in `THIRD_PARTY_NOTICES.md`.
+- `@plantuml/core` is pinned to 1.2026.8, the engine already shipped, rather
+  than `^1.2026.8`, so an install cannot pick up an engine the tests did not
+  run against.
 
 ### Fixed
 
