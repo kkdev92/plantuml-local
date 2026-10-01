@@ -1154,3 +1154,53 @@ describe('completion (dist)', () => {
     });
   });
 });
+
+describe('templates (dist)', () => {
+  const complete = (
+    document: TextEditorStub['document'],
+    line: number,
+    character: number
+  ): CompletionItemStub[] | undefined =>
+    vscodeStub._test.completionProviders[0]?.provider.provideCompletionItems(
+      document,
+      new vscodeStub.Position(line, character)
+    );
+  const inserted = (item: CompletionItemStub | undefined): string =>
+    typeof item?.insertText === 'object' ? item.insertText.value : String(item?.insertText);
+
+  it('offers a whole block in the text of a Markdown document, the bare diagram in an empty block', () => {
+    const document = makeEditor(
+      'file:///c/templates/doc.md',
+      ['# Title', '', 'pu', '', '```plantuml', 'pu', '```', '```plantuml', '@startuml', 'pu', '```'].join('\n'),
+      0
+    ).document;
+
+    const text = complete(document, 2, 2);
+    expect(text?.[0]?.label).toEqual({ label: 'puml-sequence', description: 'Sequence diagram' });
+    expect(inserted(text?.[0])).toMatch(/^```plantuml \$\{1:sequence-diagram\}\n@startuml\n[\s\S]*\n@enduml\n```$/);
+    expect(text?.[0]?.keepWhitespace).toBe(true);
+    expect(text).toHaveLength(6);
+
+    expect(inserted(complete(document, 5, 2)?.[0])).toMatch(/^@startuml\n[\s\S]*\n@enduml$/);
+    // Inside a diagram: no second start line.
+    expect(complete(document, 9, 2)).toBeUndefined();
+  });
+
+  it('offers nothing in another code block', () => {
+    const document = makeEditor('file:///c/templates/js.md', ['```js', 'pu', '```'].join('\n'), 0).document;
+
+    expect(complete(document, 1, 2)).toBeUndefined();
+  });
+
+  it('offers the bare diagram between the diagrams of a PlantUML file', () => {
+    const document = makeEditor(
+      'file:///c/templates/flows.puml',
+      ['@startuml', 'A -> B', '@enduml', 'pu'].join('\n'),
+      0,
+      { languageId: 'plantuml' }
+    ).document;
+
+    expect(inserted(complete(document, 3, 2)?.[0])).toMatch(/^@startuml\n/);
+    expect(complete(document, 1, 2)).toBeUndefined();
+  });
+});

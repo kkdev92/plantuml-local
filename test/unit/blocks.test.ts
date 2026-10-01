@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { blockAtLine, findFileDiagrams, findPlantUmlBlocks, isValidBlockName } from '../../src/export/blocks';
+import { blockAtLine, findFileDiagrams, findPlantUmlBlocks, isProseLine, isValidBlockName } from '../../src/export/blocks';
 
 const md = (...lines: string[]): string => lines.join('\n');
 
@@ -187,6 +187,38 @@ describe('blockAtLine', () => {
   it('returns null outside every block', () => {
     expect(blockAtLine(blocks, 0)).toBeNull();
     expect(blockAtLine(blocks, 4)).toBeNull();
+  });
+});
+
+describe('isProseLine', () => {
+  const doc = md(
+    '---', // 0
+    'title: x', // 1
+    '---', // 2
+    'text', // 3
+    '```js', // 4
+    'code', // 5
+    '```', // 6
+    '<!--', // 7
+    'comment', // 8
+    '-->', // 9
+    '> quoted', // 10
+    '```plantuml', // 11
+    '@startuml', // 12
+    '```', // 13
+    '' // 14
+  );
+
+  it('is true for the text the preview shows, quotes included', () => {
+    for (const line of [3, 10, 14]) {
+      expect(isProseLine(doc, line), String(line)).toBe(true);
+    }
+  });
+
+  it('is false in front matter, code blocks and HTML blocks', () => {
+    for (const line of [0, 1, 2, 4, 5, 6, 7, 8, 9, 11, 12, 13]) {
+      expect(isProseLine(doc, line), String(line)).toBe(false);
+    }
   });
 });
 

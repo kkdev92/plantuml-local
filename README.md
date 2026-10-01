@@ -174,8 +174,14 @@ In a diagram — a ` ```plantuml ` block or a `.puml` file — suggestions open 
 - `!theme `: the themes that ship with the extension
 - `<&`: the names of the OpenIconic icons
 
+Where a diagram can start, `puml-` offers a template of a sequence, class,
+activity, state, component or use case diagram, with its names to tab through:
+a whole ` ```plantuml ` block in the text of a Markdown file, the bare diagram
+in an empty block or between the diagrams of a `.puml` file.
+
 Markdown turns quick suggestions off, so in a Markdown file the list opens on
-those characters, or with *Trigger Suggest* (`Ctrl+Space`).
+those characters, or with *Trigger Suggest* (`Ctrl+Space`) — type `puml` and
+press it for the templates.
 
 ### Problems
 

@@ -23,6 +23,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   draws and the end line of the open one after `@`, the preprocessor
   directives after `!`, the bundled themes after `!theme` and the OpenIconic
   names after `<&`.
+- **Diagram templates.** `puml-sequence`, `puml-class`, `puml-activity`,
+  `puml-state`, `puml-component` and `puml-usecase` are suggested where a
+  diagram can start: as a whole ```` ```plantuml ```` block in the text of a
+  Markdown document, as the bare diagram in an empty block or between the
+  diagrams of a `.puml` file. Each draws as it is, with its names to tab
+  through.
 - **Problems panel.** The diagrams of open Markdown files are checked, with or
   without a preview, and their problems are listed on the line they are on:
   the engine's errors and warnings, what the bundled engine cannot do

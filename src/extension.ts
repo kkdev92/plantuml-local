@@ -32,6 +32,7 @@ import {
   blockAtLine,
   findFileDiagrams,
   findPlantUmlBlocks,
+  isProseLine,
   isValidBlockName,
   type PlantUmlBlock,
 } from './export/blocks';
@@ -48,7 +49,9 @@ import {
   mightSuggest,
   readCompletionData,
   suggest,
+  suggestTemplates,
   type CompletionData,
+  type Suggestions,
 } from './language/completion';
 import {
   checkSource,
@@ -1108,13 +1111,78 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
 
   module.hostedServices.add({
     id: 'plantuml.completion',
-    start: (context) => {
+    inject: { l10n: Localization },
+    start: (context, { l10n }) => {
       // Suggestions in the diagrams of Markdown documents and PlantUML files
       // (src/language/completion.ts). Markdown turns quick suggestions off,
       // so there they open on the characters a suggestion starts after.
       let data: CompletionData | undefined;
       let scanned = '';
       let blocks: readonly PlantUmlBlock[] = [];
+      const templateNames: Record<string, string> = {
+        sequence: l10n.t('Sequence diagram'),
+        class: l10n.t('Class diagram'),
+        activity: l10n.t('Activity diagram'),
+        state: l10n.t('State diagram'),
+        component: l10n.t('Component diagram'),
+        usecase: l10n.t('Use case diagram'),
+      };
+
+      /** What the list offers at `position`, from where on its line. */
+      const find = (
+        document: vscode.TextDocument,
+        position: vscode.Position,
+        text: string
+      ): { found: Suggestions | null; offset: number } => {
+        const after = text.slice(position.character);
+        if (document.languageId === 'plantuml') {
+          const where = lineContext(document.getText(), position.line);
+          const before = text.slice(0, position.character);
+          return { found: where === null ? null : inDiagram(before, after, where.open), offset: 0 };
+        }
+
+        const stamp = `${document.uri.toString()}#${String(document.version)}`;
+        if (stamp !== scanned) {
+          blocks = findPlantUmlBlocks(document.getText());
+          scanned = stamp;
+        }
+        const block = blocks.find(
+          (candidate) =>
+            position.line > candidate.openLine &&
+            (position.line < candidate.closeLine ||
+              (!candidate.closed && position.line === candidate.closeLine))
+        );
+        if (block === undefined) {
+          // The text of the document: a whole diagram block can start here.
+          const fits = isProseLine(document.getText(), position.line);
+          const before = text.slice(0, position.character);
+          return { found: fits ? suggestTemplates(before, after, true, templateNames) : null, offset: 0 };
+        }
+
+        // The block's lines up to the cursor, without its quote markers.
+        const container = block.container;
+        const lines: string[] = [];
+        for (let at = block.openLine + 1; at <= position.line; at++) {
+          const body = document.lineAt(at).text;
+          lines.push(body.startsWith(container) ? body.slice(container.length) : body);
+        }
+        const where = lineContext(lines.join('\n'), lines.length - 1);
+        const offset = text.startsWith(container) ? container.length : 0;
+        const before = text.slice(offset, position.character);
+        return { found: where === null ? null : inDiagram(before, after, where.open), offset };
+      };
+
+      /** Suggestions on a diagram line: templates only where a diagram can start. */
+      const inDiagram = (before: string, after: string, open: string | null): Suggestions | null => {
+        data ??= readCompletionData(
+          readFileSync(join(__dirname, 'engine', 'themes.cjs'), 'utf8'),
+          readFileSync(join(__dirname, 'engine', 'openiconic.cjs'), 'utf8')
+        );
+        return (
+          suggest(before, after, open, data) ??
+          (open === null ? suggestTemplates(before, after, false, templateNames) : null)
+        );
+      };
 
       const provide = (
         document: vscode.TextDocument,
@@ -1124,62 +1192,32 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         if (!mightSuggest(text.slice(0, position.character))) {
           return undefined;
         }
-
-        // The diagram text up to the cursor line, without the block's quote
-        // markers, in which the line is `line`.
-        let container = '';
-        let source = document.getText();
-        let line = position.line;
-        if (document.languageId !== 'plantuml') {
-          const stamp = `${document.uri.toString()}#${String(document.version)}`;
-          if (stamp !== scanned) {
-            blocks = findPlantUmlBlocks(source);
-            scanned = stamp;
-          }
-          const block = blocks.find(
-            (candidate) =>
-              position.line > candidate.openLine &&
-              (position.line < candidate.closeLine ||
-                (!candidate.closed && position.line === candidate.closeLine))
-          );
-          if (block === undefined) {
-            return undefined;
-          }
-          container = block.container;
-          const lines: string[] = [];
-          for (let at = block.openLine + 1; at <= position.line; at++) {
-            const body = document.lineAt(at).text;
-            lines.push(body.startsWith(container) ? body.slice(container.length) : body);
-          }
-          source = lines.join('\n');
-          line = lines.length - 1;
-        }
-        const where = lineContext(source, line);
-        if (where === null) {
-          return undefined;
-        }
-
-        data ??= readCompletionData(
-          readFileSync(join(__dirname, 'engine', 'themes.cjs'), 'utf8'),
-          readFileSync(join(__dirname, 'engine', 'openiconic.cjs'), 'utf8')
-        );
-        const offset = text.startsWith(container) ? container.length : 0;
-        const found = suggest(
-          text.slice(offset, position.character),
-          text.slice(position.character),
-          where.open,
-          data
-        );
+        const { found, offset } = find(document, position, text);
         if (found === null) {
           return undefined;
         }
+
         const start = new vscode.Position(position.line, offset + found.start);
         const end = new vscode.Position(position.line, offset + found.end);
-        const kind =
-          found.kind === 'keyword' ? vscode.CompletionItemKind.Keyword : vscode.CompletionItemKind.Value;
+        const kind = {
+          keyword: vscode.CompletionItemKind.Keyword,
+          name: vscode.CompletionItemKind.Value,
+          template: vscode.CompletionItemKind.Snippet,
+        }[found.kind];
         return found.items.map((suggestion, index) => {
-          const item = new vscode.CompletionItem(suggestion.label, kind);
-          item.insertText = suggestion.insert;
+          const item = new vscode.CompletionItem(
+            suggestion.detail === undefined
+              ? suggestion.label
+              : { label: suggestion.label, description: suggestion.detail },
+            kind
+          );
+          if (found.kind === 'template') {
+            // The template's lines carry their own quote markers and indent.
+            item.insertText = new vscode.SnippetString(suggestion.insert);
+            item.keepWhitespace = true;
+          } else {
+            item.insertText = suggestion.insert;
+          }
           item.range = {
             inserting: new vscode.Range(start, position),
             replacing: new vscode.Range(start, end),

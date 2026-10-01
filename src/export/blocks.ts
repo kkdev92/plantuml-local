@@ -105,14 +105,37 @@ const parser = new MarkdownIt({ html: true });
  * removing the lines keeps every line number.
  */
 function withoutFrontMatter(lines: string[]): string[] {
+  const end = frontMatterEnd(lines);
+  return end < 0 ? lines : lines.map((line, index) => (index <= end ? '' : line));
+}
+
+/** The closing line of the front matter, or -1 when there is none. */
+function frontMatterEnd(lines: readonly string[]): number {
   if (lines[0]?.trimEnd() !== '---') {
-    return lines;
+    return -1;
   }
-  const end = lines.findIndex((line, index) => index > 0 && line.trimEnd() === '---');
-  if (end < 0) {
-    return lines;
+  return lines.findIndex((line, index) => index > 0 && line.trimEnd() === '---');
+}
+
+/**
+ * Whether `line` of a Markdown document lies outside its front matter, code
+ * blocks and HTML blocks: in the text the preview shows, where a new
+ * diagram block can start.
+ */
+export function isProseLine(text: string, line: number): boolean {
+  const lines = text.split(/\r\n|\r|\n/);
+  if (line <= frontMatterEnd(lines)) {
+    return false;
   }
-  return lines.map((line, index) => (index <= end ? '' : line));
+  return !parser
+    .parse(withoutFrontMatter(lines).join('\n'), {})
+    .some(
+      (token) =>
+        (token.type === 'fence' || token.type === 'code_block' || token.type === 'html_block') &&
+        token.map !== null &&
+        line >= token.map[0] &&
+        line < token.map[1]
+    );
 }
 
 /**

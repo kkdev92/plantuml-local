@@ -124,9 +124,10 @@ export interface UriStub {
 
 /** A `vscode.CompletionItem` as the extension builds it. */
 export interface CompletionItemStub {
-  label: string;
+  label: string | { label: string; description?: string };
   kind?: number;
-  insertText?: string;
+  insertText?: string | { value: string };
+  keepWhitespace?: boolean;
   range?: { inserting: { start: PositionStub; end: PositionStub }; replacing: { start: PositionStub; end: PositionStub } };
   sortText?: string;
 }
@@ -179,8 +180,9 @@ export interface VscodeStub {
       ...triggers: string[]
     ) => { dispose(): void };
   };
-  CompletionItem: new (label: string, kind?: number) => CompletionItemStub;
-  CompletionItemKind: Record<'Keyword' | 'Value', number>;
+  CompletionItem: new (label: CompletionItemStub['label'], kind?: number) => CompletionItemStub;
+  CompletionItemKind: Record<'Keyword' | 'Value' | 'Snippet', number>;
+  SnippetString: new (value: string) => { value: string };
   UIKind: Record<'Desktop' | 'Web', number>;
   ProgressLocation: Record<'SourceControl' | 'Window' | 'Notification', number>;
   StatusBarAlignment: Record<'Left' | 'Right', number>;
@@ -487,9 +489,13 @@ export function createVscodeStub(): VscodeStub {
 
   class CompletionItem implements CompletionItemStub {
     constructor(
-      public label: string,
+      public label: CompletionItemStub['label'],
       public kind?: number
     ) {}
+  }
+
+  class SnippetString {
+    constructor(public value: string) {}
   }
   const completionProviders: CompletionRegistrationStub[] = [];
 
@@ -531,7 +537,8 @@ export function createVscodeStub(): VscodeStub {
     DiagnosticSeverity: { Error: 0, Warning: 1, Information: 2, Hint: 3 },
     Diagnostic,
     CompletionItem,
-    CompletionItemKind: { Keyword: 13, Value: 11 },
+    CompletionItemKind: { Keyword: 13, Value: 11, Snippet: 14 },
+    SnippetString,
     languages: {
       createDiagnosticCollection: () => ({
         set: (uri, items) => {

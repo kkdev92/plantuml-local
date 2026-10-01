@@ -42,5 +42,11 @@
   "{0} reference(s) inserted": "参照 {0} 件を挿入しました",
   "{0} reference(s) updated": "参照 {0} 件を更新しました",
   "Could not update the references": "参照を更新できませんでした",
-  "The document changed during the export, so the references were not updated": "書き出しの間に文書が変わったため、参照は更新しませんでした"
+  "The document changed during the export, so the references were not updated": "書き出しの間に文書が変わったため、参照は更新しませんでした",
+  "Sequence diagram": "シーケンス図",
+  "Class diagram": "クラス図",
+  "Activity diagram": "アクティビティ図",
+  "State diagram": "状態遷移図",
+  "Component diagram": "コンポーネント図",
+  "Use case diagram": "ユースケース図"
 }
