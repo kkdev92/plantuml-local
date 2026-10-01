@@ -26,6 +26,7 @@ function makeDeps(overrides?: Partial<ViewerDeps>): ViewerDeps & { render: Retur
       entry: (name, line) => `${name} (line ${String(line)})`,
       rendering: 'rendering',
       gone: 'gone',
+      choose: 'choose',
       empty: 'empty',
       remoteReference: 'remote',
       emojiUnavailable: 'emoji',
@@ -73,12 +74,17 @@ describe('parseRequest', () => {
 describe('DiagramViewer', () => {
   it('lists the diagrams and draws the one at the cursor, on its palette', async () => {
     const panel = makePanel();
-    const viewer = new DiagramViewer(panel, makeDeps({ isDark: () => true }), 'flows');
+    const viewer = new DiagramViewer(panel, makeDeps({ isDark: () => true }), 'flows', 'file:///flows.puml');
 
     await viewer.show(FLOWS, 5);
 
     expect(of(panel.sent, 'diagrams')).toEqual([
-      { type: 'diagrams', items: ['orders (line 1)', 'Diagram 2 (line 5)'], selected: 1 },
+      {
+        type: 'diagrams',
+        items: ['orders (line 1)', 'Diagram 2 (line 5)'],
+        selected: 1,
+        keep: { uri: 'file:///flows.puml', name: null },
+      },
     ]);
     expect(of(panel.sent, 'render')).toEqual([
       { type: 'render', svg: '<svg>@startuml\nC -> D : unnamed\n@enduml</svg>', backdrop: '#1b1b1b' },
@@ -89,7 +95,7 @@ describe('DiagramViewer', () => {
 
   it('waits for the page before drawing a diagram it was told to show', async () => {
     const panel = makePanel();
-    const viewer = new DiagramViewer(panel, makeDeps(), 'flows');
+    const viewer = new DiagramViewer(panel, makeDeps(), 'flows', 'file:///flows.puml');
 
     viewer.select(FLOWS, 1);
     expect(panel.post).not.toHaveBeenCalled();
@@ -102,7 +108,7 @@ describe('DiagramViewer', () => {
   it('draws the diagram the page picks, and nothing for a message it does not know', async () => {
     const panel = makePanel();
     const deps = makeDeps();
-    const viewer = new DiagramViewer(panel, deps, 'flows');
+    const viewer = new DiagramViewer(panel, deps, 'flows', 'file:///flows.puml');
     viewer.select(FLOWS, null);
 
     await viewer.receive({ type: 'select', index: 1 }, FLOWS);
@@ -117,7 +123,7 @@ describe('DiagramViewer', () => {
   it('follows a named diagram when diagrams move about', async () => {
     const panel = makePanel();
     const deps = makeDeps();
-    const viewer = new DiagramViewer(panel, deps, 'flows');
+    const viewer = new DiagramViewer(panel, deps, 'flows', 'file:///flows.puml');
     await viewer.show(FLOWS, 0);
 
     // A diagram inserted above: the one shown is still `orders`.
@@ -127,10 +133,45 @@ describe('DiagramViewer', () => {
     expect(of(panel.sent, 'diagrams').at(-1)).toMatchObject({ selected: 1 });
   });
 
+  it('gives the page the file and the diagram to keep, for a restart', async () => {
+    const panel = makePanel();
+    await new DiagramViewer(panel, makeDeps(), 'flows', 'file:///flows.puml').show(FLOWS, 1);
+
+    expect(of(panel.sent, 'diagrams')[0]).toMatchObject({ keep: { uri: 'file:///flows.puml', name: 'orders' } });
+  });
+
+  it('comes back after a restart on the diagram it was given by name', async () => {
+    const panel = makePanel();
+    const deps = makeDeps();
+    const viewer = new DiagramViewer(panel, deps, 'flows', 'file:///flows.puml');
+
+    viewer.restore('orders');
+    await viewer.receive({ type: 'ready' }, `@startuml\nfirst\n@enduml\n${FLOWS}`);
+
+    expect(deps.render).toHaveBeenCalledWith('@startuml(id=orders)\nA -> B : orders\n@enduml', false);
+  });
+
+  it('asks for a choice after a restart when the diagram had no name', async () => {
+    const panel = makePanel();
+    const deps = makeDeps();
+    const viewer = new DiagramViewer(panel, deps, 'flows', 'file:///flows.puml');
+
+    viewer.restore(null);
+    await viewer.receive({ type: 'ready' }, FLOWS);
+
+    expect(deps.render).not.toHaveBeenCalled();
+    expect(of(panel.sent, 'diagrams')[0]).toMatchObject({ selected: -1 });
+    expect(panel.sent.at(-1)).toEqual({ type: 'status', text: 'choose', error: false, clear: true });
+
+    // Picking one from the list draws it.
+    await viewer.receive({ type: 'select', index: 1 }, FLOWS);
+    expect(deps.render).toHaveBeenCalledWith('@startuml\nC -> D : unnamed\n@enduml', false);
+  });
+
   it('says so when the diagram shown has gone, rather than showing another', async () => {
     const panel = makePanel();
     const deps = makeDeps();
-    const viewer = new DiagramViewer(panel, deps, 'flows');
+    const viewer = new DiagramViewer(panel, deps, 'flows', 'file:///flows.puml');
     await viewer.show(FLOWS, 0);
     deps.render.mockClear();
 
@@ -147,7 +188,7 @@ describe('DiagramViewer', () => {
     ] as const) {
       const panel = makePanel();
       const deps = makeDeps();
-      await new DiagramViewer(panel, deps, 'one').show(source, 0);
+      await new DiagramViewer(panel, deps, 'one', 'file:///one.puml').show(source, 0);
 
       expect(deps.render, reason).not.toHaveBeenCalled();
       expect(panel.sent.at(-1)).toEqual({ type: 'status', text: reason, error: true, clear: true });
@@ -158,7 +199,7 @@ describe('DiagramViewer', () => {
     const svg = readFileSync(join(__dirname, 'fixtures/engine-output/syntax-error.svg'), 'utf8');
     const panel = makePanel();
     const source = ['@startuml(id=first)', 'A -> B', '@enduml', '', '@startuml', 'Alice -> Bob', 'this is not valid ;;; [[[', '@enduml'].join('\n');
-    const viewer = new DiagramViewer(panel, makeDeps({ render: vi.fn(() => Promise.resolve(svg)) }), 'two');
+    const viewer = new DiagramViewer(panel, makeDeps({ render: vi.fn(() => Promise.resolve(svg)) }), 'two', 'file:///two.puml');
 
     await viewer.show(source, 6);
 
@@ -177,7 +218,7 @@ describe('DiagramViewer', () => {
       render: vi.fn(() => Promise.reject(new Error('java.lang.RuntimeException: Failed to load emoji.js'))),
     });
 
-    await new DiagramViewer(panel, deps, 'one').show('@startuml\nA -> B : <:smile:>\n@enduml', 0);
+    await new DiagramViewer(panel, deps, 'one', 'file:///one.puml').show('@startuml\nA -> B : <:smile:>\n@enduml', 0);
 
     expect(panel.sent.at(-1)).toEqual({ type: 'status', text: 'emoji', error: true, clear: true });
   });
@@ -189,7 +230,7 @@ describe('DiagramViewer', () => {
       .mockImplementationOnce(() => new Promise<string>((resolve) => (finishFirst = resolve)))
       .mockImplementation((source: string) => Promise.resolve(`<svg>${source}</svg>`));
     const panel = makePanel();
-    const viewer = new DiagramViewer(panel, makeDeps({ render }), 'one');
+    const viewer = new DiagramViewer(panel, makeDeps({ render }), 'one', 'file:///one.puml');
 
     const first = viewer.show('@startuml\nold\n@enduml', 0);
     await new Promise((resolve) => setTimeout(resolve, 0));
