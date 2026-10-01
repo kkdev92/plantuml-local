@@ -7,6 +7,7 @@
   "PlantUML render cache cleared.": "PlantUML の描画キャッシュを捨てました。",
   "Exporting needs a trusted workspace. The preview works either way.": "書き出しは信頼されたワークスペースでのみ行えます。プレビューはどちらでも動きます。",
   "Open a Markdown file first.": "先に Markdown ファイルを開いてください。",
+  "Choose the Markdown document to export from": "書き出す Markdown 文書を選んでください",
   "Save the Markdown file before exporting.": "書き出す前に Markdown ファイルを保存してください。",
   "Put the cursor inside a ```plantuml block first.": "先に ```plantuml ブロックの中にカーソルを置いてください。",
   "File name for the exported SVG (without .svg)": "書き出す SVG のファイル名 (.svg は不要)",

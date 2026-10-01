@@ -68,6 +68,31 @@ export interface InputBoxStub {
   dispose: () => void;
 }
 
+/** Enough of `vscode.QuickPick` for the kit's quick-input capability. */
+export interface QuickPickStub {
+  items: readonly { label: string }[];
+  selectedItems: readonly { label: string }[];
+  activeItems: readonly { label: string }[];
+  title: string | undefined;
+  placeholder: string | undefined;
+  prompt: string | undefined;
+  matchOnDescription: boolean;
+  matchOnDetail: boolean;
+  ignoreFocusOut: boolean;
+  canSelectMany: boolean;
+  busy: boolean;
+  enabled: boolean;
+  buttons: readonly unknown[];
+  onDidAccept: (listener: () => void) => { dispose(): void };
+  onDidHide: (listener: () => void) => { dispose(): void };
+  onDidTriggerButton: (listener: (button: unknown) => void) => { dispose(): void };
+  onDidTriggerItemButton: (listener: (event: unknown) => void) => { dispose(): void };
+  onDidChangeActive: (listener: (items: readonly unknown[]) => void) => { dispose(): void };
+  show: () => void;
+  hide: () => void;
+  dispose: () => void;
+}
+
 type EditOp =
   | { type: 'insert'; uri: string; at: PositionStub; text: string }
   | { type: 'replace'; uri: string; start: PositionStub; end: PositionStub; text: string };
@@ -146,6 +171,11 @@ export interface VscodeStub {
      * Answers with `_test.inputBoxReply`, defaulting to a dismissal.
      */
     createInputBox: () => InputBoxStub;
+    /**
+     * The picker the extension shows to choose a document. Answers with
+     * `_test.quickPickReply`, defaulting to a dismissal.
+     */
+    createQuickPick: () => QuickPickStub;
   };
   workspace: {
     getConfiguration: (
@@ -159,6 +189,9 @@ export interface VscodeStub {
     /** Both read by the framework's runtime preflight, at activation. */
     isTrusted: boolean;
     workspaceFolders: unknown[] | undefined;
+    /** `_test.openDocuments`, which is empty unless a test fills it. */
+    textDocuments: TextEditorStub['document'][];
+    asRelativePath: (uri: { toString(): string }) => string;
     fs: {
       createDirectory: (uri: UriStub) => Promise<void>;
       writeFile: (uri: UriStub, content: Uint8Array) => Promise<void>;
@@ -200,6 +233,17 @@ export interface VscodeStub {
     inputBoxReply: string | null;
     /** Prompts shown, for asserting that one was (or was not) raised. */
     inputBoxPrompts: string[];
+    /**
+     * What the next quick pick answers with: the label to accept, `null`
+     * dismisses. Defaults to dismissal, like the input box.
+     */
+    quickPickReply: string | null;
+    /** Quick picks shown, with their titles and item labels. */
+    quickPicksShown: { title: string | undefined; labels: string[] }[];
+    /** What `workspace.textDocuments` returns; empty unless a test fills it. */
+    openDocuments: TextEditorStub['document'][];
+    /** Editors reported visible besides the active one. */
+    visibleEditors: TextEditorStub[];
     /** Sets `window.activeTextEditor` and fires the active-editor listeners. */
     setActiveEditor(editor: TextEditorStub | undefined): void;
     /** Fires the selection listeners for `editor`. */
@@ -252,7 +296,14 @@ export function createVscodeStub(): VscodeStub {
   const theme = { kind: 1 };
   let activeEditor: TextEditorStub | undefined;
   /** Mutable test knobs the window stubs read at call time. */
-  const hooks = { inputBoxReply: null as string | null, inputBoxPrompts: [] as string[] };
+  const hooks = {
+    inputBoxReply: null as string | null,
+    inputBoxPrompts: [] as string[],
+    quickPickReply: null as string | null,
+    quickPicksShown: [] as { title: string | undefined; labels: string[] }[],
+    openDocuments: [] as TextEditorStub['document'][],
+    visibleEditors: [] as TextEditorStub[],
+  };
 
   class Position implements PositionStub {
     constructor(
@@ -329,7 +380,9 @@ export function createVscodeStub(): VscodeStub {
         return activeEditor;
       },
       get visibleTextEditors() {
-        return activeEditor === undefined ? [] : [activeEditor];
+        return activeEditor === undefined
+          ? [...hooks.visibleEditors]
+          : [activeEditor, ...hooks.visibleEditors];
       },
       createOutputChannel: () => ({
         trace: (message) => void logs.push(`trace: ${message}`),
@@ -370,6 +423,57 @@ export function createVscodeStub(): VscodeStub {
           { report: () => undefined },
           { isCancellationRequested: false, onCancellationRequested: () => ({ dispose: () => undefined }) }
         ),
+      createQuickPick: () => {
+        const accept: (() => void)[] = [];
+        const hide: (() => void)[] = [];
+        const pick: QuickPickStub = {
+          items: [],
+          selectedItems: [],
+          activeItems: [],
+          title: undefined,
+          placeholder: undefined,
+          prompt: undefined,
+          matchOnDescription: false,
+          matchOnDetail: false,
+          ignoreFocusOut: false,
+          canSelectMany: false,
+          busy: false,
+          enabled: true,
+          buttons: [],
+          onDidAccept: (listener) => {
+            accept.push(listener);
+            return { dispose: () => undefined };
+          },
+          onDidHide: (listener) => {
+            hide.push(listener);
+            return { dispose: () => undefined };
+          },
+          onDidTriggerButton: () => ({ dispose: () => undefined }),
+          onDidTriggerItemButton: () => ({ dispose: () => undefined }),
+          onDidChangeActive: () => ({ dispose: () => undefined }),
+          show: () => {
+            hooks.quickPicksShown.push({
+              title: pick.title,
+              labels: pick.items.map((item) => item.label),
+            });
+            // Answer asynchronously, as the real widget does.
+            setTimeout(() => {
+              const chosen = pick.items.find((item) => item.label === hooks.quickPickReply);
+              if (chosen === undefined) {
+                for (const listener of hide) listener();
+                return;
+              }
+              pick.selectedItems = [chosen];
+              for (const listener of accept) listener();
+            }, 0);
+          },
+          hide: () => {
+            for (const listener of hide) listener();
+          },
+          dispose: () => undefined,
+        };
+        return pick;
+      },
       createInputBox: () => {
         const accept: (() => void)[] = [];
         const hide: (() => void)[] = [];
@@ -428,6 +532,11 @@ export function createVscodeStub(): VscodeStub {
       },
       isTrusted: true,
       workspaceFolders: undefined,
+      get textDocuments() {
+        return [...hooks.openDocuments];
+      },
+      // Enough of the real rule for labels: the workspace is taken to be /c.
+      asRelativePath: (uri) => uri.toString().replace(/^file:\/\/\/c\//, ''),
       fs: {
         createDirectory: async () => undefined,
         writeFile: async (uri, content) => {
@@ -478,6 +587,15 @@ export function createVscodeStub(): VscodeStub {
         hooks.inputBoxReply = value;
       },
       inputBoxPrompts: hooks.inputBoxPrompts,
+      get quickPickReply() {
+        return hooks.quickPickReply;
+      },
+      set quickPickReply(value: string | null) {
+        hooks.quickPickReply = value;
+      },
+      quickPicksShown: hooks.quickPicksShown,
+      openDocuments: hooks.openDocuments,
+      visibleEditors: hooks.visibleEditors,
       setConfiguration: (key, value) => {
         if (value === undefined) {
           configuration.delete(key);

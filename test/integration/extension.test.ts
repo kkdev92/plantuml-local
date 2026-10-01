@@ -377,6 +377,129 @@ describe('export (dist)', () => {
     expect(vscodeStub._test.notifications.warn.some((m) => m.includes('unnamed'))).toBe(true);
   });
 
+  describe('when no Markdown editor has focus', () => {
+    // A focused preview leaves no active text editor at all; a focused file
+    // of another language is the same situation for these commands.
+    const TWO_BLOCKS = [NAMED_BLOCK, '', NAMED_BLOCK.replace('orders', 'billing')].join('\n');
+
+    function reset(): void {
+      vscodeStub._test.openDocuments.length = 0;
+      vscodeStub._test.visibleEditors.length = 0;
+      vscodeStub._test.quickPickReply = null;
+    }
+
+    it('export-all uses the only open Markdown document without asking', async () => {
+      vscodeStub._test.setActiveEditor(
+        makeEditor('file:///c/only/index.ts', 'const x = 1;', 0, { languageId: 'typescript' })
+      );
+      vscodeStub._test.openDocuments.push(makeEditor('file:///c/only/doc.md', NAMED_BLOCK, 0).document);
+      const picksBefore = vscodeStub._test.quickPicksShown.length;
+      try {
+        await vscodeStub._test.registeredCommands.get('plantumlLocal.exportAllSvg')?.();
+      } finally {
+        reset();
+      }
+
+      expect(vscodeStub._test.writtenFiles.get('file:///c/only/images/orders.svg')).toContain('hi');
+      expect(vscodeStub._test.quickPicksShown.length).toBe(picksBefore);
+    });
+
+    it('export-all asks which document when several are open, rather than taking a visible one', async () => {
+      vscodeStub._test.setActiveEditor(undefined);
+      const visible = makeEditor('file:///c/two/visible.md', NAMED_BLOCK, 0);
+      const previewed = makeEditor('file:///c/two/previewed.md', NAMED_BLOCK.replace('orders', 'billing'), 0);
+      vscodeStub._test.visibleEditors.push(visible);
+      vscodeStub._test.openDocuments.push(previewed.document, visible.document);
+      vscodeStub._test.quickPickReply = 'two/previewed.md';
+      try {
+        await vscodeStub._test.registeredCommands.get('plantumlLocal.exportAllSvg')?.();
+      } finally {
+        reset();
+      }
+
+      // Visible documents are listed first; the choice, not visibility, decides.
+      expect(vscodeStub._test.quickPicksShown.at(-1)).toEqual({
+        title: 'Choose the Markdown document to export from',
+        labels: ['two/visible.md', 'two/previewed.md'],
+      });
+      expect(vscodeStub._test.writtenFiles.has('file:///c/two/images/billing.svg')).toBe(true);
+      expect(vscodeStub._test.writtenFiles.has('file:///c/two/images/orders.svg')).toBe(false);
+    });
+
+    it('export-all writes nothing when the choice is dismissed', async () => {
+      vscodeStub._test.setActiveEditor(undefined);
+      vscodeStub._test.openDocuments.push(
+        makeEditor('file:///c/dismissed/a.md', NAMED_BLOCK, 0).document,
+        makeEditor('file:///c/dismissed/b.md', NAMED_BLOCK, 0).document
+      );
+      const warningsBefore = vscodeStub._test.notifications.warn.length;
+      try {
+        await vscodeStub._test.registeredCommands.get('plantumlLocal.exportAllSvg')?.();
+      } finally {
+        reset();
+      }
+
+      expect([...vscodeStub._test.writtenFiles.keys()].some((k) => k.startsWith('file:///c/dismissed/'))).toBe(false);
+      expect(vscodeStub._test.notifications.warn.length).toBe(warningsBefore);
+    });
+
+    it('export warns when no Markdown document is open at all', async () => {
+      vscodeStub._test.setActiveEditor(undefined);
+      const picksBefore = vscodeStub._test.quickPicksShown.length;
+      try {
+        await vscodeStub._test.registeredCommands.get('plantumlLocal.exportSvg')?.();
+      } finally {
+        reset();
+      }
+
+      expect(vscodeStub._test.notifications.warn.at(-1)).toBe('Open a Markdown file first.');
+      expect(vscodeStub._test.quickPicksShown.length).toBe(picksBefore);
+    });
+
+    it('export takes the only block of a document that has no visible editor', async () => {
+      vscodeStub._test.setActiveEditor(undefined);
+      vscodeStub._test.openDocuments.push(makeEditor('file:///c/lone/doc.md', NAMED_BLOCK, 0).document);
+      try {
+        await vscodeStub._test.registeredCommands.get('plantumlLocal.exportSvg')?.();
+      } finally {
+        reset();
+      }
+
+      expect(vscodeStub._test.writtenFiles.get('file:///c/lone/images/orders.svg')).toContain('hi');
+    });
+
+    it('export needs the cursor when such a document has several blocks', async () => {
+      vscodeStub._test.setActiveEditor(undefined);
+      vscodeStub._test.openDocuments.push(makeEditor('file:///c/several/doc.md', TWO_BLOCKS, 0).document);
+      try {
+        await vscodeStub._test.registeredCommands.get('plantumlLocal.exportSvg')?.();
+      } finally {
+        reset();
+      }
+
+      expect(vscodeStub._test.notifications.warn.at(-1)).toBe(
+        'Put the cursor inside a ```plantuml block first.'
+      );
+      expect([...vscodeStub._test.writtenFiles.keys()].some((k) => k.startsWith('file:///c/several/'))).toBe(false);
+    });
+
+    it("export uses the cursor of the chosen document's own editor", async () => {
+      vscodeStub._test.setActiveEditor(undefined);
+      // Cursor on line 7: inside the second block (lines 6-10).
+      const editor = makeEditor('file:///c/cursor/doc.md', TWO_BLOCKS, 7);
+      vscodeStub._test.visibleEditors.push(editor);
+      vscodeStub._test.openDocuments.push(editor.document);
+      try {
+        await vscodeStub._test.registeredCommands.get('plantumlLocal.exportSvg')?.();
+      } finally {
+        reset();
+      }
+
+      expect(vscodeStub._test.writtenFiles.has('file:///c/cursor/images/billing.svg')).toBe(true);
+      expect(vscodeStub._test.writtenFiles.has('file:///c/cursor/images/orders.svg')).toBe(false);
+    });
+  });
+
   it('refuses to export in an untrusted workspace', async () => {
     vscodeStub._test.setActiveEditor(
       makeEditor('file:///c/docs/design.md', `intro\n\n${NAMED_BLOCK}`, 3)
