@@ -174,6 +174,16 @@ describe('planReferenceEdits', () => {
       expect(planReferenceEdits(text, exported('l'), 'images')).toEqual([]);
     });
 
+    it('keeps a paragraph right after the quote out of it', () => {
+      const text = md('> ```plantuml q', '> @startuml', '> ```', 'text');
+      const once = apply(text, planReferenceEdits(text, exported('q'), 'images'));
+      expect(once).toBe(md('> ```plantuml q', '> @startuml', '> ```', '>', '> ![q](images/q.svg#plantuml-local)', '', 'text'));
+      const quoted = new MarkdownIt().parse(once, {}).findIndex((token) => token.type === 'blockquote_close');
+      const paragraph = new MarkdownIt().parse(once, {}).findIndex((token) => token.content === 'text');
+      expect(paragraph).toBeGreaterThan(quoted);
+      expect(planReferenceEdits(once, exported('q'), 'images')).toEqual([]);
+    });
+
     it('does not take a line outside the quote as the slot', () => {
       const text = md('> ```plantuml q', '> @startuml', '> ```', '', '![q](images/q.svg#plantuml-local)');
       const once = apply(text, planReferenceEdits(text, exported('q'), 'images'));

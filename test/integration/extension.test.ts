@@ -295,7 +295,7 @@ function makeEditor(
       languageId: options?.languageId ?? 'markdown',
       version: 1,
       isUntitled: options?.isUntitled ?? false,
-      uri: { toString: () => path },
+      uri: { toString: () => path, scheme: path.slice(0, path.indexOf(':')) },
       getText: () => current,
       lineAt: (at: number) => ({ text: current.split('\n')[at] ?? '' }),
       setText: (next: string) => {
@@ -402,6 +402,26 @@ describe('export (dist)', () => {
 
       expect(vscodeStub._test.writtenFiles.get('file:///c/only/images/orders.svg')).toContain('hi');
       expect(vscodeStub._test.quickPicksShown.length).toBe(picksBefore);
+    });
+
+    it('export-all leaves out Markdown documents it cannot export beside', async () => {
+      // A notebook's Markdown cell and the git side of a diff are Markdown
+      // documents too; neither is a file to write next to.
+      vscodeStub._test.setActiveEditor(undefined);
+      vscodeStub._test.openDocuments.push(
+        makeEditor('vscode-notebook-cell:/c/cells/notes.ipynb#W0', 'Notes', 0).document,
+        makeEditor('git:/c/cells/doc.md?ref', NAMED_BLOCK, 0).document,
+        makeEditor('file:///c/cells/doc.md', NAMED_BLOCK, 0).document
+      );
+      const picksBefore = vscodeStub._test.quickPicksShown.length;
+      try {
+        await vscodeStub._test.registeredCommands.get('plantumlLocal.exportAllSvg')?.();
+      } finally {
+        reset();
+      }
+
+      expect(vscodeStub._test.quickPicksShown.length).toBe(picksBefore);
+      expect(vscodeStub._test.writtenFiles.get('file:///c/cells/images/orders.svg')).toContain('hi');
     });
 
     it('export-all asks which document when several are open, rather than taking a visible one', async () => {
