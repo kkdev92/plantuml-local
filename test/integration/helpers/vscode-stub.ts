@@ -31,7 +31,7 @@ export interface TextEditorStub {
     languageId: string;
     version: number;
     isUntitled: boolean;
-    uri: { toString(): string };
+    uri: { toString(): string; scheme: string };
     getText(): string;
     lineAt(line: number): { text: string };
     /** Applied by the stub's `workspace.applyEdit`. */
@@ -195,6 +195,7 @@ export interface VscodeStub {
     fs: {
       createDirectory: (uri: UriStub) => Promise<void>;
       writeFile: (uri: UriStub, content: Uint8Array) => Promise<void>;
+      isWritableFileSystem: (scheme: string) => boolean | undefined;
     };
     applyEdit: (edit: WorkspaceEditStub) => Promise<boolean>;
   };
@@ -542,6 +543,9 @@ export function createVscodeStub(): VscodeStub {
         writeFile: async (uri, content) => {
           writtenFiles.set(uri.toString(), Buffer.from(content).toString('utf8'));
         },
+        // As VS Code answers: files are writable, git's documents are not, and
+        // a scheme with no file system behind it (a notebook cell) is unknown.
+        isWritableFileSystem: (scheme) => (scheme === 'file' ? true : scheme === 'git' ? false : undefined),
       },
       applyEdit,
     },

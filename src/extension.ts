@@ -205,8 +205,13 @@ async function chooseMarkdownDocument(
     return active.document;
   }
 
+  // Only a file, or a document that will be one once saved: a notebook's
+  // Markdown cells and the read-only side of a diff are Markdown documents
+  // too, but there is nowhere to export beside them.
   const open = vscode.workspace.textDocuments.filter(
-    (document) => document.languageId === 'markdown'
+    (document) =>
+      document.languageId === 'markdown' &&
+      (document.isUntitled || vscode.workspace.fs.isWritableFileSystem(document.uri.scheme) === true)
   );
   if (open.length === 0) {
     void context.notify.warn(context.l10n.t('Open a Markdown file first.'));

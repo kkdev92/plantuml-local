@@ -36,7 +36,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   it.** If the document changes while *Export All Diagrams and Update
   References* runs, the files are written but the references are left alone,
   with a message saying so.
-
 - **The export commands no longer guess the document when no Markdown editor
   has focus.** With the preview focused there is no active text editor, and
   the commands took the first visible Markdown editor instead — which could be

@@ -153,11 +153,18 @@ export function planReferenceEdits(
 
     // Empty slot (or occupied by unrelated content): insert after the
     // fence, keeping one blank line on each side that needs one. Inside a
-    // block quote, the blank lines keep the quote's marker.
+    // block quote, the blank lines keep the quote's marker; a line right
+    // after the quote gets a plain one, or it would join the reference's
+    // paragraph inside the quote.
     const blank = container.trimEnd();
     const next = lines[block.closeLine + 1];
     const nextBody = next === undefined ? null : inside(next);
-    const separator = nextBody !== null && nextBody.trim() !== '' ? `\n${blank}` : '';
+    const separator =
+      next === undefined || next.trim() === '' || nextBody?.trim() === ''
+        ? ''
+        : nextBody === null
+          ? '\n'
+          : `\n${blank}`;
     edits.push({
       kind: 'insert-after',
       line: block.closeLine,

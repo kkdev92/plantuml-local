@@ -113,8 +113,9 @@ export const WORKER_IDLE_TIMEOUT_MS = 5 * 60_000;
 
 /**
  * Whether a fence with this info string is a diagram: its first word is
- * exactly `plantuml`, or `puml` as an alias. The preview, export, the
- * editor commands and the highlighting all decide with this.
+ * exactly `plantuml`, or `puml` as an alias. The preview, export and the
+ * editor commands decide with this, and the Markdown injection grammars
+ * match the same two words.
  */
 export function isDiagramFence(info: string): boolean {
   const language = info.trim().split(/\s+/)[0];
