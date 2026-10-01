@@ -8,5 +8,6 @@
   "config.logLevel.description": "Log level for the PlantUML Local output channel. The Output panel's own level selector applies on top of this.",
   "config.exportDirectory.description": "Where exported SVGs are written, relative to the Markdown file. Use \".\" for the same folder. Absolute paths and \"..\" are rejected.",
   "config.exportTheme.description": "Palette for exported SVGs. Exports face hosts like GitHub whose background this extension does not control, so \"light\" is the default; \"preview\" follows the palette the preview currently uses. A diagram whose !theme would be hard to read in the palette is exported in the other one.",
-  "config.hideExportedImages.description": "Hide images marked with #plantuml-local in the Markdown preview, so an exported diagram is not shown next to its block's own render. Turn off to check how the exported SVG itself looks."
+  "config.hideExportedImages.description": "Hide images marked with #plantuml-local in the Markdown preview, so an exported diagram is not shown next to its block's own render. Turn off to check how the exported SVG itself looks.",
+  "config.diagnostics.enabled.description": "Show the problems of the diagrams in open Markdown files in the Problems panel, whether or not a preview is open: engine errors and warnings, and what the bundled engine does not support or drops without a word."
 }

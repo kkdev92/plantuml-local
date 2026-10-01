@@ -20,6 +20,7 @@ import {
   CONFIG,
   CONTEXT_KEYS,
   DEFAULT_EXPORT_DIRECTORY,
+  DIAGNOSTICS_DEBOUNCE_MS,
   EXTENSION_ID,
   EXTENSION_NAME,
   REFRESH_DEBOUNCE_MS,
@@ -38,9 +39,17 @@ import {
   type ExportOutcome,
 } from './export/exporter';
 import { lineAfterEdits, planReferenceEdits, type ReferenceEdit } from './export/references';
+import {
+  checkSource,
+  renderProblems,
+  type BlockProblem,
+  type ProblemLabels,
+  type RenderOutcome,
+} from './diagnostics/problems';
 import { createPlantUmlPlugin, type PlantUmlPlugin } from './preview/plugin';
 import type { RenderLog } from './core/types';
 import { RendererClient, defaultWorkerPath } from './render/client';
+import { shareRenders, type SharedRender } from './render/memo';
 import { ThemePalettes } from './render/palette';
 
 /**
@@ -65,6 +74,8 @@ const Settings = defineSettings({
     [CONFIG.EXPORT_DIRECTORY]: setting.string({ default: DEFAULT_EXPORT_DIRECTORY }),
     [CONFIG.EXPORT_THEME]: setting.enum({ values: ['light', 'dark', 'preview'], default: 'light' }),
     [CONFIG.HIDE_EXPORTED_IMAGES]: setting.boolean({ default: true }),
+    // Resource-scoped: the diagnostics read it per document instead.
+    [CONFIG.DIAGNOSTICS_ENABLED]: setting.boolean({ default: true }),
   },
 });
 
@@ -99,6 +110,9 @@ const Renderer: ServiceToken<RendererClient> = serviceToken<RendererClient>('pla
  * `!theme` lines and shared by the preview and the export commands.
  */
 const Palettes: ServiceToken<ThemePalettes> = serviceToken<ThemePalettes>('plantuml.palettes');
+
+/** Renders shared by the preview and the diagnostics, so a diagram both need is drawn once. */
+const Renders: ServiceToken<SharedRender> = serviceToken<SharedRender>('plantuml.renders');
 
 /**
  * Coalesces a burst of finished renders into one preview refresh.
@@ -186,6 +200,39 @@ interface ActiveMarkdown {
 }
 
 /**
+ * A problem as the Problems panel shows it. The engine names lines, not
+ * columns, so the whole line is underlined, from its first character past
+ * the quote markers and indentation of the block's container.
+ */
+function toDiagnostic(problem: BlockProblem, lines: readonly string[], container: string): vscode.Diagnostic {
+  const text = lines[problem.line] ?? '';
+  const inside = text.startsWith(container) ? container.length : 0;
+  const rest = text.slice(inside);
+  const start = inside + rest.length - rest.trimStart().length;
+  const diagnostic = new vscode.Diagnostic(
+    new vscode.Range(problem.line, start, problem.line, Math.max(start, text.length)),
+    problem.message,
+    problem.severity === 'error' ? vscode.DiagnosticSeverity.Error : vscode.DiagnosticSeverity.Warning
+  );
+  diagnostic.code = problem.code;
+  diagnostic.source = EXTENSION_NAME;
+  return diagnostic;
+}
+
+/**
+ * A Markdown document that is a file, or will be one once saved. A
+ * notebook's Markdown cells and the read-only side of a diff are Markdown
+ * documents too, but there is nowhere to export beside them, and their
+ * problems are not the user's to fix there.
+ */
+function isMarkdownFile(document: vscode.TextDocument): boolean {
+  return (
+    document.languageId === 'markdown' &&
+    (document.isUntitled || vscode.workspace.fs.isWritableFileSystem(document.uri.scheme) === true)
+  );
+}
+
+/**
  * The Markdown document to export from, or null when there is none or
  * the user declined to choose one.
  *
@@ -205,14 +252,7 @@ async function chooseMarkdownDocument(
     return active.document;
   }
 
-  // Only a file, or a document that will be one once saved: a notebook's
-  // Markdown cells and the read-only side of a diff are Markdown documents
-  // too, but there is nowhere to export beside them.
-  const open = vscode.workspace.textDocuments.filter(
-    (document) =>
-      document.languageId === 'markdown' &&
-      (document.isUntitled || vscode.workspace.fs.isWritableFileSystem(document.uri.scheme) === true)
-  );
+  const open = vscode.workspace.textDocuments.filter(isMarkdownFile);
   if (open.length === 0) {
     void context.notify.warn(context.l10n.t('Open a Markdown file first.'));
     return null;
@@ -511,6 +551,11 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
     create: ({ renderer }) => new ThemePalettes((source, dark) => renderer.render(source, dark)),
   });
 
+  module.services.singleton(Renders, {
+    inject: { renderer: Renderer },
+    create: ({ renderer }) => shareRenders((source, dark) => renderer.render(source, dark)),
+  });
+
   module.services.singleton(RequestRefresh, () =>
     debounce(() => {
       void vscode.commands.executeCommand('markdown.preview.refresh');
@@ -519,17 +564,17 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
 
   module.services.singleton(Plugin, {
     inject: {
-      renderer: Renderer,
+      renders: Renders,
       palettes: Palettes,
       requestRefresh: RequestRefresh,
       logger: Log,
       l10n: Localization,
       settings: Settings.token,
     },
-    create: ({ renderer, palettes, requestRefresh, logger, l10n, settings }) =>
+    create: ({ renders, palettes, requestRefresh, logger, l10n, settings }) =>
       createPlantUmlPlugin({
         isDark: () => isDark(settings.read().values[CONFIG.THEME]),
-        render: (source, dark) => renderer.render(source, dark),
+        render: renders,
         resolvePalette: (source, dark) => palettes.resolve(source, dark),
         requestRefresh,
         escapeHtml,
@@ -558,8 +603,10 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
   });
 
   module.commands.handle(ClearCache, {
-    inject: { plugin: Plugin },
-    execute: async (context: OperationContext, _args, { plugin }): Promise<void> => {
+    inject: { plugin: Plugin, renders: Renders },
+    execute: async (context: OperationContext, _args, { plugin, renders }): Promise<void> => {
+      // The shared renders first, or the preview would get them back.
+      renders.clear();
       plugin.clearCache();
       context.logger.info('Render cache cleared');
       await context.notify.info(context.l10n.t('PlantUML render cache cleared.'));
@@ -729,6 +776,143 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         settingChanged.dispose();
         // A pending refresh would fire into a preview that is going away.
         requestRefresh.cancel();
+      });
+    },
+  });
+
+  module.hostedServices.add({
+    id: 'plantuml.diagnostics',
+    inject: { renders: Renders, palettes: Palettes, settings: Settings.token, l10n: Localization },
+    start: (context, { renders, palettes, settings, l10n }) => {
+      // Puts the problems of the diagrams in open Markdown documents in the
+      // Problems panel, whether or not a preview is open. Renders are shared
+      // with the preview, so a document shown in both is drawn once.
+      const collection = vscode.languages.createDiagnosticCollection(EXTENSION_ID);
+      const labels: ProblemLabels = {
+        remoteReference: l10n.t('URL-based external references (!include, !theme) are not supported.'),
+        severalDiagrams: l10n.t(
+          'This block holds more than one diagram, and only the first would be drawn. Give each diagram a block of its own.'
+        ),
+        pages: l10n.t(
+          'Pages after newpage cannot be drawn, so only the first page would be. Give each page a block of its own.'
+        ),
+        missingEnd: (end) =>
+          l10n.t('This diagram has no {0} line; it is drawn as if the block ended with one.', end),
+        includesub: l10n.t('!includesub is not supported: the engine ignores it, so nothing is included.'),
+        localFile: l10n.t('the bundled engine reads no files.'),
+        themeFrom: l10n.t('only the bundled themes can be loaded.'),
+        libraryNotBundled: (library) =>
+          l10n.t('The {0} standard library is not bundled; only azure is.', library),
+        emojiUnavailable: l10n.t('Emoji (<:name:>) are not supported: the emoji images are not bundled.'),
+        tooLarge: l10n.t('The diagram is larger than the engine draws.'),
+      };
+      const timers = new Map<string, NodeJS.Timeout>();
+      // Bumped on every change, so a check that finishes after the text moved
+      // on does not bring back what it found in the old text.
+      const generations = new Map<string, number>();
+
+      const enabled = (document: vscode.TextDocument): boolean =>
+        vscode.workspace
+          .getConfiguration(EXTENSION_ID, document.uri)
+          .get<boolean>(CONFIG.DIAGNOSTICS_ENABLED, true) !== false;
+
+      const outcomeOf = async (source: string): Promise<RenderOutcome> => {
+        try {
+          const dark = await palettes.resolve(source, isDark(settings.read().values[CONFIG.THEME]));
+          return { svg: await renders(source, dark) };
+        } catch (error: unknown) {
+          return { error: error instanceof Error ? error.message : String(error) };
+        }
+      };
+
+      const diagnose = async (document: vscode.TextDocument, generation: number): Promise<void> => {
+        const key = document.uri.toString();
+        const text = document.getText();
+        const lines = text.split(/\r\n|\r|\n/);
+        const found: vscode.Diagnostic[] = [];
+        for (const block of findPlantUmlBlocks(text)) {
+          const check = checkSource(block, labels);
+          const problems = [...check.problems];
+          if (check.render !== null) {
+            const outcome = await outcomeOf(check.render);
+            if (generations.get(key) !== generation) {
+              return;
+            }
+            problems.push(...renderProblems(block, check, outcome, labels));
+          }
+          found.push(...problems.map((problem) => toDiagnostic(problem, lines, block.container)));
+        }
+        if (generations.get(key) === generation) {
+          collection.set(document.uri, found);
+        }
+      };
+
+      const schedule = (document: vscode.TextDocument, delay: number): void => {
+        if (!isMarkdownFile(document)) {
+          return;
+        }
+        const key = document.uri.toString();
+        clearTimeout(timers.get(key));
+        const generation = (generations.get(key) ?? 0) + 1;
+        generations.set(key, generation);
+        if (!enabled(document)) {
+          timers.delete(key);
+          collection.delete(document.uri);
+          return;
+        }
+        timers.set(
+          key,
+          setTimeout(() => {
+            timers.delete(key);
+            diagnose(document, generation).catch((error: unknown) => {
+              context.logger.warn(`Checking ${key} failed: ${String(error)}`);
+            });
+          }, delay)
+        );
+      };
+
+      const forget = (document: vscode.TextDocument): void => {
+        const key = document.uri.toString();
+        clearTimeout(timers.get(key));
+        timers.delete(key);
+        generations.delete(key);
+        collection.delete(document.uri);
+      };
+
+      const subscriptions = [
+        vscode.workspace.onDidOpenTextDocument((document) => {
+          schedule(document, 0);
+        }),
+        vscode.workspace.onDidChangeTextDocument((event) => {
+          if (event.contentChanges.length === 0 || !isMarkdownFile(event.document)) {
+            return;
+          }
+          // What was found describes text that is gone; it must not stay up
+          // until the next check finishes.
+          collection.delete(event.document.uri);
+          schedule(event.document, DIAGNOSTICS_DEBOUNCE_MS);
+        }),
+        vscode.workspace.onDidCloseTextDocument(forget),
+        vscode.workspace.onDidChangeConfiguration((event) => {
+          if (event.affectsConfiguration(`${EXTENSION_ID}.${CONFIG.DIAGNOSTICS_ENABLED}`)) {
+            for (const document of vscode.workspace.textDocuments) {
+              schedule(document, 0);
+            }
+          }
+        }),
+      ];
+      for (const document of vscode.workspace.textDocuments) {
+        schedule(document, 0);
+      }
+
+      context.signal.addEventListener('abort', () => {
+        for (const subscription of subscriptions) {
+          subscription.dispose();
+        }
+        for (const timer of timers.values()) {
+          clearTimeout(timer);
+        }
+        collection.dispose();
       });
     },
   });

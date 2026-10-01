@@ -36,6 +36,7 @@ export const CONFIG = {
   EXPORT_DIRECTORY: 'exportDirectory',
   EXPORT_THEME: 'exportTheme',
   HIDE_EXPORTED_IMAGES: 'hideExportedImages',
+  DIAGNOSTICS_ENABLED: 'diagnostics.enabled',
 } as const;
 
 /**
@@ -87,6 +88,13 @@ export const DIAGRAM_BACKDROP = { light: '#FFFFFF', dark: '#1b1b1b' } as const;
  * without batching it would refresh the preview five times.
  */
 export const REFRESH_DEBOUNCE_MS = 80;
+
+/**
+ * How long a document must stay unchanged before its diagrams are checked
+ * for the Problems panel, in milliseconds: long enough not to render while
+ * someone is typing.
+ */
+export const DIAGNOSTICS_DEBOUNCE_MS = 500;
 
 /**
  * Hard ceiling for a single render, in milliseconds.
@@ -143,18 +151,24 @@ const URL_THEME = /^\s*!theme\s+\S.*?\sfrom\s+https?:\/\//i;
  * `'/`.
  */
 export function hasRemoteReference(source: string): boolean {
+  return remoteReferenceLine(source) !== null;
+}
+
+/** The line (counting from 0) of the first such directive, or null. */
+export function remoteReferenceLine(source: string): number | null {
   let inBlockComment = false;
-  for (const line of source.split(/\r?\n/)) {
+  const lines = source.split(/\r?\n/);
+  for (const [index, line] of lines.entries()) {
     const trimmed = line.trim();
     if (inBlockComment || trimmed.startsWith("/'")) {
       inBlockComment = !trimmed.endsWith("'/");
       continue;
     }
     if (URL_DIRECTIVE.test(line) || URL_THEME.test(line)) {
-      return true;
+      return index;
     }
   }
-  return false;
+  return null;
 }
 
 /**
