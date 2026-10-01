@@ -4,7 +4,7 @@ import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { createVscodeStub, type CompletionItemStub, type TextEditorStub, type VscodeStub } from './helpers/vscode-stub';
+import { createVscodeStub, type CompletionItemStub, type TextEditorStub, type VscodeStub, type WebviewPanelStub } from './helpers/vscode-stub';
 
 /**
  * Loads the built dist/extension.js with a stubbed `vscode` module and
@@ -1202,5 +1202,106 @@ describe('templates (dist)', () => {
 
     expect(inserted(complete(document, 3, 2)?.[0])).toMatch(/^@startuml\n/);
     expect(complete(document, 1, 2)).toBeUndefined();
+  });
+});
+
+describe('viewer (dist)', () => {
+  const FLOWS = [
+    '@startuml(id=orders)',
+    'Alice -> Bob : orders',
+    '@enduml',
+    '',
+    '@startuml',
+    'Carol -> Dave : second',
+    '@enduml',
+  ].join('\n');
+  const posted = (panel: WebviewPanelStub, type: string): { type: string; svg?: string }[] =>
+    (panel.webview.posted as { type: string; svg?: string }[]).filter((message) => message.type === type);
+  const waitFor = async (check: () => boolean): Promise<void> => {
+    for (let waited = 0; waited < 30_000; waited += 50) {
+      if (check()) {
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    throw new Error('timed out');
+  };
+  const run = async (id: string): Promise<void> => {
+    await vscodeStub._test.registeredCommands.get(id)?.();
+  };
+
+  it('opens a panel for the file, showing the diagram under the cursor once the page runs', async () => {
+    vscodeStub._test.setActiveEditor(makeEditor('file:///c/view/flows.puml', FLOWS, 5, { languageId: 'plantuml' }));
+    const before = vscodeStub._test.webviewPanels.length;
+
+    await run('plantumlLocal.openPreviewToSide');
+
+    const panel = vscodeStub._test.webviewPanels[before];
+    expect(panel).toMatchObject({ viewType: 'plantumlLocal.viewer', title: 'Preview flows.puml' });
+    expect(panel?.column).toBe(vscodeStub.ViewColumn.Beside);
+    expect(panel?.options).toMatchObject({ enableScripts: true, enableForms: false });
+    expect(panel?.options.localResourceRoots?.map(String)).toEqual(['file:///ext/media/viewer']);
+    // Scripts run only with the page's nonce, and the drawing comes in as a
+    // Blob URL image.
+    // The attribute is HTML-escaped, as an attribute value has to be.
+    const csp = (/Content-Security-Policy" content="([^"]*)"/.exec(panel?.webview.html ?? '')?.[1] ?? '')
+      .replace(/&#039;/g, "'")
+      .replace(/&amp;/g, '&');
+    expect(csp).toMatch(/default-src 'none'/);
+    expect(csp).toMatch(/script-src 'nonce-[^' ]+'(;|$)/);
+    expect(csp).toMatch(/img-src [^;]*blob:/);
+    expect(panel?.webview.html).toContain('/ext/media/viewer/viewer.js');
+    // Nothing is sent before the page says it runs.
+    expect(panel?.webview.posted).toEqual([]);
+
+    panel?.receive({ type: 'ready' });
+    await waitFor(() => (panel === undefined ? false : posted(panel, 'render').length > 0));
+    expect(posted(panel!, 'diagrams')[0]).toEqual({
+      type: 'diagrams',
+      items: ['orders (line 1)', 'Diagram 2 (line 5)'],
+      selected: 1,
+    });
+    expect(posted(panel!, 'render')[0]?.svg).toContain('second');
+  });
+
+  it('keeps one panel per file and draws the diagram it is asked for', async () => {
+    const editor = makeEditor('file:///c/view/flows.puml', FLOWS, 1, { languageId: 'plantuml' });
+    vscodeStub._test.setActiveEditor(editor);
+    const panels = vscodeStub._test.webviewPanels.length;
+    const panel = vscodeStub._test.webviewPanels.find((candidate) => candidate.title === 'Preview flows.puml');
+    const revealed = panel?.revealed ?? 0;
+
+    await run('plantumlLocal.openPreview');
+
+    expect(vscodeStub._test.webviewPanels).toHaveLength(panels);
+    expect(panel?.revealed).toBe(revealed + 1);
+    await waitFor(() => posted(panel!, 'render').some((message) => message.svg?.includes('orders') === true));
+
+    panel?.receive({ type: 'select', index: 1 });
+    const count = posted(panel!, 'render').length;
+    await waitFor(() => posted(panel!, 'render').length > count);
+    expect(posted(panel!, 'render').at(-1)?.svg).toContain('second');
+  });
+
+  it('draws the file again once it stops changing', async () => {
+    const editor = makeEditor('file:///c/view/flows.puml', FLOWS, 1, { languageId: 'plantuml' });
+    const panel = vscodeStub._test.webviewPanels.find((candidate) => candidate.title === 'Preview flows.puml');
+    const count = posted(panel!, 'render').length;
+
+    editor.document.setText(FLOWS.replace('second', 'edited'));
+    vscodeStub._test.changeDocument(editor.document);
+
+    await waitFor(() => posted(panel!, 'render').length > count);
+    expect(posted(panel!, 'render').at(-1)?.svg).toContain('edited');
+  });
+
+  it('asks for a PlantUML file when the editor holds none', async () => {
+    vscodeStub._test.setActiveEditor(makeEditor('file:///c/view/doc.md', '# Title', 0));
+    const panels = vscodeStub._test.webviewPanels.length;
+
+    await run('plantumlLocal.openPreview');
+
+    expect(vscodeStub._test.webviewPanels).toHaveLength(panels);
+    expect(vscodeStub._test.notifications.warn.at(-1)).toBe('Open a PlantUML file first.');
   });
 });

@@ -144,6 +144,36 @@ export interface CompletionRegistrationStub {
   };
 }
 
+/** A `vscode.WebviewPanel` as the stub creates it, with what it was sent. */
+export interface WebviewPanelStub {
+  viewType: string;
+  title: string;
+  column: unknown;
+  options: {
+    enableScripts?: boolean;
+    enableForms?: boolean;
+    localResourceRoots?: readonly { toString(): string }[];
+  };
+  visible: boolean;
+  /** How many times `reveal` was called. */
+  revealed: number;
+  webview: {
+    html: string;
+    readonly cspSource: string;
+    /** Every message posted to the page, in order. */
+    posted: unknown[];
+    asWebviewUri(uri: { toString(): string }): { toString(): string };
+    postMessage(message: unknown): Promise<boolean>;
+    onDidReceiveMessage(listener: (message: unknown) => void): { dispose(): void };
+  };
+  reveal(column?: unknown): void;
+  onDidDispose(listener: () => void): { dispose(): void };
+  onDidChangeViewState(listener: () => void): { dispose(): void };
+  dispose(): void;
+  /** Delivers `message` as the page would send it. */
+  receive(message: unknown): void;
+}
+
 /** A modal message as shown: its text, detail and the buttons offered. */
 export interface ModalStub {
   message: string;
@@ -212,6 +242,12 @@ export interface VscodeStub {
     activeTextEditor: TextEditorStub | undefined;
     visibleTextEditors: TextEditorStub[];
     createOutputChannel: (name: string, options?: { log?: boolean }) => LogOutputChannelStub;
+    createWebviewPanel: (
+      viewType: string,
+      title: string,
+      column: unknown,
+      options?: WebviewPanelStub['options']
+    ) => WebviewPanelStub;
     /** A modal one answers with `_test.messageReply`; the others are dismissed. */
     showInformationMessage: (...args: unknown[]) => Promise<unknown>;
     showWarningMessage: (...args: unknown[]) => Promise<unknown>;
@@ -318,6 +354,8 @@ export interface VscodeStub {
     fileWrites: string[];
     /** Completion providers registered, in order. */
     completionProviders: CompletionRegistrationStub[];
+    /** Webview panels created, in order. */
+    webviewPanels: WebviewPanelStub[];
     /**
      * What the next input box answers with: a string accepts, `null`
      * dismisses. Defaults to dismissal, so a test that did not expect a
@@ -499,6 +537,49 @@ export function createVscodeStub(): VscodeStub {
   }
   const completionProviders: CompletionRegistrationStub[] = [];
 
+  const webviewPanels: WebviewPanelStub[] = [];
+  function createWebviewPanel(
+    viewType: string,
+    title: string,
+    column: unknown,
+    options: WebviewPanelStub['options'] = {}
+  ): WebviewPanelStub {
+    const received: ((message: unknown) => void)[] = [];
+    const disposed: (() => void)[] = [];
+    const panel: WebviewPanelStub = {
+      viewType,
+      title,
+      column,
+      options,
+      visible: true,
+      revealed: 0,
+      webview: {
+        html: '',
+        cspSource: 'https://*.vscode-cdn.net',
+        posted: [],
+        asWebviewUri: (uri) => ({ toString: () => `https://file+.vscode-resource.vscode-cdn.net${String(uri).replace(/^file:\/\//, '')}` }),
+        postMessage: (message) => {
+          panel.webview.posted.push(message);
+          return Promise.resolve(true);
+        },
+        onDidReceiveMessage: (listener) => subscribe(received, listener),
+      },
+      reveal: () => {
+        panel.revealed += 1;
+      },
+      onDidDispose: (listener) => subscribe(disposed, listener),
+      onDidChangeViewState: () => ({ dispose: () => undefined }),
+      dispose: () => {
+        for (const listener of [...disposed]) listener();
+      },
+      receive: (message) => {
+        for (const listener of [...received]) listener(message);
+      },
+    };
+    webviewPanels.push(panel);
+    return panel;
+  }
+
   /** Executes collected ops against the active editor's document. */
   async function applyEdit(edit: WorkspaceEditStub): Promise<boolean> {
     const editor = activeEditor;
@@ -594,6 +675,7 @@ export function createVscodeStub(): VscodeStub {
         show: () => undefined,
         dispose: () => undefined,
       }),
+      createWebviewPanel,
       showInformationMessage: async (...args) => {
         notifications.info.push(String(args[0]));
         return answer(args);
@@ -857,6 +939,7 @@ export function createVscodeStub(): VscodeStub {
       },
       fileWrites,
       completionProviders,
+      webviewPanels,
       openDocuments: hooks.openDocuments,
       visibleEditors: hooks.visibleEditors,
       setConfiguration: (key, value, folder) => {

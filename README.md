@@ -160,8 +160,21 @@ theme applies, and `editor.tokenColorCustomizations` can adjust them.
 
 Files ending in `.puml`, `.plantuml`, `.pu`, `.iuml` or `.wsd` open as the
 language PlantUML, with the same colouring. *Toggle Line Comment* uses `'` and
-*Toggle Block Comment* uses `/' … '/`. A `.puml` file has no preview yet, but
-its diagrams can be exported to SVG (see below).
+*Toggle Block Comment* uses `/' … '/`. A `.puml` file has a preview of its own
+(below), and its diagrams can be exported to SVG.
+
+### Previewing `.puml` files
+
+*PlantUML Local: Open Diagram Preview to the Side* — the preview button in the
+title bar of a `.puml` file's editor — opens a panel showing the diagram under
+the cursor. The panel stays with that file while the focus moves elsewhere,
+lists the file's diagrams when it holds several, and draws the diagram again as
+the file changes. Running the command again in the same file brings its panel
+back rather than opening another. *Open Diagram Preview* does the same in the
+editor's own group (or hold Alt on the button).
+
+The panel shows the SVG as an image, so nothing in it can run, and loads
+nothing but its own script and stylesheet.
 
 ### Completion
 
@@ -432,6 +445,7 @@ external rendering service.
 - **Render Timeout**: A render exceeding 30 s is abandoned; the worker is terminated and restarted
 - **SVG Sanitisation**: Scripts, event handlers and non-fragment links are stripped before SVG reaches the preview. The one exception is a rasterised sprite, which must reach the preview as an inline `data:image/png` — it is allowed on `<image>` only, must be base64 with no other characters, and must actually begin with the PNG signature
 - **No Embedded Source**: The copy of the diagram source that PlantUML embeds in every SVG, and the element names it records in `data-*` attributes, are removed before an SVG reaches the preview or an exported file
+- **Image-Only Panel**: The `.puml` preview shows the SVG as an image under a strict content security policy, so nothing in a diagram can run there
 - **Untrusted Workspaces Supported**: No workspace files are read, no processes are spawned
 
 These controls reduce the extension's attack surface, but they have limits worth

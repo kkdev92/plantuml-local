@@ -68,6 +68,10 @@ PlantUML draws `sprite` definitions — the mechanism behind icon sets such as A
 
 `data:text/html`, `data:image/svg+xml`, `javascript:` and remote URLs remain blocked. The reasoning for allowing this much: a PNG cannot carry script the way an SVG can; the bytes are inline rather than fetched, so the network-egress concern behind the general rule does not apply; and the Markdown preview's default Content-Security-Policy already permits `img-src … data:` while confining scripts to a nonce.
 
+#### The `.puml` preview panel
+
+The preview of a `.puml` file is a webview of this extension's own, and runs one script, `media/viewer/viewer.js`. It receives the same sanitised SVG and shows it through an `<img>` holding a Blob URL, so the SVG is treated as an image: nothing in it can run, even something the sanitiser missed. The panel's Content-Security-Policy is `default-src 'none'` with scripts allowed by nonce only and images from the panel's own source, `data:` and `blob:`; it may load files from `media/viewer` only, and has forms disabled. The page acts only on messages carrying its own origin, which is how VS Code's frame around it delivers the extension's messages. The messages it sends back are untrusted input: only a ready notice and a choice among the file's diagrams are acted on.
+
 ### Remote references are rejected up front
 
 `!include https://…` and `!theme … from https://…` never reach the engine; the block renders an explanatory message instead. Includes of a file are not supported by the browser build of the engine and fail harmlessly.

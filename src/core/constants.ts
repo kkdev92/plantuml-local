@@ -14,7 +14,12 @@ export const COMMANDS = {
   EXPORT_SVG: `${EXTENSION_ID}.exportSvg`,
   EXPORT_ALL_SVG: `${EXTENSION_ID}.exportAllSvg`,
   EXPORT_ALL_UPDATE_REFS: `${EXTENSION_ID}.exportAllAndUpdateRefs`,
+  OPEN_PREVIEW: `${EXTENSION_ID}.openPreview`,
+  OPEN_PREVIEW_TO_SIDE: `${EXTENSION_ID}.openPreviewToSide`,
 } as const;
+
+/** The view type of the diagram viewer's panels. */
+export const VIEWER_TYPE = `${EXTENSION_ID}.viewer`;
 
 /**
  * Context keys behind the editor context-menu entries, set with the
@@ -95,6 +100,12 @@ export const REFRESH_DEBOUNCE_MS = 80;
  * someone is typing.
  */
 export const DIAGNOSTICS_DEBOUNCE_MS = 500;
+
+/**
+ * How long a PlantUML file must stay unchanged before its viewer draws it
+ * again, in milliseconds: the delay VS Code's Markdown preview waits too.
+ */
+export const VIEWER_DEBOUNCE_MS = 300;
 
 /**
  * Hard ceiling for a single render, in milliseconds.

@@ -147,6 +147,17 @@
         "command": "plantumlLocal.exportAllAndUpdateRefs",
         "title": "%command.exportAllAndUpdateRefs.title%",
         "category": "PlantUML Local"
+      },
+      {
+        "command": "plantumlLocal.openPreview",
+        "title": "%command.openPreview.title%",
+        "category": "PlantUML Local"
+      },
+      {
+        "command": "plantumlLocal.openPreviewToSide",
+        "title": "%command.openPreviewToSide.title%",
+        "category": "PlantUML Local",
+        "icon": "$(open-preview)"
       }
     ],
     "menus": {
@@ -165,6 +176,24 @@
           "command": "plantumlLocal.exportAllAndUpdateRefs",
           "when": "editorLangId == markdown && plantumlLocal.hasDiagrams",
           "group": "2_plantuml@3"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "plantumlLocal.openPreviewToSide",
+          "when": "editorLangId == plantuml && !notebookEditorFocused",
+          "alt": "plantumlLocal.openPreview",
+          "group": "navigation@1"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "plantumlLocal.openPreview",
+          "when": "editorLangId == plantuml && !notebookEditorFocused"
+        },
+        {
+          "command": "plantumlLocal.openPreviewToSide",
+          "when": "editorLangId == plantuml && !notebookEditorFocused"
         }
       ]
     },

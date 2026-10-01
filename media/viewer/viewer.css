@@ -1,0 +1,42 @@
+/* The diagram viewer's page. Colours come from the VS Code theme, except
+   behind the diagram, which gets the backdrop of the palette it was drawn in. */
+
+body {
+	margin: 0;
+	padding: 0;
+	color: var(--vscode-foreground);
+	background: var(--vscode-editor-background);
+	font-family: var(--vscode-font-family);
+	font-size: var(--vscode-font-size);
+}
+
+header {
+	display: flex;
+	gap: 0.75rem;
+	align-items: center;
+	padding: 0.5rem 1rem;
+	border-bottom: 1px solid var(--vscode-panel-border, transparent);
+}
+
+select {
+	color: var(--vscode-dropdown-foreground);
+	background: var(--vscode-dropdown-background);
+	border: 1px solid var(--vscode-dropdown-border, transparent);
+	font: inherit;
+}
+
+#status.error {
+	color: var(--vscode-errorForeground);
+}
+
+#stage {
+	margin: 1rem;
+	padding: 1rem;
+	overflow: auto;
+	text-align: center;
+}
+
+#diagram {
+	max-width: 100%;
+	height: auto;
+}
