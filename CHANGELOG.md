@@ -14,8 +14,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   as ```` ```plantuml ```` blocks, with `'` and `/' … '/` for the comment
   commands. They are not rendered yet: diagrams are still previewed and
   exported from Markdown.
+- **` ```puml ` blocks are diagrams too.** The preview draws them, the
+  editor colours them and the export commands find them, like
+  ` ```plantuml ` blocks. A document that used ` ```puml ` to show PlantUML
+  source as code now shows the diagram instead.
 
 ### Fixed
+
+- **Export finds the same diagram blocks as the preview.** The export
+  commands scanned the document on their own, so they missed blocks in a
+  block quote or deeper in a list, and took a block written inside an HTML
+  comment, which the preview does not draw. They now parse the document as
+  VS Code's preview does. A block in a block quote or a nested list item is
+  exported but does not get a reference line yet.
 
 - **The export commands no longer guess the document when no Markdown editor
   has focus.** With the preview focused there is no active text editor, and

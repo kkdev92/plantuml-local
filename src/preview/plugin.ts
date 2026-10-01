@@ -6,6 +6,7 @@ import {
   MAX_CACHE_BYTES,
   MAX_CACHE_ENTRIES,
   hasRemoteReference,
+  isDiagramFence,
 } from '../core/constants';
 import type { RenderLog } from '../core/types';
 
@@ -146,7 +147,7 @@ export function createPlantUmlPlugin(deps: PluginDeps): PlantUmlPlugin {
   }
 
   function isPlantUmlFence(token: { type?: string; info: string } | undefined): boolean {
-    return token !== undefined && token.info.trim().split(/\s+/)[0] === 'plantuml';
+    return token !== undefined && isDiagramFence(token.info);
   }
 
   /**
@@ -255,7 +256,7 @@ export function createPlantUmlPlugin(deps: PluginDeps): PlantUmlPlugin {
         if (token === undefined) {
           return '';
         }
-        // Everything that is not ```plantuml stays untouched.
+        // Everything that is not ```plantuml or ```puml stays untouched.
         if (!isPlantUmlFence(token)) {
           return fallback !== undefined
             ? fallback(tokens, index, options, env, self)

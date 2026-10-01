@@ -112,6 +112,16 @@ export const RENDER_TIMEOUT_MS = 30_000;
 export const WORKER_IDLE_TIMEOUT_MS = 5 * 60_000;
 
 /**
+ * Whether a fence with this info string is a diagram: its first word is
+ * exactly `plantuml`, or `puml` as an alias. The preview, export, the
+ * editor commands and the highlighting all decide with this.
+ */
+export function isDiagramFence(info: string): boolean {
+  const language = info.trim().split(/\s+/)[0];
+  return language === 'plantuml' || language === 'puml';
+}
+
+/**
  * The preprocessor directives that read a URL: the include family and
  * `!import` take it as their argument, `!theme` after `from`. Like the
  * engine, only an argument that starts with the scheme counts.

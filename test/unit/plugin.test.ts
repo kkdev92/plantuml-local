@@ -113,10 +113,17 @@ const SOURCE = '@startuml\nAlice -> Bob : Hello\n@enduml';
 describe('createPlantUmlPlugin', () => {
   it('leaves non-plantuml fences to the previous rule', () => {
     const h = makeHarness();
-    for (const language of ['js', 'ts', 'bash', 'json', 'mermaid', '']) {
+    for (const language of ['js', 'ts', 'bash', 'json', 'mermaid', '', 'PlantUML', 'uml', 'plantuml-x']) {
       expect(h.fence(language, 'const a = 1')).toBe('<pre data-fallback="original"></pre>');
     }
     expect(h.deps.render).not.toHaveBeenCalled();
+  });
+
+  it('renders a puml fence as a diagram', async () => {
+    const h = makeHarness();
+    h.fence('puml name', SOURCE);
+    await h.settle();
+    expect(h.fence('puml name', SOURCE)).toContain(`<svg>${SOURCE}</svg>`);
   });
 
   it('falls back to renderToken when no previous fence rule exists', () => {

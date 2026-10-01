@@ -47,8 +47,15 @@ describe('markdown injection', () => {
     ]);
   });
 
+  it('highlights the puml alias, as the preview renders it', async () => {
+    await expectMarkdown(`\`\`\`puml name\n${diagram}\n\`\`\``, [
+      ['puml', 'fenced_code.block.language.markdown'],
+      ['@startuml', DIAGRAM],
+    ]);
+  });
+
   it('leaves alone the fences the preview does not render', async () => {
-    for (const info of ['puml', 'PlantUML', 'plantumlx', 'plantuml{x}', 'uml']) {
+    for (const info of ['PlantUML', 'plantumlx', 'plantuml{x}', 'pumlx', 'uml']) {
       await expectMarkdown(`\`\`\`${info}\n${diagram}\n\`\`\``, [['@startuml', PLAIN]]);
     }
   });
@@ -164,7 +171,7 @@ describe('markdown injection after another grammar has claimed every fence', () 
 
   it('leaves alone the fences the preview does not render', async () => {
     await expectClaimed(
-      `\`\`\`puml\n${diagram}\n\`\`\`\n\n\`\`\`plantumlx\n${diagram}\n\`\`\`\n\n\`\`\`js\nplantuml\n@startuml\n\`\`\``,
+      `\`\`\`pumlx\n${diagram}\n\`\`\`\n\n\`\`\`plantumlx\n${diagram}\n\`\`\`\n\n\`\`\`js\nplantuml\n@startuml\n\`\`\``,
       [
         ['@startuml', PLAIN],
         ['@startuml', PLAIN],
@@ -172,6 +179,10 @@ describe('markdown injection after another grammar has claimed every fence', () 
         ['@startuml', PLAIN],
       ]
     );
+  });
+
+  it('highlights a claimed puml fence', async () => {
+    await expectClaimed(`\`\`\`puml\n${diagram}\n\`\`\``, [['@startuml', DIAGRAM]]);
   });
 
   it('leaves alone a plantuml fence shown inside another code block or an HTML comment', async () => {

@@ -3,8 +3,8 @@
  * blocks that the preview renders as diagrams get the PlantUML grammar.
  *
  * The preview renders a fence when the first word of its info string is
- * exactly `plantuml` (see src/preview/plugin.ts), so this matches the same
- * blocks — not `puml`, not `PlantUML`. The fence itself follows
+ * exactly `plantuml` or `puml` (isDiagramFence in src/core/constants.ts), so
+ * this matches the same blocks — not `PlantUML`, not `uml`. The fence itself follows
  * markdown-it: three or more backticks or tildes, no backtick in the info
  * string of a backtick fence, closed by the same character at least as
  * many times. Indentation is handled the way VS Code's own fenced blocks
@@ -24,7 +24,7 @@ function fence(marker: '`' | '~'): Rule {
   const run = marker === '`' ? re`\x{60}` : '~';
   return {
     name: 'markup.fenced_code.block.markdown',
-    begin: re`(^|\G)(\s*)(${run}{3,})[ \t]*(plantuml)(?:([ \t]+${info}))?$`,
+    begin: re`(^|\G)(\s*)(${run}{3,})[ \t]*(plantuml|puml)(?:([ \t]+${info}))?$`,
     beginCaptures: {
       3: { name: 'punctuation.definition.markdown' },
       4: { name: 'fenced_code.block.language.markdown' },
@@ -80,7 +80,7 @@ export const markdownFallbackGrammar: Grammar = {
     '-markup.fenced_code markup.fenced_code -markup.raw -comment',
   patterns: [
     {
-      begin: re`\G[ \t]*(plantuml)(?=[ \t]|$).*$`,
+      begin: re`\G[ \t]*(plantuml|puml)(?=[ \t]|$).*$`,
       beginCaptures: { 1: { name: 'fenced_code.block.language.markdown' } },
       while: re`(^|\G)(?![ \t]*([\x{60}~]{3,})[ \t]*$)`,
       contentName: EMBEDDED_SCOPE,

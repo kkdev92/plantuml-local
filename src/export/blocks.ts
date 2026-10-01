@@ -1,20 +1,19 @@
 /**
- * Finds ` ```plantuml ` blocks in Markdown source.
+ * Finds the diagram blocks (` ```plantuml `, ` ```puml `) in Markdown source.
  *
- * Export needs to know where the diagrams are and what to call the files,
- * which the preview never had to: markdown-it hands the plugin one token
- * at a time, already parsed. Here there is only the document text, so the
- * fences are scanned directly.
- *
- * The scan follows CommonMark closely enough for real documents: a fence
- * is three or more backticks or tildes indented by at most three spaces,
- * it closes on a fence of the same character that is at least as long,
- * and an unclosed fence runs to the end of the file. Content lines are
- * de-indented by the opening fence's indent.
+ * Export and the editor commands need to know where the diagrams are and
+ * what to call the files. The document is parsed with markdown-it 14, the
+ * parser and options of VS Code's Markdown preview, so they find exactly
+ * the blocks the preview draws: fences in block quotes and list items too,
+ * and nothing inside an HTML comment or another code block.
  *
  * This module deliberately has no dependency on the `vscode` module, so
  * the scan is unit-testable on plain strings.
  */
+
+import MarkdownIt from 'markdown-it';
+
+import { isDiagramFence } from '../core/constants';
 
 /** A `plantuml` fenced block found in a document. */
 export interface PlantUmlBlock {
@@ -37,6 +36,12 @@ export interface PlantUmlBlock {
   openLine: number;
   /** Zero-based line of the closing fence, or of the last content line. */
   closeLine: number;
+  /**
+   * What precedes the opening fence on its line: indentation, and the
+   * markers of a block quote or a list item (`> `, `- `) when the block is
+   * inside one.
+   */
+  prefix: string;
 }
 
 /**
@@ -83,88 +88,53 @@ export function isValidBlockName(name: string): boolean {
   return VALID_NAME.test(name) && !RESERVED_NAMES.has(name.toLowerCase());
 }
 
-interface Fence {
-  indent: number;
-  marker: string;
-  length: number;
-  info: string;
-}
+/** VS Code's Markdown preview parses with `html: true`. */
+const parser = new MarkdownIt({ html: true });
 
-/** Parses a line as a fence opener, or returns null. */
-function openingFence(line: string): Fence | null {
-  const match = /^( {0,3})(`{3,}|~{3,})(.*)$/.exec(line);
-  if (match === null) {
-    return null;
+/**
+ * Blanks out front matter the way VS Code's preview recognises it
+ * (markdown-language-features, yamlPreamble): a first line of only `---`,
+ * up to the next unindented line of only `---`. The preview shows it apart
+ * from the body, so nothing in it is a diagram. Blanking rather than
+ * removing the lines keeps every line number.
+ */
+function withoutFrontMatter(lines: string[]): string[] {
+  if (lines[0]?.trimEnd() !== '---') {
+    return lines;
   }
-  const [, indent = '', run = '', info = ''] = match;
-  // A backtick fence's info string may not contain a backtick; that rule
-  // is what stops `` `a``b` `` from being read as a fence.
-  if (run.startsWith('`') && info.includes('`')) {
-    return null;
+  const end = lines.findIndex((line, index) => index > 0 && line.trimEnd() === '---');
+  if (end < 0) {
+    return lines;
   }
-  return { indent: indent.length, marker: run[0] ?? '`', length: run.length, info: info.trim() };
-}
-
-/** Whether `line` closes a fence opened by `open`. */
-function closesFence(line: string, open: Fence): boolean {
-  const match = /^( {0,3})(`{3,}|~{3,})[ \t]*$/.exec(line);
-  if (match === null) {
-    return false;
-  }
-  const [, , run = ''] = match;
-  return run[0] === open.marker && run.length >= open.length;
+  return lines.map((line, index) => (index <= end ? '' : line));
 }
 
 /**
- * Returns every `plantuml` block in `text`, in document order.
+ * Returns every diagram block in `text`, in document order.
  *
- * Blocks in other languages are skipped, but still consume their lines —
- * a ` ```markdown ` block containing a ` ```plantuml ` example must not
- * be mistaken for a diagram.
+ * Blocks in other languages are skipped — a ` ```markdown ` block
+ * containing a ` ```plantuml ` example is not a diagram — and so is a
+ * fence inside an HTML comment, as in the preview.
  */
 export function findPlantUmlBlocks(text: string): PlantUmlBlock[] {
-  const lines = text.split(/\r\n|\r|\n/);
+  const lines = withoutFrontMatter(text.split(/\r\n|\r|\n/));
   const blocks: PlantUmlBlock[] = [];
 
-  let index = 0;
-  while (index < lines.length) {
-    const open = openingFence(lines[index] ?? '');
-    if (open === null) {
-      index++;
+  for (const token of parser.parse(lines.join('\n'), {})) {
+    if (token.type !== 'fence' || token.map === null || !isDiagramFence(token.info)) {
       continue;
     }
-
-    const openLine = index;
-    const content: string[] = [];
-    let closeLine = lines.length - 1;
-
-    index++;
-    while (index < lines.length) {
-      const line = lines[index] ?? '';
-      if (closesFence(line, open)) {
-        closeLine = index;
-        index++;
-        break;
-      }
-      // Strip at most the opening fence's indent, never more.
-      content.push(line.slice(0, open.indent).trim() === '' ? line.slice(open.indent) : line);
-      index++;
-      closeLine = index - 1;
-    }
-
-    const words = open.info.split(/\s+/);
-    if (words[0] !== 'plantuml') {
-      continue;
-    }
-
-    const name = words[1];
-    const leadingBlank = content.findIndex((line) => line.trim() !== '');
+    const [openLine, end] = token.map;
+    const opening = lines[openLine] ?? '';
+    const name = token.info.trim().split(/\s+/)[1];
+    const leadingBlank = token.content.split('\n').findIndex((line) => line.trim() !== '');
     blocks.push({
       name: name !== undefined && name !== '' ? name : null,
-      source: content.join('\n').trim(),
+      source: token.content.trim(),
       sourceLine: openLine + 1 + Math.max(leadingBlank, 0),
       openLine,
-      closeLine,
+      closeLine: end - 1,
+      prefix: opening.slice(0, Math.max(opening.indexOf(token.markup), 0)),
     });
   }
 

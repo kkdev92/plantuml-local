@@ -19,6 +19,11 @@ in [`third-party/`](third-party).
 | [ws](https://github.com/websockets/ws) | 8.21.3 | MIT | [ws-LICENSE.txt](third-party/ws-LICENSE.txt) |
 | [buffer-image-size](https://github.com/netroy/buffer-image-size) | 0.6.4 | MIT | [buffer-image-size-LICENSE.txt](third-party/buffer-image-size-LICENSE.txt) |
 | [`@kkdev92/vscode-ext-kit`](https://github.com/kkdev92/vscode-ext-kit) | 7.0.0 | MIT | [vscode-ext-kit-LICENSE.txt](third-party/vscode-ext-kit-LICENSE.txt) |
+| [markdown-it](https://github.com/markdown-it/markdown-it) | 14.3.2 | MIT | [markdown-it-LICENSE.txt](third-party/markdown-it-LICENSE.txt) |
+| [linkify-it](https://github.com/markdown-it/linkify-it) | 5.0.2 | MIT | [linkify-it-LICENSE.txt](third-party/linkify-it-LICENSE.txt) |
+| [mdurl](https://github.com/markdown-it/mdurl) | 2.1.0 | MIT | [mdurl-LICENSE.txt](third-party/mdurl-LICENSE.txt) |
+| [punycode.js](https://github.com/mathiasbynens/punycode.js) | 2.3.1 | MIT | [punycode-LICENSE.txt](third-party/punycode-LICENSE.txt) |
+| [uc.micro](https://github.com/markdown-it/uc.micro) | 2.1.0 | MIT | [uc-micro-LICENSE.txt](third-party/uc-micro-LICENSE.txt) |
 | [Azure-PlantUML](https://github.com/plantuml-stdlib/Azure-PlantUML) | 2.1.0 | MIT | [azure-plantuml-LICENSE.txt](third-party/azure-plantuml-LICENSE.txt) |
 | [Open Iconic](https://github.com/iconic/open-iconic) | (in `@plantuml/core`) | MIT | [open-iconic-LICENSE.txt](third-party/open-iconic-LICENSE.txt) |
 | [puml-themes](https://github.com/bschwarz/puml-themes) | (in `@plantuml/core`) | MIT | [puml-themes-LICENSE.txt](third-party/puml-themes-LICENSE.txt) |
@@ -88,3 +93,14 @@ buffer-image-size — are bundled with it.
 Copyright (c) 2026 kkdev92. Licensed under the MIT License.
 
 Bundled into `dist/extension.js`.
+
+## markdown-it
+
+Copyright (c) 2014 Vitaly Puzrin, Alex Kocharin. Licensed under the MIT License.
+
+Bundled into `dist/extension.js` to find the diagram blocks of a Markdown
+document the way VS Code's preview does. markdown-it's own dependencies are
+bundled with it: linkify-it (Copyright (c) 2015 Vitaly Puzrin), mdurl
+(Copyright (c) 2015 Vitaly Puzrin, Alex Kocharin; its `parse()` is based on
+Node.js's `url` code, Copyright Joyent, Inc. and other Node contributors),
+punycode.js and uc.micro (Copyright Mathias Bynens), all under the MIT License.

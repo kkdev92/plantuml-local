@@ -90,6 +90,12 @@ export function planReferenceEdits(
     if (block.name === null || !exportedNames.has(block.name)) {
       continue;
     }
+    // A reference line inside a block quote or a nested list item needs the
+    // container's markers in front of it; until it gets them, only blocks
+    // at the start of a line (indented by at most three spaces) get one.
+    if (!/^ {0,3}$/.test(block.prefix)) {
+      continue;
+    }
     const wanted = managedLine(directory, block.name);
 
     // The block's slot: the first non-blank line after the closing fence.
