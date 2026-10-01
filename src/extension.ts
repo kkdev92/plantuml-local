@@ -1,12 +1,16 @@
 import {
   Localization,
   Log,
+  Webviews,
+  createWebviewHtml,
   debounce,
   defineCommandContract,
   defineExtension,
   defineModule,
   defineSettings,
   escapeHtml,
+  generateCSP,
+  generateNonce,
   serviceToken,
   setting,
   type OperationContext,
@@ -27,6 +31,8 @@ import {
   EXTENSION_ID,
   EXTENSION_NAME,
   REFRESH_DEBOUNCE_MS,
+  VIEWER_DEBOUNCE_MS,
+  VIEWER_TYPE,
 } from './core/constants';
 import {
   blockAtLine,
@@ -65,6 +71,7 @@ import type { RenderLog } from './core/types';
 import { RendererClient, defaultWorkerPath } from './render/client';
 import { shareRenders, type SharedRender } from './render/memo';
 import { ThemePalettes } from './render/palette';
+import { DiagramViewer, VIEWER_BODY, type ViewerDeps } from './viewer/viewer';
 
 /**
  * Extension entry point: wires VS Code, the markdown-it plugin and the render
@@ -124,6 +131,16 @@ export const ExportAllAndUpdateRefs = defineCommandContract<readonly [], void>({
   id: COMMANDS.EXPORT_ALL_UPDATE_REFS,
 });
 
+/** Shows the diagram under the cursor of a PlantUML file in a viewer, in the editor's group. */
+export const OpenPreview = defineCommandContract<readonly [], void>({
+  id: COMMANDS.OPEN_PREVIEW,
+});
+
+/** The same, in the group beside the editor. */
+export const OpenPreviewToSide = defineCommandContract<readonly [], void>({
+  id: COMMANDS.OPEN_PREVIEW_TO_SIDE,
+});
+
 /** The worker client. An object with `dispose`, so the container shuts it down. */
 const Renderer: ServiceToken<RendererClient> = serviceToken<RendererClient>('plantuml.renderer');
 
@@ -153,6 +170,17 @@ const RequestRefresh: ServiceToken<Refresh> = serviceToken<Refresh>('plantuml.re
  * VS Code reads off `activate`.
  */
 const Plugin: ServiceToken<PlantUmlPlugin> = serviceToken<PlantUmlPlugin>('plantuml.plugin');
+
+/** The open diagram viewers, one per PlantUML file. */
+interface ViewerSet {
+  /** Shows the diagram at `line` of `document`, reusing the file's viewer if it has one. */
+  open(document: vscode.TextDocument, line: number | null, column: number): void;
+  /** Draws again what a viewer of `document` shows, after the file changed. */
+  update(document: vscode.TextDocument): void;
+  /** Draws every viewer again, after the palette changed. */
+  updateAll(): void;
+}
+const Viewers: ServiceToken<ViewerSet> = serviceToken<ViewerSet>('plantuml.viewers');
 
 type Level = 'trace' | 'debug' | 'info' | 'warn' | 'error';
 const SEVERITY: Record<Level, number> = { trace: 0, debug: 1, info: 2, warn: 3, error: 4 };
@@ -246,12 +274,20 @@ function toDiagnostic(problem: BlockProblem, lines: readonly string[], container
  * the file when there is one, or the diagram blocks of a Markdown document.
  */
 function diagramsOf(document: vscode.TextDocument, text: string): PlantUmlBlock[] {
-  if (document.languageId !== 'plantuml') {
-    return findPlantUmlBlocks(text);
-  }
-  const file = document.uri.path.slice(document.uri.path.lastIndexOf('/') + 1);
+  return document.languageId === 'plantuml'
+    ? findFileDiagrams(text, withoutExtension(fileNameOf(document)))
+    : findPlantUmlBlocks(text);
+}
+
+/** The last segment of a document's path: `flows.puml`. */
+function fileNameOf(document: vscode.TextDocument): string {
+  return document.uri.path.slice(document.uri.path.lastIndexOf('/') + 1);
+}
+
+/** A file name without its extension, which names the only diagram of a PlantUML file. */
+function withoutExtension(file: string): string {
   const dot = file.lastIndexOf('.');
-  return findFileDiagrams(text, dot > 0 ? file.slice(0, dot) : file);
+  return dot > 0 ? file.slice(0, dot) : file;
 }
 
 /**
@@ -720,14 +756,176 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
       }),
   });
 
+  module.services.singleton(Viewers, {
+    inject: {
+      webviews: Webviews,
+      renders: Renders,
+      palettes: Palettes,
+      l10n: Localization,
+      settings: Settings.token,
+    },
+    create: ({ webviews, renders, palettes, l10n, settings }): ViewerSet => {
+      const deps: ViewerDeps = {
+        render: renders,
+        resolvePalette: (source, dark) => palettes.resolve(source, dark),
+        isDark: () => isDark(settings.read().values[CONFIG.THEME]),
+        labels: {
+          diagram: (position) => l10n.t('Diagram {0}', String(position)),
+          entry: (name, line) => l10n.t('{0} (line {1})', name, String(line)),
+          rendering: l10n.t('Rendering diagram…'),
+          gone: l10n.t('The diagram shown is no longer in the file. Choose another.'),
+          empty: l10n.t('The file holds no diagram.'),
+          remoteReference: l10n.t(
+            'URL-based external references (!include, !theme) are not supported.'
+          ),
+          emojiUnavailable: l10n.t(
+            'Emoji (<:name:>) are not supported: the emoji images are not bundled.'
+          ),
+          pages: l10n.t(
+            'Pages after newpage cannot be drawn, so only the first page would be. Give each page a diagram of its own.'
+          ),
+          engineError: (message, line) =>
+            line === null
+              ? l10n.t('PlantUML reported an error: {0}', message)
+              : l10n.t('PlantUML reported an error at line {0}: {1}', String(line), message),
+        },
+      };
+      const open = new Map<string, { viewer: DiagramViewer; document: vscode.TextDocument; reveal(): void }>();
+
+      return {
+        open: (document, line, column): void => {
+          const key = document.uri.toString();
+          const existing = open.get(key);
+          if (existing !== undefined) {
+            existing.document = document;
+            existing.reveal();
+            void existing.viewer.show(document.getText(), line);
+            return;
+          }
+
+          const name = fileNameOf(document);
+          const panel = webviews.openPanel({
+            viewType: VIEWER_TYPE,
+            title: l10n.t('Preview {0}', name),
+            column,
+            enableScripts: true,
+            enableForms: false,
+            localResourceRoots: ['media/viewer'],
+          });
+          const nonce = generateNonce();
+          panel.setHtml(
+            createWebviewHtml({
+              title: name,
+              // Blob URLs are how the page shows the SVG, as an image.
+              csp: generateCSP(panel, { nonce, imgSrc: ['blob:'] }),
+              styles: [panel.asWebviewUri('media/viewer/viewer.css')],
+              scripts: [panel.asWebviewUri('media/viewer/viewer.js')],
+              nonce,
+              body: VIEWER_BODY,
+            })
+          );
+          const entry = {
+            viewer: new DiagramViewer(panel, deps, withoutExtension(name)),
+            document,
+            reveal: (): void => {
+              panel.reveal();
+            },
+          };
+          // Drawn once the page asks, as it does each time it is created.
+          entry.viewer.select(document.getText(), line);
+          open.set(key, entry);
+          panel.onMessage((message) => {
+            void entry.viewer.receive(message, entry.document.getText());
+          });
+          panel.onDidDispose(() => {
+            open.delete(key);
+          });
+        },
+        update: (document): void => {
+          const entry = open.get(document.uri.toString());
+          if (entry !== undefined) {
+            entry.document = document;
+            void entry.viewer.update(document.getText());
+          }
+        },
+        updateAll: (): void => {
+          for (const entry of open.values()) {
+            void entry.viewer.update(entry.document.getText());
+          }
+        },
+      };
+    },
+  });
+
   module.commands.handle(ClearCache, {
-    inject: { plugin: Plugin, renders: Renders },
-    execute: async (context: OperationContext, _args, { plugin, renders }): Promise<void> => {
+    inject: { plugin: Plugin, renders: Renders, viewers: Viewers },
+    execute: async (context: OperationContext, _args, { plugin, renders, viewers }): Promise<void> => {
       // The shared renders first, or the preview would get them back.
       renders.clear();
       plugin.clearCache();
+      viewers.updateAll();
       context.logger.info('Render cache cleared');
       await context.notify.info(context.l10n.t('PlantUML render cache cleared.'));
+    },
+  });
+
+  /** Opens the viewer for the PlantUML file in the editor, in `column`. */
+  const openPreview =
+    (column: number) =>
+    async (context: OperationContext, _args: readonly [], { viewers }: { viewers: ViewerSet }): Promise<void> => {
+      const editor = vscode.window.activeTextEditor;
+      if (editor?.document.languageId !== 'plantuml') {
+        await context.notify.warn(context.l10n.t('Open a PlantUML file first.'));
+        return;
+      }
+      viewers.open(editor.document, editor.selection.active.line, column);
+    };
+  module.commands.handle(OpenPreview, {
+    inject: { viewers: Viewers },
+    execute: openPreview(vscode.ViewColumn.Active),
+  });
+  module.commands.handle(OpenPreviewToSide, {
+    inject: { viewers: Viewers },
+    execute: openPreview(vscode.ViewColumn.Beside),
+  });
+
+  module.hostedServices.add({
+    id: 'plantuml.viewerUpdates',
+    inject: { viewers: Viewers },
+    start: (context, { viewers }) => {
+      // Draws a viewer again once its file has stopped changing, and every
+      // viewer when the palette may have changed with the theme or setting.
+      const timers = new Map<string, ReturnType<typeof setTimeout>>();
+      const changed = vscode.workspace.onDidChangeTextDocument((event) => {
+        if (event.document.languageId !== 'plantuml' || event.contentChanges.length === 0) {
+          return;
+        }
+        const key = event.document.uri.toString();
+        clearTimeout(timers.get(key));
+        timers.set(
+          key,
+          setTimeout(() => {
+            timers.delete(key);
+            viewers.update(event.document);
+          }, VIEWER_DEBOUNCE_MS)
+        );
+      });
+      const themed = vscode.window.onDidChangeActiveColorTheme(() => {
+        viewers.updateAll();
+      });
+      const configured = vscode.workspace.onDidChangeConfiguration((event) => {
+        if (event.affectsConfiguration(`${EXTENSION_ID}.${CONFIG.THEME}`)) {
+          viewers.updateAll();
+        }
+      });
+      context.signal.addEventListener('abort', () => {
+        changed.dispose();
+        themed.dispose();
+        configured.dispose();
+        for (const timer of timers.values()) {
+          clearTimeout(timer);
+        }
+      });
     },
   });
 

@@ -50,6 +50,8 @@ const REQUIRED = [
   'extension/dist/syntaxes/plantuml-json.tmLanguage.json',
   'extension/dist/stdlib/azure.json',
   'extension/media/plantuml.css',
+  'extension/media/viewer/viewer.js',
+  'extension/media/viewer/viewer.css',
   'extension/l10n/bundle.l10n.ja.json',
   'extension/images/icon.png',
 ];

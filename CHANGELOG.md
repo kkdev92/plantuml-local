@@ -12,7 +12,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`.puml` files open as PlantUML.** Files ending in `.puml`, `.plantuml`,
   `.pu`, `.iuml` or `.wsd` get the language PlantUML and the same colouring
   as ```` ```plantuml ```` blocks, with `'` and `/' … '/` for the comment
-  commands. They have no preview yet.
+  commands.
+- **A preview for `.puml` files.** *Open Diagram Preview to the Side*, also
+  the button in the editor's title bar, shows the diagram under the cursor in
+  a panel kept to that file; a file with several diagrams lists them in the
+  panel. The panel draws the diagram again as the file changes and when the
+  palette changes. It shows the SVG as an image, so nothing in it can run.
 - **Export from `.puml` files.** *Export Diagram as SVG* and *Export All
   Diagrams as SVG* work in a PlantUML file too, writing each of its diagrams
   to a file of its own: the one under the cursor, or every named one. A

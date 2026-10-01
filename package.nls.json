@@ -4,6 +4,8 @@
   "command.exportSvg.title": "Export Diagram as SVG",
   "command.exportAllSvg.title": "Export All Diagrams as SVG",
   "command.exportAllAndUpdateRefs.title": "Export All Diagrams and Update References",
+  "command.openPreview.title": "Open Diagram Preview",
+  "command.openPreviewToSide.title": "Open Diagram Preview to the Side",
   "config.theme.description": "Diagram colour palette. \"auto\" follows the VS Code colour theme. A diagram whose !theme would be hard to read in the palette is drawn in the other one.",
   "config.logLevel.description": "Log level for the PlantUML Local output channel. The Output panel's own level selector applies on top of this.",
   "config.exportDirectory.description": "Where exported SVGs are written, relative to the Markdown file. Use \".\" for the same folder. Absolute paths and \"..\" are rejected.",
