@@ -42,6 +42,7 @@ Your diagram source is processed locally and is not sent to a rendering service.
 - **Syntax Highlighting**: ```` ```plantuml ```` blocks and `.puml` files are coloured in the editor, following the syntax the bundled engine accepts
 - **Offline Rendering**: No Java, no PlantUML server, no network connection required — nothing to install besides the extension
 - **Fault-Tolerant**: A syntax error shows up inline at the broken diagram; the rest of the page stays intact
+- **Problems Panel**: Errors, warnings and unsupported syntax in the diagrams of open Markdown files are listed with their line, preview or not
 - **Multi-Diagram Pages**: Any number of diagrams per page; renders are serialised so results never mix
 - **Dark-Mode Aware**: Diagrams re-render to match your colour theme, or pin the palette via settings
 - **Full-Width Text Support**: Japanese and other full-width characters are measured and laid out correctly
@@ -161,6 +162,25 @@ Files ending in `.puml`, `.plantuml`, `.pu`, `.iuml` or `.wsd` open as the
 language PlantUML, with the same colouring. *Toggle Line Comment* uses `'` and
 *Toggle Block Comment* uses `/' … '/`. Diagrams are previewed and exported from
 Markdown only; a `.puml` file is not rendered yet.
+
+### Problems
+
+The diagrams of open Markdown files are checked, whether or not a preview is
+open, and what is wrong with them is listed in the Problems panel on the line
+it is on:
+
+- the engine's errors and warnings;
+- what the bundled engine cannot do: including a file, a library other than
+  `azure`, a theme from a folder, a URL, emoji;
+- what it would drop without a word: a second diagram in a block, the pages
+  after `newpage`, an `!includesub`;
+- a diagram with no `@enduml` line, which is drawn anyway.
+
+The engine stops at the first error, so a diagram shows at most one, and it
+names a line but no column, so the whole line is marked. Its warnings name no
+line at all and are put on the diagram's `@startuml` line. A document is checked
+again half a second after it last changed, and its problems disappear as soon as
+it changes. `plantumlLocal.diagnostics.enabled` turns the checks off.
 
 ### Icons and sprites
 
@@ -334,6 +354,7 @@ and would show the referenced image as a second copy.
 | `plantumlLocal.exportDirectory` | `images` | Where exported SVGs are written, relative to the Markdown file. `.` for the same folder; absolute paths and `..` are rejected |
 | `plantumlLocal.exportTheme` | `light` | Palette for exported SVGs. `preview` follows the palette the preview currently uses |
 | `plantumlLocal.hideExportedImages` | `true` | Hide images marked `#plantuml-local` in the preview, so an exported diagram is not shown next to its block's render |
+| `plantumlLocal.diagnostics.enabled` | `true` | List the problems of the diagrams in open Markdown files in the Problems panel; can be set per folder |
 
 A diagram that picks a `!theme` is drawn in that theme's colours, and most
 themes paint no background of their own, leaving the diagram on the backdrop

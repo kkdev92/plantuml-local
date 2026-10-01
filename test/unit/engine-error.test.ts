@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import { addBackground } from '../../src/export/exporter';
-import { recognizeEngineError } from '../../src/render/engine-error';
+import { recognizeEngineError, recognizeEngineWarnings } from '../../src/render/engine-error';
 
 /**
  * The fixtures are what the bundled engine returned through the render
@@ -135,5 +135,24 @@ describe('recognizeEngineError', () => {
       expect(recognizeEngineError('')).toBeNull();
       expect(recognizeEngineError('<svg xmlns="http://www.w3.org/2000/svg"/>')).toBeNull();
     });
+  });
+});
+
+describe('recognizeEngineWarnings', () => {
+  it('reads the banner the engine draws above a diagram it accepted with warnings', () => {
+    expect(recognizeEngineWarnings(fixture('warning'))).toEqual([
+      "This syntax is deprecated, you must add <<#pink>> at the end of the line, after the ';'",
+    ]);
+  });
+
+  it('reads it in the dark palette too, where the banner has other colours', () => {
+    // Measured with the bundled engine: fill #774400, stroke #AA5500, white text.
+    const dark = fixture('warning').replace('fill="#FFFFCC" stroke="#FFDD88"', 'fill="#774400" stroke="#AA5500"');
+    expect(recognizeEngineWarnings(dark)).toHaveLength(1);
+  });
+
+  it('finds none in a diagram without the banner, or in an error', () => {
+    expect(recognizeEngineWarnings(fixture('sequence'))).toEqual([]);
+    expect(recognizeEngineWarnings(fixture('syntax-error'))).toEqual([]);
   });
 });

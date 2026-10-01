@@ -211,6 +211,12 @@
           "type": "boolean",
           "default": true,
           "description": "%config.hideExportedImages.description%"
+        },
+        "plantumlLocal.diagnostics.enabled": {
+          "type": "boolean",
+          "default": true,
+          "scope": "resource",
+          "description": "%config.diagnostics.enabled.description%"
         }
       }
     }

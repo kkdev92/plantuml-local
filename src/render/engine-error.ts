@@ -138,3 +138,24 @@ export function recognizeEngineError(svg: string): EngineError | null {
   const texts = textElements(svg);
   return locatedError(texts) ?? notSupported(texts) ?? loneMessage(svg, texts);
 }
+
+/**
+ * The banner the engine draws above a diagram it accepted with warnings
+ * (DiagramChromeFactory upstream), in the light and in the dark palette.
+ */
+const WARNING_BANNER = /<rect\b[^>]*\bfill="#(?:FFFFCC|774400)"[^>]*\bstroke="#(?:FFDD88|AA5500)"[^>]*\bstroke-width="3"/i;
+
+/**
+ * The warnings the engine drew above a diagram: one line of 10-point
+ * monospace text per message in the banner, which names no line of the
+ * source. Empty when there is no banner.
+ */
+export function recognizeEngineWarnings(svg: string): string[] {
+  if (!WARNING_BANNER.test(svg)) {
+    return [];
+  }
+  return textElements(svg)
+    .filter((text) => /\bfont-size="10"/.test(text.attributes) && /\bfont-family="monospace"/.test(text.attributes))
+    .map((text) => text.content.trim())
+    .filter((message) => message !== '');
+}

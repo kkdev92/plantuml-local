@@ -8,5 +8,6 @@
   "config.logLevel.description": "出力パネル (PlantUML Local) に出すログの水準。出力パネル側のレベル選択も併せて効きます。",
   "config.exportDirectory.description": "SVG の書き出し先。Markdown ファイルからの相対パスで指定します。同じ場所なら \".\"。絶対パスと \"..\" は拒否します。",
   "config.exportTheme.description": "書き出す SVG の配色。書き出した図は GitHub など背景を制御できない場所で見られるため、既定は \"light\" です。\"preview\" にするとプレビューの現在の配色に従います。!theme で選んだテーマの文字がその配色で読みにくい図は、もう一方の配色で書き出します。",
-  "config.hideExportedImages.description": "#plantuml-local が付いた画像を Markdown プレビューで隠し、ブロックの描画と書き出した SVG が二重に表示されないようにします。書き出した SVG 自体の見た目を確認したいときはオフにしてください。"
+  "config.hideExportedImages.description": "#plantuml-local が付いた画像を Markdown プレビューで隠し、ブロックの描画と書き出した SVG が二重に表示されないようにします。書き出した SVG 自体の見た目を確認したいときはオフにしてください。",
+  "config.diagnostics.enabled.description": "開いている Markdown ファイルの図の問題を、プレビューを開いていなくても「問題」パネルに表示します。エンジンのエラーと警告、同梱エンジンが対応していない構文や黙って捨てる内容が対象です。"
 }

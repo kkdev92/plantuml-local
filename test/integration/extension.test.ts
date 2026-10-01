@@ -377,6 +377,137 @@ describe('export (dist)', () => {
     expect(vscodeStub._test.notifications.warn.some((m) => m.includes('unnamed'))).toBe(true);
   });
 
+  describe('diagnostics', () => {
+    const DOCUMENT = [
+      '# Doc',
+      '',
+      '```plantuml syntax',
+      '@startuml',
+      'Alice -> Bob',
+      'this is not valid ;;; [[[',
+      '@enduml',
+      '```',
+      '',
+      '> ```plantuml quoted',
+      '> @startuml',
+      '> Alice -> Bob',
+      '> !include shared.puml',
+      '> @enduml',
+      '> ```',
+      '',
+      '```plantuml two',
+      '@startuml',
+      'A -> B',
+      '@enduml',
+      '@startuml',
+      'C -> D',
+      '@enduml',
+      '```',
+      '',
+      '```plantuml sub',
+      '@startuml',
+      '!includesub shared.puml!PART',
+      'Alice -> Bob',
+      '@enduml',
+      '```',
+      '',
+      '```plantuml open',
+      '@startuml',
+      'Alice -> Bob',
+      '```',
+      '',
+      '```plantuml warned',
+      '@startuml',
+      'start',
+      '#pink:deprecated colour',
+      'second line;',
+      'stop',
+      '@enduml',
+      '```',
+    ].join('\n');
+
+    /** Waits until the document's problems satisfy `ready`, then returns them. */
+    async function problemsOf(
+      uri: string,
+      ready: (found: readonly { message: string; code?: unknown }[]) => boolean
+    ): Promise<{ line: number; character: number; code: unknown; severity: number; message: string }[]> {
+      for (let waited = 0; waited < 30_000; waited += 100) {
+        const found = vscodeStub._test.diagnostics.get(uri);
+        if (found !== undefined && ready(found)) {
+          return found.map((d) => ({
+            line: d.range.start.line,
+            character: d.range.start.character,
+            code: d.code,
+            severity: d.severity,
+            message: d.message,
+          }));
+        }
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      throw new Error(`no problems for ${uri}: ${JSON.stringify(vscodeStub._test.diagnostics.get(uri))}`);
+    }
+
+    it('puts each problem on its line: engine errors and warnings, and what the engine drops', async () => {
+      const uri = 'file:///c/diag/doc.md';
+      const document = makeEditor(uri, DOCUMENT, 0).document;
+      vscodeStub._test.openDocument(document);
+      try {
+        const found = await problemsOf(uri, (items) => items.length >= 6);
+        const ERROR = vscodeStub.DiagnosticSeverity.Error;
+        const WARNING = vscodeStub.DiagnosticSeverity.Warning;
+        expect(found.map((p) => [p.line, p.code, p.severity])).toEqual([
+          [5, 'PLLOCAL-SYN001', ERROR],
+          [12, 'PLLOCAL-CAP001', ERROR],
+          [20, 'PLLOCAL-DOC003', ERROR],
+          [27, 'PLLOCAL-CAP001', WARNING],
+          [33, 'PLLOCAL-DOC002', WARNING],
+          [38, 'PLLOCAL-WRN001', WARNING],
+        ]);
+        expect(found[0]?.message).toContain('Syntax Error?');
+        // In the quote, past the marker; and an explanation, not the engine's bare words.
+        expect(found[1]?.character).toBe(2);
+        expect(found[1]?.message).toBe('cannot include shared.puml: the bundled engine reads no files.');
+        expect(found[4]?.message).toContain('@enduml');
+        expect(found[5]?.message).toContain('deprecated');
+      } finally {
+        vscodeStub._test.closeDocument(document);
+      }
+      // Closing the document takes its problems away.
+      expect(vscodeStub._test.diagnostics.has(uri)).toBe(false);
+    });
+
+    it('drops a document’s problems as soon as it changes, then checks it again', async () => {
+      const uri = 'file:///c/diag/edit.md';
+      const editor = makeEditor(uri, '```plantuml broken\n@startuml\nthis is not valid ;;; [[[\n@enduml\n```', 0);
+      vscodeStub._test.openDocument(editor.document);
+      try {
+        await problemsOf(uri, (items) => items.length === 1);
+
+        editor.document.setText('```plantuml broken\n@startuml\nAlice -> Bob\n@enduml\n```');
+        vscodeStub._test.changeDocument(editor.document);
+        expect(vscodeStub._test.diagnostics.has(uri)).toBe(false);
+
+        expect(await problemsOf(uri, () => true)).toEqual([]);
+      } finally {
+        vscodeStub._test.closeDocument(editor.document);
+      }
+    });
+
+    it('reports nothing when turned off', async () => {
+      const uri = 'file:///c/diag/off.md';
+      vscodeStub._test.setConfiguration('diagnostics.enabled', false);
+      const document = makeEditor(uri, '```plantuml broken\n@startuml\nthis is not valid ;;; [[[\n@enduml\n```', 0).document;
+      try {
+        vscodeStub._test.openDocument(document);
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+        expect(vscodeStub._test.diagnostics.has(uri)).toBe(false);
+      } finally {
+        vscodeStub._test.closeDocument(document);
+        vscodeStub._test.setConfiguration('diagnostics.enabled', undefined);
+      }
+    });
+  });
+
   describe('when no Markdown editor has focus', () => {
     // A focused preview leaves no active text editor at all; a focused file
     // of another language is the same situation for these commands.

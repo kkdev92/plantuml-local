@@ -121,8 +121,30 @@ export interface UriStub {
   toString(): string;
 }
 
+/** A `vscode.Diagnostic` as the extension builds it. */
+export interface DiagnosticStub {
+  range: { start: PositionStub; end: PositionStub };
+  message: string;
+  severity: number;
+  code?: unknown;
+  source?: string;
+}
+
 export interface VscodeStub {
   ColorThemeKind: Record<'Light' | 'Dark' | 'HighContrast' | 'HighContrastLight', number>;
+  DiagnosticSeverity: Record<'Error' | 'Warning' | 'Information' | 'Hint', number>;
+  Diagnostic: new (
+    range: { start: PositionStub; end: PositionStub },
+    message: string,
+    severity?: number
+  ) => DiagnosticStub;
+  languages: {
+    createDiagnosticCollection: (name?: string) => {
+      set: (uri: { toString(): string }, diagnostics: readonly DiagnosticStub[] | undefined) => void;
+      delete: (uri: { toString(): string }) => void;
+      dispose: () => void;
+    };
+  };
   UIKind: Record<'Desktop' | 'Web', number>;
   ProgressLocation: Record<'SourceControl' | 'Window' | 'Notification', number>;
   StatusBarAlignment: Record<'Left' | 'Right', number>;
@@ -186,6 +208,11 @@ export interface VscodeStub {
       update: () => Promise<void>;
     };
     onDidChangeConfiguration: (listener: (e: unknown) => void) => { dispose(): void };
+    onDidOpenTextDocument: (listener: (document: TextEditorStub['document']) => void) => { dispose(): void };
+    onDidChangeTextDocument: (
+      listener: (event: { document: TextEditorStub['document']; contentChanges: unknown[] }) => void
+    ) => { dispose(): void };
+    onDidCloseTextDocument: (listener: (document: TextEditorStub['document']) => void) => { dispose(): void };
     /** Both read by the framework's runtime preflight, at activation. */
     isTrusted: boolean;
     workspaceFolders: unknown[] | undefined;
@@ -249,6 +276,14 @@ export interface VscodeStub {
     setActiveEditor(editor: TextEditorStub | undefined): void;
     /** Fires the selection listeners for `editor`. */
     fireSelection(editor: TextEditorStub): void;
+    /** What each diagnostic collection last set, by document URI. */
+    diagnostics: Map<string, readonly DiagnosticStub[]>;
+    /** Opens `document`: adds it to `textDocuments` and fires the open listeners. */
+    openDocument(document: TextEditorStub['document']): void;
+    /** Fires the change listeners for `document`, as an edit would. */
+    changeDocument(document: TextEditorStub['document']): void;
+    /** Closes `document`: removes it from `textDocuments` and fires the close listeners. */
+    closeDocument(document: TextEditorStub['document']): void;
   };
 }
 
@@ -294,6 +329,29 @@ export function createVscodeStub(): VscodeStub {
   const logs: string[] = [];
   const configuration = new Map<string, unknown>();
   const configurationListeners: ((event: unknown) => void)[] = [];
+  const diagnostics = new Map<string, readonly DiagnosticStub[]>();
+  type DocumentStub = TextEditorStub['document'];
+  const openListeners: ((document: DocumentStub) => void)[] = [];
+  const changeListeners: ((event: { document: DocumentStub; contentChanges: unknown[] }) => void)[] = [];
+  const closeListeners: ((document: DocumentStub) => void)[] = [];
+  const subscribe = <T>(listeners: T[], listener: T): { dispose(): void } => {
+    listeners.push(listener);
+    return {
+      dispose: () => {
+        listeners.splice(listeners.indexOf(listener), 1);
+      },
+    };
+  };
+
+  class Diagnostic implements DiagnosticStub {
+    code?: unknown;
+    source?: string;
+    constructor(
+      public range: { start: PositionStub; end: PositionStub },
+      public message: string,
+      public severity = 0
+    ) {}
+  }
   const theme = { kind: 1 };
   let activeEditor: TextEditorStub | undefined;
   /** Mutable test knobs the window stubs read at call time. */
@@ -357,6 +415,19 @@ export function createVscodeStub(): VscodeStub {
 
   return {
     ColorThemeKind: { Light: 1, Dark: 2, HighContrast: 3, HighContrastLight: 4 },
+    DiagnosticSeverity: { Error: 0, Warning: 1, Information: 2, Hint: 3 },
+    Diagnostic,
+    languages: {
+      createDiagnosticCollection: () => ({
+        set: (uri, items) => {
+          diagnostics.set(uri.toString(), items ?? []);
+        },
+        delete: (uri) => {
+          diagnostics.delete(uri.toString());
+        },
+        dispose: () => undefined,
+      }),
+    },
     EndOfLine: { LF: 1, CRLF: 2 },
     Position,
     Range,
@@ -531,6 +602,9 @@ export function createVscodeStub(): VscodeStub {
         configurationListeners.push(listener);
         return { dispose: () => undefined };
       },
+      onDidOpenTextDocument: (listener) => subscribe(openListeners, listener),
+      onDidChangeTextDocument: (listener) => subscribe(changeListeners, listener),
+      onDidCloseTextDocument: (listener) => subscribe(closeListeners, listener),
       isTrusted: true,
       workspaceFolders: undefined,
       get textDocuments() {
@@ -619,6 +693,24 @@ export function createVscodeStub(): VscodeStub {
       fireSelection: (editor) => {
         for (const listener of selectionListeners) {
           listener({ textEditor: editor });
+        }
+      },
+      diagnostics,
+      openDocument: (document) => {
+        hooks.openDocuments.push(document);
+        for (const listener of openListeners) {
+          listener(document);
+        }
+      },
+      changeDocument: (document) => {
+        for (const listener of changeListeners) {
+          listener({ document, contentChanges: [{}] });
+        }
+      },
+      closeDocument: (document) => {
+        hooks.openDocuments.splice(hooks.openDocuments.indexOf(document), 1);
+        for (const listener of closeListeners) {
+          listener(document);
         }
       },
     },

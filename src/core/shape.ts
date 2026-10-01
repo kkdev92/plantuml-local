@@ -4,11 +4,13 @@
  *
  * A diagram runs from a line starting with `@start…` (or `\start…`) to one
  * starting with `@end…`; neither counts on a `'` comment line or inside a
- * `/' … '/` block comment, which the engine skips too. The engine draws
- * only the first diagram of an input and only the first page of a diagram
- * that uses `newpage`, and says nothing about the rest; it fails outright
- * on a diagram whose end line is missing. Those cases are told apart here,
+ * `/' … '/` block comment, which the engine skips too. The engine draws only
+ * the first diagram of an input and only the first page of a diagram that
+ * uses `newpage`, and says nothing about the rest; it fails outright on a
+ * diagram whose end line is missing. Those cases are told apart here,
  * before the engine sees the source.
+ *
+ * Lines are counted from 0 within the source.
  */
 
 /** What the preview and export do with a block's source. */
@@ -16,59 +18,72 @@ export type DiagramShape =
   /**
    * Hand `source` to the engine. `addedEnd` is the end line appended
    * because the block had none, or null when the source is unchanged.
+   * `startLine` is the diagram's `@start…` line, or null without one.
    */
-  | { kind: 'drawable'; source: string; addedEnd: string | null }
-  /** More than one `@start…` line: only the first diagram would be drawn. */
-  | { kind: 'several' }
-  /** `newpage` inside the diagram: only the first page would be drawn. */
-  | { kind: 'pages' };
+  | { kind: 'drawable'; source: string; addedEnd: string | null; startLine: number | null }
+  /** More than one `@start…` line, the second at `line`: only the first diagram would be drawn. */
+  | { kind: 'several'; line: number }
+  /** `newpage` inside the diagram, at `line`: only the first page would be drawn. */
+  | { kind: 'pages'; line: number };
 
 const START = /^\s*([@\\])start([A-Za-z0-9_]+)/;
 const END = /^\s*[@\\]end/;
 const NEWPAGE = /^\s*newpage(?:\s|$)/i;
 
-export function diagramShape(source: string): DiagramShape {
+/**
+ * Calls `visit` with each line the engine reads as part of the diagram text,
+ * skipping comment lines and block comments, with the line's index.
+ */
+export function forEachCodeLine(source: string, visit: (line: string, index: number) => void): void {
   let inBlockComment = false;
-  let starts = 0;
-  let open = false;
-  let pages = false;
-  let addedEnd = '';
-
-  for (const line of source.split(/\r?\n/)) {
+  source.split(/\r?\n/).forEach((line, index) => {
     const trimmed = line.trim();
     if (inBlockComment || trimmed.startsWith("/'")) {
       inBlockComment = !trimmed.endsWith("'/");
-      continue;
+      return;
     }
-    if (trimmed.startsWith("'")) {
-      continue;
+    if (!trimmed.startsWith("'")) {
+      visit(line, index);
     }
+  });
+}
+
+export function diagramShape(source: string): DiagramShape {
+  let startLine: number | null = null;
+  let secondStart: number | null = null;
+  let newpage: number | null = null;
+  let open = false;
+  let addedEnd = '';
+
+  forEachCodeLine(source, (line, index) => {
     const start = START.exec(line);
     if (start !== null) {
-      starts++;
-      if (!open) {
+      if (startLine === null) {
+        startLine = index;
         open = true;
         addedEnd = `${start[1] ?? '@'}end${start[2] ?? 'uml'}`;
+      } else {
+        secondStart ??= index;
       }
-      continue;
+      return;
     }
     if (END.test(line)) {
       open = false;
-      continue;
+      return;
     }
-    if (open && NEWPAGE.test(line)) {
-      pages = true;
+    if (open && newpage === null && NEWPAGE.test(line)) {
+      newpage = index;
     }
-  }
+  });
 
-  if (starts > 1) {
-    return { kind: 'several' };
+  if (secondStart !== null) {
+    return { kind: 'several', line: secondStart };
   }
-  if (pages) {
-    return { kind: 'pages' };
+  if (newpage !== null) {
+    return { kind: 'pages', line: newpage };
   }
-  if (starts === 1 && open) {
-    return { kind: 'drawable', source: `${source}\n${addedEnd}`, addedEnd };
+  if (startLine !== null && open) {
+    return { kind: 'drawable', source: `${source}\n${addedEnd}`, addedEnd, startLine };
   }
-  return { kind: 'drawable', source, addedEnd: null };
+  return { kind: 'drawable', source, addedEnd: null, startLine };
 }

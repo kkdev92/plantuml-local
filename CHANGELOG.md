@@ -14,6 +14,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   as ```` ```plantuml ```` blocks, with `'` and `/' … '/` for the comment
   commands. They are not rendered yet: diagrams are still previewed and
   exported from Markdown.
+- **Problems panel.** The diagrams of open Markdown files are checked, with or
+  without a preview, and their problems are listed on the line they are on:
+  the engine's errors and warnings, what the bundled engine cannot do
+  (including files, libraries other than azure, themes from a folder, URLs,
+  emoji), what it would drop without a word (a second diagram, the pages
+  after `newpage`, `!includesub`) and a missing `@enduml`. The preview and
+  the checks share renders, so a diagram both need is drawn once.
+  `plantumlLocal.diagnostics.enabled` turns them off.
 - **` ```puml ` blocks are diagrams too.** The preview draws them, the
   editor colours them and the export commands find them, like
   ` ```plantuml ` blocks. A document that used ` ```puml ` to show PlantUML
