@@ -50,9 +50,11 @@ export interface PlantUmlBlock {
  * Names are used as file names, so the character set is deliberately
  * narrow: anything else — a slash, a dot, whitespace, a drive letter —
  * would either escape the export directory or produce a path that does
- * not round-trip through a Markdown link.
+ * not round-trip through a Markdown link. The length is capped well
+ * under the 255 characters file systems commonly allow in a file name:
+ * the file is first written under a temporary name that adds to it.
  */
-const VALID_NAME = /^[A-Za-z0-9_-]+$/;
+const VALID_NAME = /^[A-Za-z0-9_-]{1,128}$/;
 
 /**
  * Windows device names. `nul.svg` opens the null device rather than a

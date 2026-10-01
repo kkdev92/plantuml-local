@@ -27,8 +27,27 @@ export interface ExporterDeps {
    * for a diagram whose `!theme` cannot be read in it (src/render/palette.ts).
    */
   resolvePalette(source: string, dark: boolean): Promise<boolean>;
-  /** Writes `content` to `path`, creating parent directories. */
-  writeFile(path: string, content: string): Promise<void>;
+  /**
+   * The text of the file at `path`, or null when there is none. Rejects
+   * for a folder, which a diagram is never written in place of.
+   */
+  readExisting(path: string): Promise<string | null>;
+  /**
+   * Asks before replacing files that hold something other than their
+   * diagram: 'replace' them, 'keep' them and write only the rest, or
+   * undefined to write nothing. `canKeep` says whether there is a rest:
+   * more than one diagram is being exported.
+   */
+  confirmReplace(
+    paths: readonly string[],
+    canKeep: boolean
+  ): Promise<'replace' | 'keep' | undefined>;
+  /**
+   * Writes `content` to `path`, creating parent directories. Unless
+   * `replace` is set, a file that has appeared there since the check is
+   * an error rather than something to write over.
+   */
+  writeFile(path: string, content: string, replace: boolean): Promise<void>;
   /** Joins a document path's directory with a relative path. */
   resolve(documentPath: string, relative: string): string;
   /** Localised reason given for a block carrying a URL-based include. */
@@ -71,6 +90,15 @@ export interface ExportOutcome {
   failed: ExportResult[];
   /** Blocks skipped because they carry no name. */
   unnamed: number;
+  /** Existing files left as they were, replacing them having been declined. */
+  kept: number;
+}
+
+/** A diagram rendered and ready to write. */
+interface Drawing {
+  name: string;
+  path: string;
+  svg: string;
 }
 
 /**
@@ -115,19 +143,24 @@ export function addBackground(svg: string, dark: boolean): string {
   return svg.slice(0, open[0].length) + rect + svg.slice(open[0].length);
 }
 
+/** The text an error carries, for a failure's reason. */
+function messageOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 /**
- * Renders one block and writes it.
+ * Renders one block, or says why it cannot be exported.
  *
  * Renders are serialised inside the worker, so calling this in a loop is
  * already sequential; there is nothing to gain from firing them at once.
  */
-async function exportBlock(
+async function drawBlock(
   deps: ExporterDeps,
   documentPath: string,
   directory: string,
   block: PlantUmlBlock,
   name: string
-): Promise<ExportResult> {
+): Promise<Drawing | ExportResult> {
   // Names become file names, and they come from the document — so on a
   // repository someone else wrote, `x/../../..` would put a file wherever
   // the block asked. Checked here rather than only at the call sites so
@@ -175,12 +208,13 @@ async function exportBlock(
       };
     }
 
-    const svg = addBackground(rendered, dark);
-    const path = deps.resolve(documentPath, `${directory}/${name}.svg`);
-    await deps.writeFile(path, svg);
-    return { name, path, error: null };
+    return {
+      name,
+      path: deps.resolve(documentPath, `${directory}/${name}.svg`),
+      svg: addBackground(rendered, dark),
+    };
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = messageOf(error);
     return {
       name,
       path: null,
@@ -189,23 +223,91 @@ async function exportBlock(
   }
 }
 
-/** Exports a single block under an explicit name. */
+/**
+ * Writes the drawings, asking once before replacing any file that holds
+ * something else: it may be a file someone put there by hand. A file that
+ * already holds its drawing is left alone, since writing it again would
+ * change nothing. Null when the replacement is declined outright.
+ */
+async function writeDrawings(
+  deps: ExporterDeps,
+  drawings: readonly Drawing[]
+): Promise<Pick<ExportOutcome, 'written' | 'failed' | 'kept'> | null> {
+  const failed: ExportResult[] = [];
+  const checked: { drawing: Drawing; existing: string | null }[] = [];
+  for (const drawing of drawings) {
+    try {
+      checked.push({ drawing, existing: await deps.readExisting(drawing.path) });
+    } catch (error: unknown) {
+      failed.push({ name: drawing.name, path: null, error: messageOf(error) });
+    }
+  }
+
+  const replacing = checked.filter(
+    ({ drawing, existing }) => existing !== null && existing !== drawing.svg
+  );
+  let replace = false;
+  if (replacing.length > 0) {
+    const answer = await deps.confirmReplace(
+      replacing.map(({ drawing }) => drawing.path),
+      drawings.length > 1
+    );
+    if (answer === undefined) {
+      return null;
+    }
+    replace = answer === 'replace';
+  }
+
+  const written: ExportResult[] = [];
+  let kept = 0;
+  for (const { drawing, existing } of checked) {
+    const result = { name: drawing.name, path: drawing.path, error: null };
+    if (existing === drawing.svg) {
+      written.push(result);
+    } else if (existing !== null && !replace) {
+      kept += 1;
+    } else {
+      try {
+        await deps.writeFile(drawing.path, drawing.svg, existing !== null);
+        written.push(result);
+      } catch (error: unknown) {
+        failed.push({ name: drawing.name, path: null, error: messageOf(error) });
+      }
+    }
+  }
+  return { written, failed, kept };
+}
+
+/**
+ * Exports a single block under an explicit name. Null when replacing the
+ * file already there is declined.
+ */
 export async function exportOne(
   deps: ExporterDeps,
   documentPath: string,
   directory: string,
   block: PlantUmlBlock,
   name: string
-): Promise<ExportResult> {
-  return exportBlock(deps, documentPath, directory, block, name);
+): Promise<ExportResult | null> {
+  const drawing = await drawBlock(deps, documentPath, directory, block, name);
+  if (!('svg' in drawing)) {
+    return drawing;
+  }
+  const outcome = await writeDrawings(deps, [drawing]);
+  if (outcome === null || outcome.kept > 0) {
+    return null;
+  }
+  return outcome.written[0] ?? outcome.failed[0] ?? null;
 }
 
 /**
- * Exports every named block in `text`.
+ * Exports every named block in `text`. Null when replacing the files
+ * already there is declined, in which case nothing is written.
  *
  * Unnamed blocks are counted rather than guessed at: a positional name
  * would move the moment a block is inserted above it, silently orphaning
- * whatever already referenced the old file.
+ * whatever already referenced the old file. A name that cannot be a file
+ * name is a failure, not a missing name.
  */
 export async function exportAll(
   deps: ExporterDeps,
@@ -213,21 +315,32 @@ export async function exportAll(
   directory: string,
   text: string,
   onProgress?: (done: number, total: number, name: string) => void
-): Promise<ExportOutcome> {
+): Promise<ExportOutcome | null> {
   const blocks = findPlantUmlBlocks(text);
   const named = blocks.filter(
-    (block): block is PlantUmlBlock & { name: string } =>
-      block.name !== null && isValidBlockName(block.name)
+    (block): block is PlantUmlBlock & { name: string } => block.name !== null
   );
 
-  const written: ExportResult[] = [];
+  const drawings: Drawing[] = [];
   const failed: ExportResult[] = [];
-
   for (const [index, block] of named.entries()) {
     onProgress?.(index, named.length, block.name);
-    const result = await exportBlock(deps, documentPath, directory, block, block.name);
-    (result.error === null ? written : failed).push(result);
+    const drawing = await drawBlock(deps, documentPath, directory, block, block.name);
+    if ('svg' in drawing) {
+      drawings.push(drawing);
+    } else {
+      failed.push(drawing);
+    }
   }
 
-  return { written, failed, unnamed: blocks.length - named.length };
+  const outcome = await writeDrawings(deps, drawings);
+  if (outcome === null) {
+    return null;
+  }
+  return {
+    written: outcome.written,
+    failed: [...failed, ...outcome.failed],
+    unnamed: blocks.length - named.length,
+    kept: outcome.kept,
+  };
 }
