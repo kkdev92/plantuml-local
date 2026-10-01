@@ -24,6 +24,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   include showed the "URL-based external references" message instead of
   the diagram. Only the directives that read a URL are refused now, and
   comments are skipped as the engine skips them.
+- **Editing a diagram no longer makes the preview flicker.** Every change to
+  a block's source replaced its diagram with the "Rendering diagram…"
+  placeholder until the new render finished. The preview now keeps showing
+  the diagram that was there until the new one is ready; the placeholder
+  appears only the first time a block renders.
 
 ## [0.11.1] - 2026-09-30
 

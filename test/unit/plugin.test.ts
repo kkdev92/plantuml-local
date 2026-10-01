@@ -20,7 +20,11 @@ const LABELS = {
 interface Harness {
   deps: PluginDeps & { render: ReturnType<typeof vi.fn> };
   plugin: ReturnType<typeof createPlantUmlPlugin>;
-  fence(info: string, content: string): string;
+  /**
+   * Renders one fence. `env` is what VS Code passes (`currentDocument` in a
+   * preview); `before` are the ```plantuml blocks above it in the document.
+   */
+  fence(info: string, content: string, env?: object, before?: string[]): string;
   refreshes(): number;
   /** Waits until all in-flight renders have settled. */
   settle(): Promise<void>;
@@ -80,16 +84,17 @@ function makeHarness(options?: {
   return {
     deps,
     plugin,
-    fence(info, content) {
+    fence(info, content, env = {}, before = []) {
       const rule = md.renderer.rules.fence;
       if (rule === undefined) {
         throw new Error('fence rule missing');
       }
+      const above = before.map((c) => ({ type: 'fence', info: 'plantuml', content: c }));
       return rule(
-        [{ info, content } as never],
-        0,
+        [...above, { type: 'fence', info, content }] as never,
+        above.length,
         {} as never,
-        {},
+        env,
         self as never
       );
     },
@@ -311,6 +316,57 @@ describe('createPlantUmlPlugin', () => {
     expect(h.fence('plantuml', SOURCE)).toContain('plantuml-loading');
     await h.settle();
     expect(h.deps.render).toHaveBeenCalledTimes(2);
+  });
+
+  describe('while an edited block re-renders', () => {
+    const DOC = { currentDocument: 'file:///docs/a.md' };
+    const EDITED = '@startuml\nAlice -> Bob : Hello!\n@enduml';
+
+    it('keeps showing the diagram that was there, then the new one', async () => {
+      const h = makeHarness();
+      h.fence('plantuml', SOURCE, DOC);
+      await h.settle();
+      expect(h.fence('plantuml', SOURCE, DOC)).toContain(`<svg>${SOURCE}</svg>`);
+
+      const during = h.fence('plantuml', EDITED, DOC);
+      expect(during).toContain(`<svg>${SOURCE}</svg>`);
+      expect(during).not.toContain('plantuml-loading');
+
+      await h.settle();
+      expect(h.fence('plantuml', EDITED, DOC)).toContain(`<svg>${EDITED}</svg>`);
+    });
+
+    it('keeps each block in its own place', async () => {
+      const h = makeHarness();
+      const FIRST = '@startuml\nCarol -> Dave\n@enduml';
+      h.fence('plantuml', FIRST, DOC);
+      h.fence('plantuml', SOURCE, DOC, [FIRST]);
+      await h.settle();
+      h.fence('plantuml', FIRST, DOC);
+      h.fence('plantuml', SOURCE, DOC, [FIRST]);
+
+      const during = h.fence('plantuml', EDITED, DOC, [FIRST]);
+      expect(during).toContain(`<svg>${SOURCE}</svg>`);
+      expect(during).not.toContain(`<svg>${FIRST}</svg>`);
+    });
+
+    it('never carries a diagram over to another document', async () => {
+      const h = makeHarness();
+      h.fence('plantuml', SOURCE, DOC);
+      await h.settle();
+      h.fence('plantuml', SOURCE, DOC);
+
+      expect(h.fence('plantuml', EDITED, { currentDocument: 'file:///docs/b.md' })).toContain('plantuml-loading');
+    });
+
+    it('shows the placeholder when the document is not known', async () => {
+      const h = makeHarness();
+      h.fence('plantuml', SOURCE);
+      await h.settle();
+      h.fence('plantuml', SOURCE);
+
+      expect(h.fence('plantuml', EDITED)).toContain('plantuml-loading');
+    });
   });
 
   it('supports many diagrams on one page without mixing results', async () => {
