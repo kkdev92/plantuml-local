@@ -1,4 +1,5 @@
 import { DIAGRAM_BACKDROP, EMOJI_UNAVAILABLE, hasRemoteReference } from '../core/constants';
+import { diagramShape } from '../core/shape';
 import { recognizeEngineError } from '../render/engine-error';
 import { findPlantUmlBlocks, isValidBlockName, type PlantUmlBlock } from './blocks';
 
@@ -36,6 +37,10 @@ export interface ExporterDeps {
   emojiUnavailableMessage: string;
   /** Localised reason given for a block name unusable as a file name. */
   invalidNameMessage: string;
+  /** Localised reason given for a block holding more than one diagram. */
+  severalDiagramsMessage: string;
+  /** Localised reason given for a diagram split into pages with `newpage`. */
+  pagesMessage: string;
   /**
    * Localised reason given for a diagram the engine drew as an error:
    * `message` is the engine's own text, `line` the document line it
@@ -138,9 +143,20 @@ async function exportBlock(
     return { name, path: null, error: deps.remoteReferenceMessage };
   }
 
+  // The engine would draw only the first diagram or page; written out, that
+  // part would stand in for the whole block. A missing end line is added,
+  // as the preview does, since nothing is lost by it.
+  const shape = diagramShape(block.source);
+  if (shape.kind === 'several') {
+    return { name, path: null, error: deps.severalDiagramsMessage };
+  }
+  if (shape.kind === 'pages') {
+    return { name, path: null, error: deps.pagesMessage };
+  }
+
   try {
-    const dark = await deps.resolvePalette(block.source, deps.isDark());
-    const rendered = await deps.render(block.source, dark);
+    const dark = await deps.resolvePalette(shape.source, deps.isDark());
+    const rendered = await deps.render(shape.source, dark);
 
     // The engine reports a syntax error, a failed include or an empty
     // diagram by drawing it, through the same success path as a diagram.

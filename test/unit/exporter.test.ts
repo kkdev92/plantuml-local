@@ -30,6 +30,8 @@ function makeDeps(overrides?: Partial<ExporterDeps>): ExporterDeps & {
     remoteReferenceMessage: 'remote references are not supported',
     emojiUnavailableMessage: 'emoji are not available',
     invalidNameMessage: 'unusable name',
+    severalDiagramsMessage: 'one diagram per block',
+    pagesMessage: 'no pages',
     engineErrorMessage: (message: string, line: number | null): string =>
       `engine: ${message} @ ${String(line)}`,
     ...overrides,
@@ -335,5 +337,47 @@ describe('exportAll', () => {
     expect(outcome.failed[0]?.engineError).toBeUndefined();
     expect(deps.render).not.toHaveBeenCalled();
     expect(deps.writeFile).not.toHaveBeenCalled();
+  });
+
+  it('refuses a block with two diagrams or with pages, rather than writing part of it', async () => {
+    const deps = makeDeps();
+    const outcome = await exportAll(
+      deps,
+      DOC,
+      'images',
+      [
+        '```plantuml two',
+        '@startuml',
+        'A -> B',
+        '@enduml',
+        '@startuml',
+        'C -> D',
+        '@enduml',
+        '```',
+        '',
+        '```plantuml paged',
+        '@startuml',
+        'A -> B',
+        'newpage',
+        'C -> D',
+        '@enduml',
+        '```',
+      ].join('\n')
+    );
+
+    expect(outcome.failed.map((r) => [r.name, r.error])).toEqual([
+      ['two', 'one diagram per block'],
+      ['paged', 'no pages'],
+    ]);
+    expect(deps.render).not.toHaveBeenCalled();
+    expect(deps.writeFile).not.toHaveBeenCalled();
+  });
+
+  it('exports a diagram missing its end line with the line added', async () => {
+    const deps = makeDeps();
+    const outcome = await exportAll(deps, DOC, 'images', '```plantuml open\n@startuml\nA -> B\n```');
+
+    expect(outcome.written.map((r) => r.name)).toEqual(['open']);
+    expect(deps.render).toHaveBeenCalledWith('@startuml\nA -> B\n@enduml', false);
   });
 });

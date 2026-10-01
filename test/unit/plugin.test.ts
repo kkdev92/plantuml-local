@@ -15,6 +15,9 @@ const LABELS = {
   emptySource: 'source is empty',
   remoteReference: 'remote references are not supported',
   emojiUnavailable: 'emoji are not available',
+  severalDiagrams: 'one diagram per block',
+  pages: 'no pages',
+  missingEnd: (end: string): string => `no ${end}`,
 };
 
 interface Harness {
@@ -117,6 +120,28 @@ describe('createPlantUmlPlugin', () => {
       expect(h.fence(language, 'const a = 1')).toBe('<pre data-fallback="original"></pre>');
     }
     expect(h.deps.render).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['two diagrams', '@startuml\nA -> B\n@enduml\n@startuml\nC -> D\n@enduml', LABELS.severalDiagrams],
+    ['pages', '@startuml\nA -> B\nnewpage\nC -> D\n@enduml', LABELS.pages],
+  ])('says why it does not draw a block with %s, instead of drawing part of it', (_what, source, label) => {
+    const h = makeHarness();
+    const html = h.fence('plantuml', source);
+    expect(html).toContain('plantuml-error');
+    expect(html).toContain(label);
+    expect(h.deps.render).not.toHaveBeenCalled();
+  });
+
+  it('draws a diagram missing its end line with the line added, and says so', async () => {
+    const h = makeHarness();
+    h.fence('plantuml', '@startuml\nA -> B');
+    await h.settle();
+    expect(h.deps.render).toHaveBeenCalledWith('@startuml\nA -> B\n@enduml', false);
+    const html = h.fence('plantuml', '@startuml\nA -> B');
+    expect(html).toContain('plantuml-notice');
+    expect(html).toContain('no @enduml');
+    expect(html).toContain('<svg>@startuml\nA -> B\n@enduml</svg>');
   });
 
   it('renders a puml fence as a diagram', async () => {

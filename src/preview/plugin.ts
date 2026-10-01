@@ -8,6 +8,7 @@ import {
   hasRemoteReference,
   isDiagramFence,
 } from '../core/constants';
+import { diagramShape } from '../core/shape';
 import type { RenderLog } from '../core/types';
 
 /**
@@ -44,6 +45,12 @@ export interface PluginLabels {
   remoteReference: string;
   /** Error for a diagram that uses an emoji, which cannot be drawn here. */
   emojiUnavailable: string;
+  /** Error for a block holding more than one diagram. */
+  severalDiagrams: string;
+  /** Error for a diagram split into pages with `newpage`. */
+  pages: string;
+  /** Note above a diagram drawn with `end`, the end line its block lacks. */
+  missingEnd(end: string): string;
 }
 
 export interface PluginDeps {
@@ -273,8 +280,22 @@ export function createPlantUmlPlugin(deps: PluginDeps): PlantUmlPlugin {
           return errorBlock(deps.labels.remoteReference);
         }
 
+        // The engine would draw only the first diagram or page and drop the
+        // rest without a word, so say so instead of drawing part of it.
+        const shape = diagramShape(source);
+        if (shape.kind === 'several') {
+          return errorBlock(deps.labels.severalDiagrams);
+        }
+        if (shape.kind === 'pages') {
+          return errorBlock(deps.labels.pages);
+        }
+        const notice =
+          shape.addedEnd === null
+            ? ''
+            : `<div class="plantuml-notice">${deps.escapeHtml(deps.labels.missingEnd(shape.addedEnd))}</div>`;
+
         const dark = deps.isDark();
-        const key = cacheKey(source, dark);
+        const key = cacheKey(shape.source, dark);
 
         const position = positionKey(tokens, index, env);
 
@@ -283,7 +304,7 @@ export function createPlantUmlPlugin(deps: PluginDeps): PlantUmlPlugin {
           if (position !== undefined) {
             shown.set(position, html);
           }
-          return html;
+          return notice + html;
         }
 
         const message = failed.get(key);
@@ -291,11 +312,12 @@ export function createPlantUmlPlugin(deps: PluginDeps): PlantUmlPlugin {
           return errorBlock(message, source);
         }
 
-        startRender(source, dark, key);
+        startRender(shape.source, dark, key);
         const previous = position !== undefined ? shown.get(position) : undefined;
         return (
-          previous ??
-          `<div class="plantuml-diagram plantuml-loading">${deps.escapeHtml(deps.labels.loading)}</div>`
+          notice +
+          (previous ??
+            `<div class="plantuml-diagram plantuml-loading">${deps.escapeHtml(deps.labels.loading)}</div>`)
         );
       };
 

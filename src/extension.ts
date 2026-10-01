@@ -362,6 +362,12 @@ function exporterDeps(
     invalidNameMessage: context.l10n.t(
       'Use letters, digits, hyphens and underscores only.'
     ),
+    severalDiagramsMessage: context.l10n.t(
+      'This block holds more than one diagram, and only the first would be drawn. Give each diagram a block of its own.'
+    ),
+    pagesMessage: context.l10n.t(
+      'Pages after newpage cannot be drawn, so only the first page would be. Give each page a block of its own.'
+    ),
     engineErrorMessage: (message, line) => engineErrorMessage(context, message, line),
     // Exports default to the light palette regardless of the editor theme:
     // the files face hosts like GitHub, whose background this extension
@@ -539,6 +545,14 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
           emojiUnavailable: l10n.t(
             'Emoji (<:name:>) are not supported: the emoji images are not bundled.'
           ),
+          severalDiagrams: l10n.t(
+            'This block holds more than one diagram, and only the first would be drawn. Give each diagram a block of its own.'
+          ),
+          pages: l10n.t(
+            'Pages after newpage cannot be drawn, so only the first page would be. Give each page a block of its own.'
+          ),
+          missingEnd: (end) =>
+            l10n.t('This diagram has no {0} line; it is drawn as if the block ended with one.', end),
         },
       }),
   });

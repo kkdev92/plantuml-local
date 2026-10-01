@@ -53,6 +53,8 @@ const deps: ExporterDeps = {
   remoteReferenceMessage: 'URL-based external references are not supported.',
   emojiUnavailableMessage: 'Emoji are not supported.',
   invalidNameMessage: 'Use letters, digits, hyphens and underscores only.',
+  severalDiagramsMessage: 'This block holds more than one diagram.',
+  pagesMessage: 'Pages after newpage cannot be drawn.',
   engineErrorMessage: (message, line) =>
     line === null ? `PlantUML reported an error: ${message}` : `PlantUML reported an error at line ${String(line)}: ${message}`,
   resolve: (documentPath, relative) => resolve(dirname(documentPath), relative),
@@ -207,5 +209,42 @@ describe('export (dist worker)', () => {
     expect(outcome.written).toHaveLength(0);
     expect(outcome.failed.map((r) => r.name)).toEqual(['remote']);
     expect(existsSync(join(workspace, 'docs/images/remote.svg'))).toBe(false);
+  });
+
+  it('writes a diagram missing its end line, which the engine alone fails on', async () => {
+    const document = join(workspace, 'docs/open.md');
+    const outcome = await exportAll(deps, document, 'images', '```plantuml open\n@startuml\nAlice -> Bob : unterminated\n```');
+
+    expect(outcome.failed).toHaveLength(0);
+    expect(readFileSync(join(workspace, 'docs/images/open.svg'), 'utf8')).toContain('unterminated');
+  });
+
+  it('refuses a block with two diagrams or with pages, which the engine would cut short', async () => {
+    const document = join(workspace, 'docs/cut.md');
+    const text = [
+      '```plantuml two',
+      '@startuml',
+      'Alice -> Bob : first',
+      '@enduml',
+      '@startuml',
+      'Carol -> Dave : second',
+      '@enduml',
+      '```',
+      '',
+      '```plantuml paged',
+      '@startuml',
+      'Alice -> Bob : page1',
+      'newpage',
+      'Carol -> Dave : page2',
+      '@enduml',
+      '```',
+    ].join('\n');
+
+    const outcome = await exportAll(deps, document, 'images', text);
+
+    expect(outcome.written).toHaveLength(0);
+    expect(outcome.failed.map((r) => r.name)).toEqual(['two', 'paged']);
+    expect(existsSync(join(workspace, 'docs/images/two.svg'))).toBe(false);
+    expect(existsSync(join(workspace, 'docs/images/paged.svg'))).toBe(false);
   });
 });

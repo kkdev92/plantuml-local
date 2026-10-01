@@ -134,6 +134,9 @@ diagram is.
 If a diagram looks stale, run `PlantUML Local: Clear Render Cache and Re-render`
 from the Command Palette.
 
+A diagram whose `@enduml` line is missing is drawn as if the block ended with
+one, with a note above it saying so; the export writes it the same way.
+
 ### Syntax highlighting
 
 ` ```plantuml ` and ` ```puml ` blocks are also coloured in the editor, including
@@ -293,8 +296,9 @@ and would show the referenced image as a second copy.
   `[img TBD…]` placeholder in their place
 - Emoji (`<:smile:>`) are not supported: their images are not bundled, and a
   diagram using one shows an inline message instead
-- A block draws one diagram: a second `@startuml` … `@enduml` in the same
-  block, and the pages after `newpage`, are left out without an error
+- A block draws one diagram, on one page: a block holding a second
+  `@startuml` … `@enduml`, or a diagram using `newpage`, shows a message
+  instead, since the engine would draw only the first diagram or page
 - `!includesub` is ignored without an error
 - Functions that read the machine return nothing: `%getenv()`, `%filename()`
   and `%dirpath()` are empty and `%file_exists()` is `0`

@@ -61,6 +61,16 @@
 	opacity: 0.75;
 }
 
+/* A note on a diagram that was drawn after a fix-up, such as an end line the
+   block lacked. */
+.plantuml-notice {
+	margin: 1rem 0 -0.5rem;
+	padding: 0.4rem 0.75rem;
+	border-left: 3px solid var(--vscode-inputValidation-warningBorder, #b89500);
+	background-color: var(--vscode-inputValidation-warningBackground, rgba(184, 149, 0, 0.1));
+	font-size: 0.9em;
+}
+
 @media print {
 	.plantuml-diagram {
 		overflow-x: visible;
