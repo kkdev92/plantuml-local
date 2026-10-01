@@ -19,8 +19,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ` ```plantuml ` blocks. A document that used ` ```puml ` to show PlantUML
   source as code now shows the diagram instead.
 
+### Changed
+
+- **A block with two diagrams, or with `newpage`, says so instead of
+  showing part of it.** The engine draws only the first diagram of a block
+  and only the first page of a diagram, and dropped the rest without a word.
+  The preview now explains that each diagram or page needs a block of its
+  own, and export refuses the block rather than writing part of it.
+
 ### Fixed
 
+- **A diagram missing its `@enduml` line is drawn.** The engine failed on it
+  with `java.lang.IndexOutOfBoundsException`. The preview now draws it as if
+  the block ended with the line, with a note saying so, and export writes it.
 - **Export finds the same diagram blocks as the preview.** The export
   commands scanned the document on their own, so they missed blocks in a
   block quote or deeper in a list, and took a block written inside an HTML
