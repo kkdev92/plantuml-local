@@ -16,6 +16,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Markdown document, or ask which one when several are open. *Export Diagram
   as SVG* also takes the only block of a document without needing the cursor
   inside it.
+- **A URL that is not the argument of a directive no longer stops a
+  diagram.** The check that refuses `!include https://…` and
+  `!theme … from https://…` matched any line holding a `!` followed by a
+  word and a URL, so a title such as `title Hello!world https://example.com`,
+  a label with an exclamation mark and a link, or a commented-out remote
+  include showed the "URL-based external references" message instead of
+  the diagram. Only the directives that read a URL are refused now, and
+  comments are skipped as the engine skips them.
 
 ## [0.11.1] - 2026-09-30
 

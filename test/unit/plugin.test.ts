@@ -233,14 +233,38 @@ describe('createPlantUmlPlugin', () => {
     expect(h.deps.render).not.toHaveBeenCalled();
   });
 
-  it('rejects URL-based external references without calling the renderer', () => {
+  it.each([
+    '!include https://example.com/theme.puml',
+    '  !include http://example.com/theme.puml',
+    '!includeurl https://example.com/x.puml',
+    '!include_once https://example.com/x.puml',
+    '!include_many https://example.com/x.puml',
+    '!includesub https://example.com/x.puml!PART',
+    '!import https://example.com/x.zip',
+    '!theme sunlust from https://example.com/themes',
+    '!theme sunlust FROM https://example.com/themes',
+    "/' a one-line comment '/\n!include https://example.com/x.puml",
+  ])('rejects a URL-based external reference without calling the renderer: %s', (line) => {
     const h = makeHarness();
-    const html = h.fence(
-      'plantuml',
-      '@startuml\n!include https://example.com/theme.puml\nA -> B\n@enduml'
-    );
+    const html = h.fence('plantuml', `@startuml\n${line}\nA -> B\n@enduml`);
     expect(html).toContain(LABELS.remoteReference);
     expect(h.deps.render).not.toHaveBeenCalled();
+  });
+
+  // The engine draws all of these: the URL is not a directive's argument.
+  it.each([
+    'title Hello!world https://example.com',
+    'A -> B : Wow!great see https://example.com',
+    '!$url = "https://example.com"',
+    "' !include https://example.com/x.puml",
+    "/'\n!include https://example.com/x.puml\n'/",
+    '!include <C4/C4_Context>',
+  ])('renders a diagram whose URL is not a directive argument: %s', async (line) => {
+    const h = makeHarness();
+    const html = h.fence('plantuml', `@startuml\n${line}\nA -> B\n@enduml`);
+    await h.settle();
+    expect(html).not.toContain(LABELS.remoteReference);
+    expect(h.deps.render).toHaveBeenCalledTimes(1);
   });
 
   it('renders dark diagrams with the dark marker class and dark=true', async () => {

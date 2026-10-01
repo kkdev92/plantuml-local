@@ -5,7 +5,7 @@ import {
   EXPORT_FRAGMENT,
   MAX_CACHE_BYTES,
   MAX_CACHE_ENTRIES,
-  REMOTE_REFERENCE,
+  hasRemoteReference,
 } from '../core/constants';
 import type { RenderLog } from '../core/types';
 
@@ -234,7 +234,7 @@ export function createPlantUmlPlugin(deps: PluginDeps): PlantUmlPlugin {
           return errorBlock(deps.labels.emptySource);
         }
 
-        if (REMOTE_REFERENCE.test(source)) {
+        if (hasRemoteReference(source)) {
           return errorBlock(deps.labels.remoteReference);
         }
 

@@ -112,14 +112,39 @@ export const RENDER_TIMEOUT_MS = 30_000;
 export const WORKER_IDLE_TIMEOUT_MS = 5 * 60_000;
 
 /**
- * Matches PlantUML preprocessor directives that reference a URL
- * (`!include https://…`, `!theme x from https://…`).
+ * The preprocessor directives that read a URL: the include family and
+ * `!import` take it as their argument, `!theme` after `from`. Like the
+ * engine, only an argument that starts with the scheme counts.
+ */
+const URL_DIRECTIVE = /^\s*!(?:include(?:url|_once|_many|sub)?|import)\s*https?:\/\//i;
+const URL_THEME = /^\s*!theme\s+\S.*?\sfrom\s+https?:\/\//i;
+
+/**
+ * Whether the source has a PlantUML preprocessor directive that references
+ * a URL (`!include https://…`, `!theme x from https://…`).
  *
  * The engine never performs network I/O, so such diagrams would fail
- * silently mid-render; rejecting them up front gives the author an
- * actionable message instead.
+ * mid-render; rejecting them up front gives the author an actionable
+ * message instead. Only directives are looked at, so a URL in a label or a
+ * title, or a directive in a comment, does not stop a diagram that would
+ * render. Comments are skipped the way the engine skips them: a line
+ * starting with `'`, and from a line starting with `/'` to one ending with
+ * `'/`.
  */
-export const REMOTE_REFERENCE = /^[^\n]*![a-z]+[^\n]*\bhttps?:\/\//im;
+export function hasRemoteReference(source: string): boolean {
+  let inBlockComment = false;
+  for (const line of source.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (inBlockComment || trimmed.startsWith("/'")) {
+      inBlockComment = !trimmed.endsWith("'/");
+      continue;
+    }
+    if (URL_DIRECTIVE.test(line) || URL_THEME.test(line)) {
+      return true;
+    }
+  }
+  return false;
+}
 
 /**
  * Matches the render error of a diagram that uses an emoji (`<:smile:>`).
@@ -127,7 +152,7 @@ export const REMOTE_REFERENCE = /^[^\n]*![a-z]+[^\n]*\bhttps?:\/\//im;
  * The emoji images are not bundled, so the engine asks for its emoji.js
  * and the worker refuses the load ("Failed to load emoji.js", see
  * stdlib.ts). The source is not checked up front the way
- * {@link REMOTE_REFERENCE} is: `<:name:>` can also be plain text, so the
+ * {@link hasRemoteReference} is: `<:name:>` can also be plain text, so the
  * error is recognised instead and replaced with a message that says what
  * is missing.
  */
