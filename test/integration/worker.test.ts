@@ -150,6 +150,43 @@ describe('render worker (dist)', () => {
     expect(next).toContain('Hello');
   });
 
+  // How the engine reads the shape of its input. The preview, the export and
+  // the error messages are built around this, so it is re-checked on every
+  // engine update. The next engine (upstream's TextareaSource) changes the
+  // last two: it ignores lines before @startuml and closes a diagram that has
+  // no @enduml. When an update fails here, take the new behaviour on purpose:
+  // adjust these and the export tests that expect "Diagram not supported",
+  // and say what changes for users in the changelog.
+  describe('the shape of the input (re-check on every engine update)', () => {
+    it('draws only the first of two diagrams in one source', async () => {
+      const svg = await render('@startuml\nAlice -> Bob : first\n@enduml\n@startuml\nCarol -> Dave : second\n@enduml');
+      expect(svg).toContain('first');
+      expect(svg).not.toContain('second');
+    });
+
+    it('draws only the first page of a diagram with newpage', async () => {
+      const svg = await render('@startuml\nAlice -> Bob : page1\nnewpage\nCarol -> Dave : page2\n@enduml');
+      expect(svg).toContain('page1');
+      expect(svg).not.toContain('page2');
+    });
+
+    it('does not end a diagram at an @enduml in a block comment or a string', async () => {
+      const comment = await render("@startuml\nAlice -> Bob : before\n/'\n@enduml\n'/\nCarol -> Dave : after\n@enduml");
+      expect(comment).toContain('after');
+      const string = await render('@startuml\nAlice -> Bob : "@enduml"\nCarol -> Dave : after\n@enduml');
+      expect(string).toContain('after');
+    });
+
+    it('does not draw a source with a line before @startuml', async () => {
+      const svg = await render('title Before\n@startuml\nAlice -> Bob : x\n@enduml');
+      expect(svg).toContain('Diagram not supported by this release of PlantUML');
+    });
+
+    it('fails a source that has no @enduml', async () => {
+      await expect(render('@startuml\nAlice -> Bob : open')).rejects.toThrow(/IndexOutOfBoundsException/);
+    });
+  });
+
   it('strips scripts and event handlers from the SVG', async () => {
     const svg = await render('@startuml\nAlice -> Bob : Hello\n@enduml');
     expect(svg).not.toMatch(/<script/i);

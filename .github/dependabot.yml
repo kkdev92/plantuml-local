@@ -10,6 +10,11 @@ updates:
         update-types:
           - minor
           - patch
+        # The engine comes in a pull request of its own: it is pinned to one
+        # version, and an update is taken only once the engine-behaviour tests
+        # in test/integration/worker.test.ts pass or are adjusted on purpose.
+        exclude-patterns:
+          - "@plantuml/core"
 
     ignore:
       # Both of these were opened, checked and closed rather than merged, so the
