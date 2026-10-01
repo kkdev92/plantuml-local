@@ -40,6 +40,14 @@ updates:
         update-types:
           - version-update:semver-major
 
+      # markdown-it majors: it finds the diagram blocks for export and the
+      # editor commands, and must parse as VS Code's Markdown preview does.
+      # The preview uses markdown-it ^14 (extensions/markdown-language-features
+      # in microsoft/vscode), so stay on 14 until VS Code moves.
+      - dependency-name: markdown-it
+        update-types:
+          - version-update:semver-major
+
   # Actions are pinned to commit SHAs, which a person cannot reasonably keep current by
   # hand. Dependabot reads the version from the trailing comment and updates both, so the
   # pinning stays a safeguard rather than becoming a way to stay on old code forever.

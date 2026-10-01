@@ -78,7 +78,7 @@ npm run install-local
 ## Quick Start
 
 1. Open any Markdown file
-2. Add a fenced code block with the `plantuml` language:
+2. Add a fenced code block with the `plantuml` language (`puml` works too):
 
    ````markdown
    ```plantuml
@@ -136,9 +136,9 @@ from the Command Palette.
 
 ### Syntax highlighting
 
-` ```plantuml ` blocks are also coloured in the editor, including ones inside
-block quotes and list items. As with the preview, only the language
-`plantuml` counts — ` ```puml ` stays plain. The grammar follows the parser of
+` ```plantuml ` and ` ```puml ` blocks are also coloured in the editor, including
+ones inside block quotes and list items. As with the preview, only these two
+languages count, exactly — ` ```PlantUML ` and ` ```uml ` stay plain. The grammar follows the parser of
 the bundled engine rather than PlantUML's documentation, and covers every
 diagram type that engine renders:
 
@@ -242,7 +242,8 @@ machine-managed: renaming a block or changing the export directory rewrites the
 line on the next run, while every line without the marker — including a
 hand-written reference to the same file — is never touched. The update command
 is idempotent: running it twice changes nothing, and one Undo reverts whatever
-it wrote.
+it wrote. A block inside a block quote or a nested list item is exported like
+any other, but gets no reference line yet.
 
 Exports use the light palette regardless of your editor theme, since the files
 face hosts whose background this extension does not control;

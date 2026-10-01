@@ -134,6 +134,15 @@ describe('planReferenceEdits', () => {
     expect(planReferenceEdits(text, exported('orders'), 'my diagrams')).toEqual([]);
   });
 
+  it('references a block in a block quote or a nested list only once that is supported', () => {
+    // Exported like any other block, but a reference line there needs the
+    // container's markers, so for now none is planned.
+    const quoted = md('> ```plantuml quoted', '> @startuml', '> A -> B', '> @enduml', '> ```', '', 'after');
+    const nested = md('1. item', '', '    ```plantuml nested', '    @startuml', '    @enduml', '    ```');
+    expect(planReferenceEdits(quoted, exported('quoted'), 'images')).toEqual([]);
+    expect(planReferenceEdits(nested, exported('nested'), 'images')).toEqual([]);
+  });
+
   it('writes next to the document when the directory is "."', () => {
     const text = md(...BLOCK);
     const result = apply(text, planReferenceEdits(text, exported('orders'), '.'));

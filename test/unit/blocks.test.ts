@@ -105,6 +105,57 @@ describe('findPlantUmlBlocks', () => {
   it('returns nothing for a document without diagrams', () => {
     expect(findPlantUmlBlocks(md('# Title', '', 'Just prose.'))).toEqual([]);
   });
+
+  it('finds the blocks the preview draws, in quotes and lists too, and only those', () => {
+    const blocks = findPlantUmlBlocks(
+      md(
+        '```plantuml top', '@startuml', 'A -> B', '@enduml', '```',
+        '',
+        '> quoted', '>', '> ```plantuml quoted', '> @startuml', '> A -> B', '> @enduml', '> ```',
+        '',
+        '- item', '', '  ```plantuml listed', '  @startuml', '  A -> B', '  @enduml', '  ```',
+        '',
+        '1. ordered', '', '    ```plantuml deeplisted', '    @startuml', '    A -> B', '    @enduml', '    ```',
+        '',
+        '```puml alias', '@startuml', 'A -> B', '@enduml', '```',
+        '',
+        '~~~plantuml tilde', '@startuml', 'A -> B', '@enduml', '~~~',
+        '',
+        '````markdown', '```plantuml inside-other-fence', '@startuml', '@enduml', '```', '````',
+        '',
+        '<!--', '```plantuml in-html-comment', '@startuml', 'A -> B', '@enduml', '```', '-->'
+      )
+    );
+
+    expect(blocks.map((b) => [b.name, b.prefix])).toEqual([
+      ['top', ''],
+      ['quoted', '> '],
+      ['listed', '  '],
+      ['deeplisted', '    '],
+      ['alias', ''],
+      ['tilde', ''],
+    ]);
+    for (const block of blocks) {
+      expect(block.source, String(block.name)).toBe('@startuml\nA -> B\n@enduml');
+    }
+    expect(blocks[1]?.openLine).toBe(8);
+    expect(blocks[1]?.sourceLine).toBe(9);
+    expect(blocks[1]?.closeLine).toBe(12);
+  });
+
+  it('takes only plantuml and puml, exactly', () => {
+    for (const info of ['PlantUML', 'uml', 'plantuml-x', 'pumlx']) {
+      expect(findPlantUmlBlocks(md(`\`\`\`${info}`, '@startuml', '@enduml', '```')), info).toEqual([]);
+    }
+  });
+
+  it('skips front matter as the preview does, keeping line numbers', () => {
+    const blocks = findPlantUmlBlocks(
+      md('---', 'title: x', '```plantuml in-front-matter', '---', '', '```plantuml body', '@startuml', '@enduml', '```')
+    );
+    expect(blocks.map((b) => b.name)).toEqual(['body']);
+    expect(blocks[0]?.openLine).toBe(5);
+  });
 });
 
 describe('blockAtLine', () => {
