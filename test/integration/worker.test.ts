@@ -7,6 +7,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { EMOJI_UNAVAILABLE } from '../../src/core/constants';
 import type { RenderResponseMessage } from '../../src/core/types';
+import { TEMPLATES } from '../../src/language/completion';
+import { recognizeEngineError } from '../../src/render/engine-error';
 import {
   choosePalette,
   labelContrast,
@@ -405,4 +407,18 @@ describe('render worker (dist)', () => {
       expect(svg).not.toContain('data:image');
     });
   });
+});
+
+describe('diagram templates (dist)', () => {
+  it.each(TEMPLATES.map((template) => [template.kind, template.diagram]))(
+    'draws the %s template as it is, its placeholders at their defaults',
+    async (_kind, diagram) => {
+      // `${n:default}` -> `default`, as accepting the template without edits leaves it.
+      const source = diagram.replace(/\$\{\d+:([^}]*)\}/g, '$1');
+
+      for (const dark of [false, true]) {
+        expect(recognizeEngineError(await render(source, dark))).toBeNull();
+      }
+    }
+  );
 });

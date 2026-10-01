@@ -6,6 +6,8 @@ import {
   mightSuggest,
   readCompletionData,
   suggest,
+  suggestTemplates,
+  TEMPLATES,
   type CompletionData,
 } from '../../src/language/completion';
 import { checkScopes } from './grammar/harness';
@@ -89,9 +91,45 @@ describe('suggest', () => {
   });
 });
 
+describe('suggestTemplates', () => {
+  const NAMES = { sequence: 'Sequence diagram' };
+
+  it('offers each template as a whole block in the text of a Markdown document', () => {
+    const found = suggestTemplates('puml-se', '', true, NAMES);
+
+    expect(found?.items.map((item) => item.label)).toEqual(TEMPLATES.map((t) => `puml-${t.kind}`));
+    expect(found?.items[0]).toMatchObject({ label: 'puml-sequence', detail: 'Sequence diagram' });
+    expect(found?.items[0]?.insert.split('\n')).toEqual([
+      '```plantuml ${1:sequence-diagram}',
+      ...(TEMPLATES[0]?.diagram.split('\n') ?? []),
+      '```',
+    ]);
+    expect(found).toMatchObject({ kind: 'template', start: 0, end: 7 });
+  });
+
+  it('keeps every line of a template in the quote it is typed in', () => {
+    const found = suggestTemplates('> pu', '', true, NAMES);
+    const lines = found?.items[0]?.insert.split('\n') ?? [];
+
+    expect(lines[0]).toBe('```plantuml ${1:sequence-diagram}');
+    expect(lines.slice(1).every((line) => line.startsWith('> '))).toBe(true);
+    expect(found).toMatchObject({ start: 2, end: 4 });
+  });
+
+  it('offers the bare diagram where one can start without a block', () => {
+    expect(suggestTemplates('p', '', false, NAMES)?.items[0]?.insert).toBe(TEMPLATES[0]?.diagram);
+  });
+
+  it('offers nothing with text after the cursor, or for another word', () => {
+    expect(suggestTemplates('pu', 'ml', false, NAMES)).toBeNull();
+    expect(suggestTemplates('participant', '', false, NAMES)).toBeNull();
+    expect(suggestTemplates('A -> B pu', '', false, NAMES)).toBeNull();
+  });
+});
+
 describe('mightSuggest', () => {
   it('passes the lines a suggestion could follow, and stops the rest before the document is read', () => {
-    for (const before of ['@', '  @sta', '> @en', '!', '!inc', '!theme ', '!theme cer', 'A -> B : <&', 'x "<&he']) {
+    for (const before of ['@', '  @sta', '> @en', '!', '!inc', '!theme cer', 'A -> B : <&', 'x "<&he', 'p', '> puml-se']) {
       expect(mightSuggest(before), before).toBe(true);
     }
     for (const before of ['', 'Alice -> Bob', 'prose with a @', 'title !important', '<&heart> done']) {
