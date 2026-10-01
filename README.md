@@ -163,6 +163,20 @@ language PlantUML, with the same colouring. *Toggle Line Comment* uses `'` and
 *Toggle Block Comment* uses `/' … '/`. A `.puml` file has no preview yet, but
 its diagrams can be exported to SVG (see below).
 
+### Completion
+
+In a diagram — a ` ```plantuml ` block or a `.puml` file — suggestions open on:
+
+- `@` at the start of a line: the start line of each diagram type the bundled
+  engine draws, or inside a diagram, its end line
+- `!` at the start of a line: the preprocessor directives, without the ones
+  the engine does not act on, such as `!includesub`
+- `!theme `: the themes that ship with the extension
+- `<&`: the names of the OpenIconic icons
+
+Markdown turns quick suggestions off, so in a Markdown file the list opens on
+those characters, or with *Trigger Suggest* (`Ctrl+Space`).
+
 ### Problems
 
 The diagrams of open Markdown files are checked, whether or not a preview is

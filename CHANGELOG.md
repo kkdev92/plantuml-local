@@ -18,6 +18,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   to a file of its own: the one under the cursor, or every named one. A
   diagram is named by an id on its start line, `@startuml(id=orders-api)`,
   and the only diagram of a file may go by the file's name instead.
+- **Suggestions while typing a diagram**, in ```` ```plantuml ```` blocks
+  and `.puml` files: the start line of each diagram type the bundled engine
+  draws and the end line of the open one after `@`, the preprocessor
+  directives after `!`, the bundled themes after `!theme` and the OpenIconic
+  names after `<&`.
 - **Problems panel.** The diagrams of open Markdown files are checked, with or
   without a preview, and their problems are listed on the line they are on:
   the engine's errors and warnings, what the bundled engine cannot do

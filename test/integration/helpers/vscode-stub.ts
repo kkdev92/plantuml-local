@@ -122,6 +122,27 @@ export interface UriStub {
   toString(): string;
 }
 
+/** A `vscode.CompletionItem` as the extension builds it. */
+export interface CompletionItemStub {
+  label: string;
+  kind?: number;
+  insertText?: string;
+  range?: { inserting: { start: PositionStub; end: PositionStub }; replacing: { start: PositionStub; end: PositionStub } };
+  sortText?: string;
+}
+
+/** A completion provider as registered, with what it was registered for. */
+export interface CompletionRegistrationStub {
+  selector: unknown;
+  triggers: string[];
+  provider: {
+    provideCompletionItems(
+      document: TextEditorStub['document'],
+      position: PositionStub
+    ): CompletionItemStub[] | undefined;
+  };
+}
+
 /** A modal message as shown: its text, detail and the buttons offered. */
 export interface ModalStub {
   message: string;
@@ -152,7 +173,14 @@ export interface VscodeStub {
       delete: (uri: { toString(): string }) => void;
       dispose: () => void;
     };
+    registerCompletionItemProvider: (
+      selector: unknown,
+      provider: CompletionRegistrationStub['provider'],
+      ...triggers: string[]
+    ) => { dispose(): void };
   };
+  CompletionItem: new (label: string, kind?: number) => CompletionItemStub;
+  CompletionItemKind: Record<'Keyword' | 'Value', number>;
   UIKind: Record<'Desktop' | 'Web', number>;
   ProgressLocation: Record<'SourceControl' | 'Window' | 'Notification', number>;
   StatusBarAlignment: Record<'Left' | 'Right', number>;
@@ -161,11 +189,12 @@ export interface VscodeStub {
   ViewColumn: Record<'Active' | 'Beside' | 'One', number>;
   EndOfLine: Record<'LF' | 'CRLF', number>;
   Position: new (line: number, character: number) => PositionStub;
+  /** Both overloads: two positions, or four numbers. */
   Range: new (
-    startLine: number,
-    startCharacter: number,
-    endLine: number,
-    endCharacter: number
+    startLine: number | PositionStub,
+    startCharacter: number | PositionStub,
+    endLine?: number,
+    endCharacter?: number
   ) => { start: PositionStub; end: PositionStub };
   WorkspaceEdit: new () => WorkspaceEditStub;
   FileType: Record<'Unknown' | 'File' | 'Directory' | 'SymbolicLink', number>;
@@ -285,6 +314,8 @@ export interface VscodeStub {
     failRename: boolean;
     /** URIs passed to `workspace.fs.writeFile`, in order. */
     fileWrites: string[];
+    /** Completion providers registered, in order. */
+    completionProviders: CompletionRegistrationStub[];
     /**
      * What the next input box answers with: a string accepts, `null`
      * dismisses. Defaults to dismissal, so a test that did not expect a
@@ -438,11 +469,29 @@ export function createVscodeStub(): VscodeStub {
   class Range {
     start: PositionStub;
     end: PositionStub;
-    constructor(startLine: number, startCharacter: number, endLine: number, endCharacter: number) {
-      this.start = new Position(startLine, startCharacter);
-      this.end = new Position(endLine, endCharacter);
+    constructor(
+      startLine: number | PositionStub,
+      startCharacter: number | PositionStub,
+      endLine = 0,
+      endCharacter = 0
+    ) {
+      if (typeof startLine === 'number' && typeof startCharacter === 'number') {
+        this.start = new Position(startLine, startCharacter);
+        this.end = new Position(endLine, endCharacter);
+      } else {
+        this.start = startLine as PositionStub;
+        this.end = startCharacter as PositionStub;
+      }
     }
   }
+
+  class CompletionItem implements CompletionItemStub {
+    constructor(
+      public label: string,
+      public kind?: number
+    ) {}
+  }
+  const completionProviders: CompletionRegistrationStub[] = [];
 
   /** Executes collected ops against the active editor's document. */
   async function applyEdit(edit: WorkspaceEditStub): Promise<boolean> {
@@ -481,6 +530,8 @@ export function createVscodeStub(): VscodeStub {
     ColorThemeKind: { Light: 1, Dark: 2, HighContrast: 3, HighContrastLight: 4 },
     DiagnosticSeverity: { Error: 0, Warning: 1, Information: 2, Hint: 3 },
     Diagnostic,
+    CompletionItem,
+    CompletionItemKind: { Keyword: 13, Value: 11 },
     languages: {
       createDiagnosticCollection: () => ({
         set: (uri, items) => {
@@ -491,6 +542,10 @@ export function createVscodeStub(): VscodeStub {
         },
         dispose: () => undefined,
       }),
+      registerCompletionItemProvider: (selector, provider, ...triggers) => {
+        completionProviders.push({ selector, provider, triggers });
+        return { dispose: () => undefined };
+      },
     },
     EndOfLine: { LF: 1, CRLF: 2 },
     Position,
@@ -794,6 +849,7 @@ export function createVscodeStub(): VscodeStub {
         hooks.failRename = value;
       },
       fileWrites,
+      completionProviders,
       openDocuments: hooks.openDocuments,
       visibleEditors: hooks.visibleEditors,
       setConfiguration: (key, value, folder) => {

@@ -4,7 +4,7 @@ import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { createVscodeStub, type TextEditorStub, type VscodeStub } from './helpers/vscode-stub';
+import { createVscodeStub, type CompletionItemStub, type TextEditorStub, type VscodeStub } from './helpers/vscode-stub';
 
 /**
  * Loads the built dist/extension.js with a stubbed `vscode` module and
@@ -1082,6 +1082,75 @@ describe('export (dist)', () => {
         [...vscodeStub._test.writtenFiles.keys()].filter((key) => key.startsWith('file:///c/failing/'))
       ).toEqual([]);
       expect(vscodeStub._test.notifications.error.at(-1)).toMatch(/^Could not export the diagram: /);
+    });
+  });
+});
+
+describe('completion (dist)', () => {
+  const complete = (
+    document: TextEditorStub['document'],
+    line: number,
+    character: number
+  ): CompletionItemStub[] | undefined =>
+    vscodeStub._test.completionProviders[0]?.provider.provideCompletionItems(
+      document,
+      new vscodeStub.Position(line, character)
+    );
+
+  it('is registered for Markdown and PlantUML files, opening on the characters suggestions follow', () => {
+    expect(vscodeStub._test.completionProviders).toHaveLength(1);
+    expect(vscodeStub._test.completionProviders[0]?.selector).toEqual([
+      { language: 'markdown' },
+      { language: 'plantuml' },
+    ]);
+    expect(vscodeStub._test.completionProviders[0]?.triggers).toEqual(['@', '!', '&', ' ']);
+  });
+
+  it('suggests in the diagram blocks of a Markdown document only', () => {
+    const document = makeEditor(
+      'file:///c/complete/doc.md',
+      ['# Title', '@', '```js', '@', '```', '```plantuml', '@', '```'].join('\n'),
+      0
+    ).document;
+
+    expect(complete(document, 1, 1)).toBeUndefined();
+    expect(complete(document, 3, 1)).toBeUndefined();
+    const items = complete(document, 6, 1);
+    expect(items?.[0]).toMatchObject({ label: '@startuml', insertText: '@startuml' });
+    expect(items?.[0]?.range?.replacing.start).toEqual({ line: 6, character: 0 });
+  });
+
+  it('offers the themes and icons the engine ships, read from its files', () => {
+    const document = makeEditor(
+      'file:///c/complete/flows.puml',
+      ['@startuml', '!theme ', 'A -> B : <&', '@enduml'].join('\n'),
+      0,
+      { languageId: 'plantuml' }
+    ).document;
+
+    const themes = complete(document, 1, 7)?.map((item) => item.label);
+    expect(themes).toContain('cerulean');
+    // Left out of the package for the licence its header declares.
+    expect(themes).not.toContain('mars');
+    expect(themes).toHaveLength(40);
+
+    const icons = complete(document, 2, 11);
+    expect(icons).toHaveLength(223);
+    expect(icons?.find((item) => item.label === 'heart')?.insertText).toBe('heart>');
+  });
+
+  it('leaves the quote markers of a block in a quote outside what it replaces', () => {
+    const document = makeEditor(
+      'file:///c/complete/quote.md',
+      ['> ```plantuml', '> @startuml', '> @en', '> ```'].join('\n'),
+      0
+    ).document;
+
+    const items = complete(document, 2, 5);
+    expect(items?.map((item) => item.label)).toEqual(['@enduml']);
+    expect(items?.[0]?.range?.replacing).toEqual({
+      start: { line: 2, character: 2 },
+      end: { line: 2, character: 5 },
     });
   });
 });
