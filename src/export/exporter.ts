@@ -1,4 +1,4 @@
-import { DIAGRAM_BACKDROP, EMOJI_UNAVAILABLE, REMOTE_REFERENCE } from '../core/constants';
+import { DIAGRAM_BACKDROP, EMOJI_UNAVAILABLE, hasRemoteReference } from '../core/constants';
 import { recognizeEngineError } from '../render/engine-error';
 import { findPlantUmlBlocks, isValidBlockName, type PlantUmlBlock } from './blocks';
 
@@ -134,7 +134,7 @@ async function exportBlock(
   // The preview refuses these before the engine sees them; export has to
   // refuse them too, or the same block that shows an explanation on screen
   // would write out the engine's "cannot include" error diagram instead.
-  if (REMOTE_REFERENCE.test(block.source)) {
+  if (hasRemoteReference(block.source)) {
     return { name, path: null, error: deps.remoteReferenceMessage };
   }
 
