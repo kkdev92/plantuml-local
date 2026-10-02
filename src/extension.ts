@@ -31,6 +31,7 @@ import {
   EXTENSION_NAME,
   PNG_PANEL_TYPE,
   REFRESH_DEBOUNCE_MS,
+  SAVE_REFRESH_DELAY_MS,
   VIEWER_DEBOUNCE_MS,
   VIEWER_TYPE,
 } from './core/constants';
@@ -70,7 +71,7 @@ import {
   type ProblemLabels,
   type RenderOutcome,
 } from './diagnostics/problems';
-import { createPlantUmlPlugin, type PlantUmlPlugin } from './preview/plugin';
+import { createPlantUmlPlugin, type PlantUmlPlugin, type UpdateMode } from './preview/plugin';
 import type { RenderLog } from './core/types';
 import { RendererClient, defaultWorkerPath } from './render/client';
 import { shareRenders, type SharedRender } from './render/memo';
@@ -109,6 +110,11 @@ const Settings = defineSettings({
     // 1, 2 or 4 in the manifest; anything else read is taken as 2.
     [CONFIG.EXPORT_PNG_SCALE]: setting.integer({ default: 2, minimum: 1, maximum: 4, scope: 'resource' }),
     [CONFIG.HIDE_EXPORTED_IMAGES]: setting.boolean({ default: true }),
+    [CONFIG.PREVIEW_UPDATE_MODE]: setting.enum({
+      values: ['onChange', 'onSave', 'manual'],
+      default: 'onChange',
+      scope: 'resource',
+    }),
     // Resource-scoped: the diagnostics read it per document instead.
     [CONFIG.DIAGNOSTICS_ENABLED]: setting.boolean({ default: true }),
   },
@@ -190,6 +196,8 @@ interface ViewerSet {
   restore(panel: vscode.WebviewPanel, state: unknown): Promise<void>;
   /** Draws again what a viewer of `document` shows, after the file changed. */
   update(document: vscode.TextDocument): void;
+  /** Says with `note`, in a viewer of `document`, that the file changed since it was drawn. */
+  stale(document: vscode.TextDocument, note: string): void;
   /** Draws every viewer again, after the palette changed. */
   updateAll(): void;
 }
@@ -431,6 +439,22 @@ function exportDirectory(
     return null;
   }
   return directory;
+}
+
+/** When the changed diagrams of the document at `uri` are drawn again. */
+function updateModeOf(settings: SettingsReader, uri: vscode.Uri): UpdateMode {
+  const mode = settings.read({ resource: uri }).values[CONFIG.PREVIEW_UPDATE_MODE];
+  return mode === 'onSave' || mode === 'manual' ? mode : 'onChange';
+}
+
+/** The note on a diagram not drawn again since its file changed. */
+function notUpdatedNote(
+  l10n: { t(message: string, ...args: string[]): string },
+  mode: Exclude<UpdateMode, 'onChange'>
+): string {
+  return mode === 'onSave'
+    ? l10n.t('Not updated: the diagram is drawn again when the file is saved.')
+    : l10n.t('Not updated: run "PlantUML Local: Clear Render Cache and Re-render" to draw it again.');
 }
 
 /** Prompts for a file name for a block that does not carry one. */
@@ -836,6 +860,7 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         requestRefresh,
         escapeHtml,
         hideExportedImages: () => settings.read().values[CONFIG.HIDE_EXPORTED_IMAGES],
+        updateMode: (document) => updateModeOf(settings, vscode.Uri.parse(document)),
         log: filtered(logger, settings.read().values[CONFIG.LOG_LEVEL]),
         labels: {
           loading: l10n.t('Rendering diagram…'),
@@ -855,6 +880,7 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
           ),
           missingEnd: (end) =>
             l10n.t('This diagram has no {0} line; it is drawn as if the block ended with one.', end),
+          notUpdated: (mode) => notUpdatedNote(l10n, mode),
         },
       }),
   });
@@ -989,6 +1015,13 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
             void entry.viewer.update(document.getText());
           }
         },
+        stale: (document, note): void => {
+          const entry = open.get(document.uri.toString());
+          if (entry !== undefined) {
+            entry.document = document;
+            void entry.viewer.stale(note);
+          }
+        },
         updateAll: (): void => {
           for (const entry of open.values()) {
             void entry.viewer.update(entry.document.getText());
@@ -1031,13 +1064,20 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
 
   module.hostedServices.add({
     id: 'plantuml.viewerUpdates',
-    inject: { viewers: Viewers },
-    start: (context, { viewers }) => {
-      // Draws a viewer again once its file has stopped changing, and every
-      // viewer when the palette may have changed with the theme or setting.
+    inject: { viewers: Viewers, settings: Settings.token, l10n: Localization },
+    start: (context, { viewers, settings, l10n }) => {
+      // Draws a viewer again once its file has stopped changing, or with
+      // onSave once it is saved, and every viewer when the palette may have
+      // changed with the theme or setting. With onSave or manual, a change
+      // only marks the diagram shown as not updated.
       const timers = new Map<string, ReturnType<typeof setTimeout>>();
       const changed = vscode.workspace.onDidChangeTextDocument((event) => {
         if (event.document.languageId !== 'plantuml' || event.contentChanges.length === 0) {
+          return;
+        }
+        const mode = updateModeOf(settings, event.document.uri);
+        if (mode !== 'onChange') {
+          viewers.stale(event.document, notUpdatedNote(l10n, mode));
           return;
         }
         const key = event.document.uri.toString();
@@ -1050,11 +1090,19 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
           }, VIEWER_DEBOUNCE_MS)
         );
       });
+      const saved = vscode.workspace.onDidSaveTextDocument((document) => {
+        if (document.languageId === 'plantuml' && updateModeOf(settings, document.uri) === 'onSave') {
+          viewers.update(document);
+        }
+      });
       const themed = vscode.window.onDidChangeActiveColorTheme(() => {
         viewers.updateAll();
       });
       const configured = vscode.workspace.onDidChangeConfiguration((event) => {
-        if (event.affectsConfiguration(`${EXTENSION_ID}.${CONFIG.THEME}`)) {
+        if (
+          event.affectsConfiguration(`${EXTENSION_ID}.${CONFIG.THEME}`) ||
+          event.affectsConfiguration(`${EXTENSION_ID}.${CONFIG.PREVIEW_UPDATE_MODE}`)
+        ) {
           viewers.updateAll();
         }
       });
@@ -1065,6 +1113,7 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
       });
       context.signal.addEventListener('abort', () => {
         changed.dispose();
+        saved.dispose();
         themed.dispose();
         configured.dispose();
         restorer.dispose();
@@ -1259,10 +1308,32 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
       const settingChanged = settings.watch(CONFIG.THEME, undefined, () => {
         plugin.clearCache();
       });
+      // VS Code's preview does not render again on a save, so with onSave the
+      // saved blocks are taken for the ones to draw and the preview refreshed,
+      // once the update the save itself scheduled there has passed.
+      let afterSave: ReturnType<typeof setTimeout> | undefined;
+      const saved = vscode.workspace.onDidSaveTextDocument((document) => {
+        if (document.languageId === 'markdown' && updateModeOf(settings, document.uri) === 'onSave') {
+          const sources = findPlantUmlBlocks(document.getText()).map((block) => block.source);
+          plugin.accept(document.uri.toString(), sources);
+          clearTimeout(afterSave);
+          afterSave = setTimeout(() => {
+            requestRefresh();
+          }, SAVE_REFRESH_DELAY_MS);
+        }
+      });
+      const modeChanged = vscode.workspace.onDidChangeConfiguration((event) => {
+        if (event.affectsConfiguration(`${EXTENSION_ID}.${CONFIG.PREVIEW_UPDATE_MODE}`)) {
+          requestRefresh();
+        }
+      });
 
       context.signal.addEventListener('abort', () => {
         themeChanged.dispose();
         settingChanged.dispose();
+        saved.dispose();
+        modeChanged.dispose();
+        clearTimeout(afterSave);
         // A pending refresh would fire into a preview that is going away.
         requestRefresh.cancel();
       });

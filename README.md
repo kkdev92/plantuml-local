@@ -135,6 +135,14 @@ diagram is.
 If a diagram looks stale, run `PlantUML Local: Clear Render Cache and Re-render`
 from the Command Palette.
 
+A changed diagram is drawn again as you type. For a large one,
+`plantumlLocal.preview.updateMode` can wait instead: `onSave` draws it again
+when the file is saved, and `manual` only with *Clear Render Cache and
+Re-render*. Until then the Markdown preview and the `.puml` preview keep the
+diagram they show, with a note that it is not updated. A diagram shown for the
+first time is drawn whatever the mode; the Problems checks still follow every
+change, and export always uses the current text.
+
 A diagram whose `@enduml` line is missing is drawn as if the block ended with
 one, with a note above it saying so; the export writes it the same way.
 
@@ -443,6 +451,7 @@ and would show the referenced image as a second copy.
 | `plantumlLocal.exportTheme` | `light` | Palette for exported SVGs and PNGs. `preview` follows the palette the preview currently uses. Can be set per folder |
 | `plantumlLocal.exportPngScale` | `2` | Scale of an exported PNG: 1, 2 or 4 times the diagram's own size. Can be set per folder |
 | `plantumlLocal.hideExportedImages` | `true` | Hide images marked `#plantuml-local` in the preview, so an exported diagram is not shown next to its block's render |
+| `plantumlLocal.preview.updateMode` | `onChange` | When a changed diagram is drawn again in the previews: `onChange`, `onSave`, or `manual` (with *Clear Render Cache and Re-render*). Can be set per folder |
 | `plantumlLocal.diagnostics.enabled` | `true` | List the problems of the diagrams in open Markdown files in the Problems panel; can be set per folder |
 
 A diagram that picks a `!theme` is drawn in that theme's colours, and most

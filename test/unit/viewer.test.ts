@@ -251,6 +251,31 @@ describe('DiagramViewer', () => {
   });
 });
 
+describe('DiagramViewer not updated', () => {
+  it('keeps the diagram, saying it is not updated, also when a drawing lands afterwards', async () => {
+    let finish: (svg: string) => void = () => undefined;
+    const render = vi
+      .fn()
+      .mockImplementationOnce(() => new Promise<string>((resolve) => (finish = resolve)))
+      .mockImplementation((source: string) => Promise.resolve(`<svg>${source}</svg>`));
+    const panel = makePanel();
+    const viewer = new DiagramViewer(panel, makeDeps({ render }), 'one', 'file:///one.puml');
+
+    const drawing = viewer.show('@startuml\nold\n@enduml', 0);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await viewer.stale('not updated');
+    finish('<svg>old</svg>');
+    await drawing;
+
+    expect(of(panel.sent, 'render')).toHaveLength(1);
+    expect(of(panel.sent, 'status').at(-1)).toEqual({ type: 'status', text: 'not updated', error: false, clear: false });
+
+    // Drawn again, as on a save: the note goes.
+    await viewer.update('@startuml\nnew\n@enduml');
+    expect(of(panel.sent, 'status').at(-1)).toEqual({ type: 'status', text: '', error: false, clear: false });
+  });
+});
+
 describe('viewerBody', () => {
   const escape = (text: string): string =>
     text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');

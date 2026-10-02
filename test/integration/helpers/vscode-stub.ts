@@ -350,6 +350,7 @@ export interface VscodeStub {
       listener: (event: { document: TextEditorStub['document']; contentChanges: unknown[] }) => void
     ) => { dispose(): void };
     onDidCloseTextDocument: (listener: (document: TextEditorStub['document']) => void) => { dispose(): void };
+    onDidSaveTextDocument: (listener: (document: TextEditorStub['document']) => void) => { dispose(): void };
     /** Both read by the framework's runtime preflight, at activation. */
     isTrusted: boolean;
     workspaceFolders: unknown[] | undefined;
@@ -458,6 +459,8 @@ export interface VscodeStub {
     changeDocument(document: TextEditorStub['document']): void;
     /** Closes `document`: removes it from `textDocuments` and fires the close listeners. */
     closeDocument(document: TextEditorStub['document']): void;
+    /** Fires the save listeners for `document`, as a save would. */
+    saveDocument(document: TextEditorStub['document']): void;
   };
 }
 
@@ -513,6 +516,7 @@ export function createVscodeStub(): VscodeStub {
   const openListeners: ((document: DocumentStub) => void)[] = [];
   const changeListeners: ((event: { document: DocumentStub; contentChanges: unknown[] }) => void)[] = [];
   const closeListeners: ((document: DocumentStub) => void)[] = [];
+  const saveListeners: ((document: DocumentStub) => void)[] = [];
   const subscribe = <T>(listeners: T[], listener: T): { dispose(): void } => {
     listeners.push(listener);
     return {
@@ -942,6 +946,7 @@ export function createVscodeStub(): VscodeStub {
       onDidOpenTextDocument: (listener) => subscribe(openListeners, listener),
       onDidChangeTextDocument: (listener) => subscribe(changeListeners, listener),
       onDidCloseTextDocument: (listener) => subscribe(closeListeners, listener),
+      onDidSaveTextDocument: (listener) => subscribe(saveListeners, listener),
       isTrusted: true,
       workspaceFolders: undefined,
       get textDocuments() {
@@ -1125,6 +1130,11 @@ export function createVscodeStub(): VscodeStub {
       closeDocument: (document) => {
         hooks.openDocuments.splice(hooks.openDocuments.indexOf(document), 1);
         for (const listener of closeListeners) {
+          listener(document);
+        }
+      },
+      saveDocument: (document) => {
+        for (const listener of saveListeners) {
           listener(document);
         }
       },

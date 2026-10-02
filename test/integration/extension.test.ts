@@ -194,6 +194,44 @@ describe('extension (dist)', () => {
     expect(fired).toBe(true);
   });
 
+  it('with onSave, draws an edited diagram again only once its document is saved', async () => {
+    const uri = 'file:///c/onsave/doc.md';
+    const md = makeMd();
+    api.extendMarkdownIt(md);
+    const fence = (content: string): string => {
+      const rule = md.renderer.rules.fence;
+      if (rule === undefined) {
+        throw new Error('fence rule missing');
+      }
+      return rule([{ info: 'plantuml', content }], 0, {}, { currentDocument: { toString: () => uri } }, {
+        renderToken: () => '',
+      });
+    };
+    const first = '@startuml\nAlice -> Bob : first\n@enduml';
+    const edited = '@startuml\nAlice -> Bob : edited\n@enduml';
+    const refreshes = (): number =>
+      vscodeStub._test.executedCommands.filter((command) => command === 'markdown.preview.refresh').length;
+    vscodeStub._test.setConfiguration('preview.updateMode', 'onSave', 'file:///c/onsave');
+    try {
+      expect(await waitFor(() => fence(first).includes('first'))).toBe(true);
+
+      const stale = fence(edited);
+      expect(stale).toContain('Not updated: the diagram is drawn again when the file is saved.');
+      expect(stale).toContain('first');
+
+      // Nothing renders now, so the next refresh is the one the save asks for.
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      const before = refreshes();
+      vscodeStub._test.saveDocument(makeEditor(uri, ['```plantuml', edited, '```'].join('\n'), 0).document);
+      expect(await waitFor(() => refreshes() > before, 5_000)).toBe(true);
+
+      expect(await waitFor(() => fence(edited).includes('edited'))).toBe(true);
+      expect(fence(edited)).not.toContain('Not updated');
+    } finally {
+      vscodeStub._test.setConfiguration('preview.updateMode', undefined, 'file:///c/onsave');
+    }
+  });
+
   it('serves repeat requests from cache without extra refreshes', async () => {
     const md = makeMd(() => '<pre></pre>');
     api.extendMarkdownIt(md);
@@ -1537,6 +1575,39 @@ describe('viewer (dist)', () => {
 
     await waitFor(() => posted(panel!, 'render').length > count);
     expect(posted(panel!, 'render').at(-1)?.svg).toContain('edited');
+  });
+
+  it('with onSave, says a changed file is not updated, and draws it again once it is saved', async () => {
+    const editor = makeEditor('file:///c/viewsave/flows.puml', FLOWS, 1, { languageId: 'plantuml' });
+    vscodeStub._test.setActiveEditor(editor);
+    const before = vscodeStub._test.webviewPanels.length;
+    await run('plantumlLocal.openPreviewToSide');
+    const panel = vscodeStub._test.webviewPanels[before]!;
+    panel.receive({ type: 'ready' });
+    await waitFor(() => posted(panel, 'render').length > 0);
+    const statuses = (): { text?: string; error?: boolean; clear?: boolean }[] =>
+      posted(panel, 'status') as { text?: string; error?: boolean; clear?: boolean }[];
+
+    vscodeStub._test.setConfiguration('preview.updateMode', 'onSave', 'file:///c/viewsave');
+    try {
+      // The setting changed: every viewer is drawn again.
+      await waitFor(() => posted(panel, 'render').length > 1);
+      const count = posted(panel, 'render').length;
+
+      editor.document.setText(FLOWS.replace('Alice -> Bob : orders', 'Alice -> Bob : changed'));
+      vscodeStub._test.changeDocument(editor.document);
+      await waitFor(() => statuses().at(-1)?.text === 'Not updated: the diagram is drawn again when the file is saved.');
+      expect(statuses().at(-1)).toMatchObject({ error: false, clear: false });
+      // Past the delay a change waits for before drawing: nothing drawn.
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      expect(posted(panel, 'render')).toHaveLength(count);
+
+      vscodeStub._test.saveDocument(editor.document);
+      await waitFor(() => posted(panel, 'render').length > count);
+      expect(posted(panel, 'render').at(-1)?.svg).toContain('changed');
+    } finally {
+      vscodeStub._test.setConfiguration('preview.updateMode', undefined, 'file:///c/viewsave');
+    }
   });
 
   it('asks for a PlantUML file when the editor holds none', async () => {
