@@ -978,6 +978,26 @@ describe('export (dist)', () => {
     );
   });
 
+  it('says why an empty export directory or a reserved name is refused', async () => {
+    vscodeStub._test.setConfiguration('exportDirectory', '', 'file:///c/empty');
+    try {
+      vscodeStub._test.setActiveEditor(makeEditor('file:///c/empty/doc.md', NAMED_BLOCK, 1));
+      await vscodeStub._test.registeredCommands.get('plantumlLocal.exportSvg')?.();
+    } finally {
+      vscodeStub._test.setConfiguration('exportDirectory', undefined, 'file:///c/empty');
+    }
+    expect(vscodeStub._test.notifications.error.at(-1)).toBe(
+      'plantumlLocal.exportDirectory is empty. Set a folder relative to the document, such as images.'
+    );
+
+    const reserved = ['```plantuml CON', '@startuml', 'A -> B', '@enduml', '```'].join('\n');
+    vscodeStub._test.setActiveEditor(makeEditor('file:///c/reserved/doc.md', reserved, 1));
+    await vscodeStub._test.registeredCommands.get('plantumlLocal.exportAllSvg')?.();
+    const failure =
+      'Export failed for CON: Use up to 128 ASCII letters, digits, hyphens and underscores. Windows device names such as CON cannot be used.';
+    expect(vscodeStub._test.logs.some((line) => line.includes(failure))).toBe(true);
+  });
+
   describe('PlantUML files', () => {
     const FLOWS = [
       '@startuml(id=orders)',
