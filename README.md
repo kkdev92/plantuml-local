@@ -230,7 +230,8 @@ a whole ` ```plantuml ` block in the text of a Markdown file, the bare diagram
 in an empty block or between the diagrams of a `.puml` file.
 *PlantUML Local: Insert Diagram Template* does the same from the command
 palette: pick the kind, and the template goes on lines of its own at the
-cursor, as one edit that one Undo takes back. In a block that already holds a
+cursor, inside the block quote or list item the cursor is in, as one edit that
+one Undo takes back. In a block that already holds a
 diagram, it asks to add a new block after it; in a diagram, a comment or a block
 of another language, it says why it does not.
 

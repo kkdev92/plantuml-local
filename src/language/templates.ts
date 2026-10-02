@@ -33,6 +33,17 @@ export type TemplatePlace =
 const isEmpty = (line: string | undefined): boolean => (line ?? '').replace(/^[\s>]*/, '') === '';
 
 /**
+ * What starts a line inside the quote or the list item `line` is in: its
+ * quote markers and indentation, and on an item's first line its list
+ * marker and the spaces after it, as spaces, which line the template up
+ * with the item's text.
+ */
+function containerOf(line: string): string {
+  const [, prefix = '', marker = ''] = /^([\s>]*)((?:[-+*]|\d{1,9}[.)])[ \t]{1,4}(?=\S))?/.exec(line) ?? [];
+  return prefix + marker.replace(/[^\t]/g, ' ');
+}
+
+/**
  * `body`, whole lines, put before line `at`: after the last line when `at`
  * is past it.
  */
@@ -93,8 +104,8 @@ export function templatePlace(
     if (!isProseLine(text, line)) {
       return { kind: 'refused', reason: 'elsewhere' };
     }
-    // In a quote, the template stays in it.
-    const prefix = /^[\s>]*/.exec(lines[line] ?? '')?.[0] ?? '';
+    // In a quote or a list item, the template stays in it.
+    const prefix = containerOf(lines[line] ?? '');
     return { kind: 'insert', ...linesAt(lines, at, apart(lines, at, lead(fenced, prefix), prefix.trimEnd())) };
   }
   if (block.source === '') {

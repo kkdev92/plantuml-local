@@ -31,6 +31,18 @@ describe('templatePlace in a Markdown document', () => {
     expect(lines.slice(0, 2)).toEqual(['>', '> ```plantuml ${1:sequence-diagram}']);
   });
 
+  it('keeps a template in the list item the cursor is in, lined up with its text', () => {
+    const inItem = (prefix: string): string => fenced.replace(/^/gm, prefix);
+
+    // On an item's first line, its marker counts as indentation.
+    expect(markdown('- item\n', 0)).toEqual({ kind: 'insert', line: 1, character: 0, text: `\n${inItem('  ')}\n` });
+    expect(markdown('1. one\n', 0)).toEqual({ kind: 'insert', line: 1, character: 0, text: `\n${inItem('   ')}\n` });
+    expect(markdown('1. one\n   - two\n', 1)).toEqual({ kind: 'insert', line: 2, character: 0, text: `\n${inItem('     ')}\n` });
+    expect(markdown('> - item\n', 0)).toEqual({ kind: 'insert', line: 1, character: 0, text: `>\n${inItem('>   ')}\n` });
+    // Five spaces after the marker make the item's text code, where no diagram starts.
+    expect(markdown('-     code\n', 0)).toEqual({ kind: 'refused', reason: 'elsewhere' });
+  });
+
   it('fills an empty block with the diagram alone', () => {
     expect(markdown('```plantuml\n```\n', 0)).toEqual({ kind: 'insert', line: 1, character: 0, text: `${diagram}\n` });
     expect(markdown('```plantuml\n\n```\n', 1)).toEqual({ kind: 'insert', line: 2, character: 0, text: `${diagram}\n` });
