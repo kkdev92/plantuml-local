@@ -79,6 +79,7 @@ function makeDeps(
       `too large: ${String(width)}×${String(height)}, fits ${String(fits)}`,
     pngFailedMessage: 'no PNG',
     sameFileMessage: 'same file',
+    changedMessage: 'changed meanwhile',
     ...overrides,
   };
   return deps as ExporterDeps & {
@@ -198,6 +199,42 @@ describe('exportOne', () => {
       '/repo/docs/images/orders.svg',
       expect.stringContaining('x</svg>'),
       true
+    );
+  });
+
+  it('leaves a file that changed while the question was open, whatever the answer', async () => {
+    const deps = makeDeps({}, { '/repo/docs/images/orders.svg': '<svg>hand-made</svg>' });
+    deps.confirmReplace.mockImplementation(async () => {
+      await deps.writeFile('/repo/docs/images/orders.svg', '<svg>changed meanwhile</svg>', true);
+      return 'replace';
+    });
+    const [block] = findPlantUmlBlocks('```plantuml\nx\n```');
+
+    const result = await exportOne(deps, DOC, 'images', block!, 'orders');
+
+    expect(result).toEqual({ name: 'orders', path: null, error: 'changed meanwhile' });
+    expect(deps.writeFile).toHaveBeenCalledOnce();
+    const now = await deps.readExisting('/repo/docs/images/orders.svg');
+    expect(new TextDecoder().decode(now!)).toBe('<svg>changed meanwhile</svg>');
+  });
+
+  it('writes a file that was removed while the question was open, as a new one', async () => {
+    const deps = makeDeps({
+      readExisting: vi
+        .fn()
+        .mockResolvedValueOnce(new TextEncoder().encode('<svg>hand-made</svg>'))
+        .mockResolvedValueOnce(null),
+      confirmReplace: vi.fn(() => Promise.resolve('replace' as const)),
+    });
+    const [block] = findPlantUmlBlocks('```plantuml\nx\n```');
+
+    const result = await exportOne(deps, DOC, 'images', block!, 'orders');
+
+    expect(result?.path).toBe('/repo/docs/images/orders.svg');
+    expect(deps.writeFile).toHaveBeenCalledWith(
+      '/repo/docs/images/orders.svg',
+      expect.stringContaining('x</svg>'),
+      false
     );
   });
 
@@ -720,6 +757,25 @@ describe('exportAll', () => {
     expect(deps.writeFile.mock.calls.map((call) => [call[0], call[2]])).toEqual([
       ['/repo/docs/images/one.svg', true],
     ]);
+  });
+
+  it('leaves its own file when it changed while the question about another was open', async () => {
+    const deps = makeDeps();
+    await exportMarkdown(deps, DOC, 'images', document);
+    await deps.writeFile('/repo/docs/images/two.svg', 'edited', true);
+    deps.confirmReplace.mockImplementation(async () => {
+      await deps.writeFile('/repo/docs/images/one.svg', 'edited meanwhile', true);
+      return 'keep';
+    });
+
+    const changed = document.replace('\na\n', '\nA\n').replace('\nb\n', '\nB\n');
+    const outcome = await exportMarkdown(deps, DOC, 'images', changed);
+
+    expect(outcome?.written).toEqual([]);
+    expect(outcome?.failed).toEqual([{ name: 'one', path: null, error: 'changed meanwhile' }]);
+    expect(outcome?.kept).toBe(1);
+    const now = await deps.readExisting('/repo/docs/images/one.svg');
+    expect(new TextDecoder().decode(now!)).toBe('edited meanwhile');
   });
 
   it('does not ask about a file that already holds its diagram', async () => {

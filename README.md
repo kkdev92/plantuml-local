@@ -349,9 +349,11 @@ a file changed since or open with unsaved edits — the command asks about first
 once for all the files it would replace, and the bulk commands can keep those
 files and write the rest. What the export wrote is kept in the workspace's
 state on this machine: each file, its document and a SHA-256 of the contents,
-no diagram. On another machine, the first export asks. Each file is written
-under a temporary name beside the target and then renamed over it, so an
-export that fails part way never leaves half an image behind.
+no diagram. On another machine, the first export asks. A file that changes
+while the export runs — while its question is open, say — is left as it is and
+reported, whatever the answer. Each file is written under a temporary name
+beside the target and then renamed over it, so an export that fails part way
+never leaves half an image behind.
 
 The `#plantuml-local` fragment on the inserted reference does two jobs. GitHub
 ignores it and renders the SVG, while this extension's preview hides marked

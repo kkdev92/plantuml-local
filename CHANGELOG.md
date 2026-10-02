@@ -106,9 +106,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   since, and ask before replacing any other: once for all of them, with the
   choice of keeping those files and writing the rest. What they wrote is kept
   in the workspace's state on this machine, as each file, its document and a
-  SHA-256 of the contents. Each file is written under a temporary name beside
-  the target and renamed over it, so an export that fails part way no longer
-  leaves half an image.
+  SHA-256 of the contents. A file that changes while the export runs, such as
+  while its question is open, is left as it is and reported. Each file is
+  written under a temporary name beside the target and renamed over it, so an
+  export that fails part way no longer leaves half an image.
 - `plantumlLocal.exportDirectory` and `plantumlLocal.exportTheme` can be set
   per folder, and are read for the document being exported.
 - Block names are limited to 128 characters, and the bulk export commands

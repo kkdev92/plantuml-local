@@ -74,6 +74,7 @@
   "Not updated: the diagram is drawn again when the file is saved.": "未更新です。ファイルを保存すると描き直します。",
   "Not updated: run \"PlantUML Local: Clear Render Cache and Re-render\" to draw it again.": "未更新です。「PlantUML Local: 描画キャッシュを捨てて描き直す」で描き直します。",
   "Another diagram is exported to the same file.": "同じファイルに別の図を書き出しています。",
+  "The file changed while the export was running, so it was left as it is.": "書き出しの途中でファイルが変更されたため、そのままにしました。",
   "Export Diagrams": "図を書き出す",
   "Choose a folder in the workspace.": "ワークスペース内のフォルダーを選んでください。",
   "Looking for diagrams…": "図を探しています…",
