@@ -91,6 +91,13 @@ export const MAX_CACHE_ENTRIES = 200;
 export const MAX_CACHE_BYTES = 16 * 1024 * 1024;
 
 /**
+ * How many documents' previews keep the diagrams they show in the cache
+ * past both limits: those previewed last. Evicting a diagram a preview
+ * shows would only have the next refresh render it again.
+ */
+export const MAX_DOCUMENTS_IN_VIEW = 8;
+
+/**
  * What a diagram is drawn on, by palette: the backdrop media/plantuml.css
  * gives the preview, and the background baked into an exported SVG. The
  * dark one matches the background the engine paints for dark renders.

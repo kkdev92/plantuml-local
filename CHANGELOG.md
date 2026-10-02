@@ -143,6 +143,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   diagram hit the 30-second limit, the diagrams waiting behind it — usually
   the rest of the document — failed with "Rendering timed out" too, and stayed
   failed until edited. The restarted renderer now draws them.
+- **A preview with very many diagrams settles.** With more diagrams in the
+  open previews than the render cache holds — 200, or 16 MB of SVG — each
+  refresh drew the ones it had evicted again, evicting others, so the
+  preview never finished and kept the renderer busy. The diagrams a preview
+  shows now stay cached, for the last eight documents previewed.
 - **A diagram missing its `@enduml` line is drawn.** The engine failed on it
   with `java.lang.IndexOutOfBoundsException`. The preview now draws it as if
   the block ended with the line, with a note saying so, and export writes it.
