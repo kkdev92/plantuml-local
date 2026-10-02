@@ -145,12 +145,12 @@ export const ClearCache = defineCommandContract<readonly [], void>({
 });
 
 /** Writes the diagram under the cursor to an SVG file. */
-export const ExportSvg = defineCommandContract<readonly [], void>({
+export const ExportSvg = defineCommandContract<readonly unknown[], void>({
   id: COMMANDS.EXPORT_SVG,
 });
 
 /** Writes the diagram under the cursor to a PNG file, at plantumlLocal.exportPngScale. */
-export const ExportPng = defineCommandContract<readonly [], void>({
+export const ExportPng = defineCommandContract<readonly unknown[], void>({
   id: COMMANDS.EXPORT_PNG,
 });
 
@@ -419,7 +419,8 @@ async function chooseMarkdownDocument(
  */
 async function activeDocument(
   context: OperationContext,
-  plantUml: boolean
+  plantUml: boolean,
+  target: ExportTarget | null = null
 ): Promise<ActiveDocument | null> {
   // Writing files is the one thing this extension promises not to do in
   // an untrusted workspace. Checked here rather than through a command
@@ -434,7 +435,14 @@ async function activeDocument(
 
   const active = vscode.window.activeTextEditor?.document;
   const document =
-    plantUml && active?.languageId === 'plantuml' ? active : await chooseMarkdownDocument(context);
+    target !== null
+      ? await vscode.workspace.openTextDocument(target.uri).then(
+          (opened) => opened,
+          () => null
+        )
+      : plantUml && active?.languageId === 'plantuml'
+        ? active
+        : await chooseMarkdownDocument(context);
   if (document === null) {
     return null;
   }
@@ -449,10 +457,27 @@ async function activeDocument(
   return {
     text: document.getText(),
     path: document.uri.toString(),
-    line: editor?.selection.active.line ?? null,
+    line: target?.line ?? editor?.selection.active.line ?? null,
     textDocument: document,
     version: document.version,
   };
+}
+
+/** A file and the line of a diagram in it, as the `.puml` preview names what it shows. */
+interface ExportTarget {
+  uri: vscode.Uri;
+  line: number;
+}
+
+/** The {@link ExportTarget} an export command was given, checked; null for anything else. */
+function exportTarget(value: unknown): ExportTarget | null {
+  if (typeof value !== 'object' || value === null) {
+    return null;
+  }
+  const { uri, line } = value as { uri?: unknown; line?: unknown };
+  return typeof uri === 'string' && typeof line === 'number' && Number.isInteger(line) && line >= 0
+    ? { uri: vscode.Uri.parse(uri), line }
+    : null;
 }
 
 /** How the settings accessor is seen by the helpers below. */
@@ -1115,6 +1140,9 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         render: renders,
         resolvePalette: (source, dark) => palettes.resolve(source, dark),
         isDark: () => isDark(settings.read().values[CONFIG.THEME]),
+        exportPng: async (uri, line): Promise<void> => {
+          await vscode.commands.executeCommand(COMMANDS.EXPORT_PNG, { uri, line });
+        },
         labels: {
           diagram: (position) => l10n.t('Diagram {0}', String(position)),
           entry: (name, line) => l10n.t('{0} (line {1})', name, String(line)),
@@ -1145,6 +1173,7 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         zoomIn: l10n.t('Zoom In'),
         fit: l10n.t('Fit'),
         actualSize: l10n.t('Actual Size'),
+        exportPng: l10n.t('Export Diagram as PNG'),
       };
 
       /** Takes over `panel` for `document`: its options, its page and its messages. */
@@ -1347,7 +1376,7 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
     (format: ExportFormat) =>
     async (
       context: OperationContext,
-      _args: readonly [],
+      args: readonly unknown[],
       {
         renderer,
         palettes,
@@ -1360,7 +1389,8 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         exportRecords: TypedStorage<ExportRecords>;
       }
     ): Promise<void> => {
-      const document = await activeDocument(context, true);
+      // The `.puml` preview names its file and the line of the diagram it shows.
+      const document = await activeDocument(context, true, exportTarget(args[0]));
       if (document === null) {
         return;
       }

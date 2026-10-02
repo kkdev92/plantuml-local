@@ -36,7 +36,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (1, 2 or 4; 2 by default) on the background of its palette, in a panel that
   opens beside the editor for the time the drawing takes. A PNG larger than
   8192 pixels a side or 16 million in all is refused, and the message names
-  the largest scale it would fit at.
+  the largest scale it would fit at. The PNG button of the `.puml` preview
+  does the same for the diagram it shows.
 - **Suggestions while typing a diagram**, in ```` ```plantuml ```` blocks
   and `.puml` files: the start line of each diagram type the bundled engine
   draws and the end line of the open one after `@`, the preprocessor

@@ -206,7 +206,9 @@ out and in, fit it, and show it at 100%; so do the keys `-`, `+`, `0` and `1`.
 Ctrl+wheel (Cmd on macOS) or a pinch zooms at the pointer, the wheel scrolls,
 dragging moves the diagram, and the arrow keys move it by 40 pixels (200 with
 Shift). Each diagram keeps its zoom and position while it is redrawn, while
-the panel is hidden, and across a restart.
+the panel is hidden, and across a restart. The PNG button beside them exports
+the diagram shown as *Export Diagram as PNG* does, at its own size and scale
+rather than the zoom of the panel.
 
 The panel shows the SVG as an image, so nothing in it can run, and loads
 nothing but its own script and stylesheet.

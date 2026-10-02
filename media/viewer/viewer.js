@@ -265,6 +265,10 @@
     vscode.postMessage({ type: 'select', index: Number(select.value) });
   });
 
+  document.getElementById('export-png').addEventListener('click', () => {
+    vscode.postMessage({ type: 'exportPng' });
+  });
+
   window.addEventListener('message', (event) => {
     // VS Code's frame around the page posts the extension's messages with
     // the page's own origin; anything else is not from the extension.

@@ -16,11 +16,14 @@ function makePanel(): { post: ReturnType<typeof vi.fn>; sent: unknown[] } {
   };
 }
 
-function makeDeps(overrides?: Partial<ViewerDeps>): ViewerDeps & { render: ReturnType<typeof vi.fn> } {
+function makeDeps(
+  overrides?: Partial<ViewerDeps>
+): ViewerDeps & { render: ReturnType<typeof vi.fn>; exportPng: ReturnType<typeof vi.fn> } {
   return {
     render: vi.fn((source: string) => Promise.resolve(`<svg>${source}</svg>`)),
     resolvePalette: (_source: string, dark: boolean) => Promise.resolve(dark),
     isDark: () => false,
+    exportPng: vi.fn(() => Promise.resolve()),
     labels: {
       diagram: (position) => `Diagram ${String(position)}`,
       entry: (name, line) => `${name} (line ${String(line)})`,
@@ -34,7 +37,7 @@ function makeDeps(overrides?: Partial<ViewerDeps>): ViewerDeps & { render: Retur
       engineError: (message, line) => `engine: ${message} @ ${String(line)}`,
     },
     ...overrides,
-  } as ViewerDeps & { render: ReturnType<typeof vi.fn> };
+  } as ViewerDeps & { render: ReturnType<typeof vi.fn>; exportPng: ReturnType<typeof vi.fn> };
 }
 
 const FLOWS = [
@@ -51,8 +54,9 @@ const of = (sent: unknown[], type: string): unknown[] =>
   sent.filter((message) => (message as { type: string }).type === type);
 
 describe('parseRequest', () => {
-  it('accepts a ready page and a choice among the diagrams', () => {
+  it('accepts a ready page, a choice among the diagrams and the PNG button', () => {
     expect(parseRequest({ type: 'ready' }, 2)).toEqual({ type: 'ready' });
+    expect(parseRequest({ type: 'exportPng' }, 2)).toEqual({ type: 'exportPng' });
     expect(parseRequest({ type: 'select', index: 1 }, 2)).toEqual({ type: 'select', index: 1 });
   });
 
@@ -124,6 +128,21 @@ describe('DiagramViewer', () => {
     await viewer.receive({ type: 'select', index: 7 }, FLOWS);
     await viewer.receive({ type: 'reveal', line: 3 }, FLOWS);
     expect(panel.sent).toEqual([]);
+  });
+
+  it('exports the diagram shown when the page asks, and none in place of one that has gone', async () => {
+    const deps = makeDeps();
+    const viewer = new DiagramViewer(makePanel(), deps, 'flows', 'file:///flows.puml');
+    viewer.select(FLOWS, 5);
+
+    await viewer.receive({ type: 'exportPng' }, FLOWS);
+    expect(deps.exportPng).toHaveBeenLastCalledWith('file:///flows.puml', 4);
+    await viewer.receive({ type: 'select', index: 0 }, FLOWS);
+    await viewer.receive({ type: 'exportPng' }, FLOWS);
+    expect(deps.exportPng).toHaveBeenLastCalledWith('file:///flows.puml', 0);
+
+    await viewer.receive({ type: 'exportPng' }, FLOWS.replace('(id=orders)', '(id=renamed)'));
+    expect(deps.exportPng).toHaveBeenCalledTimes(2);
   });
 
   it('follows a named diagram when diagrams move about', async () => {
@@ -282,7 +301,14 @@ describe('viewerBody', () => {
 
   it('has a toolbar whose buttons name what they do and the key that does it too', () => {
     const body = viewerBody(
-      { toolbar: 'Zoom', zoomOut: 'Zoom Out', zoomIn: 'Zoom In', fit: 'Fit', actualSize: 'Actual Size' },
+      {
+        toolbar: 'Zoom',
+        zoomOut: 'Zoom Out',
+        zoomIn: 'Zoom In',
+        fit: 'Fit',
+        actualSize: 'Actual Size',
+        exportPng: 'Export Diagram as PNG',
+      },
       escape
     );
 
@@ -292,17 +318,22 @@ describe('viewerBody', () => {
     // Fit is a toggle, pressed while the diagram is fitted.
     expect(body).toContain('<button id="fit" type="button" aria-label="Fit" title="Fit (0)" aria-pressed="true">Fit</button>');
     expect(body).toContain('<button id="actual" type="button" aria-label="Actual Size" title="Actual Size (1)">100%</button>');
+    // Beside the zoom, not in it: the PNG button.
+    expect(body).toContain(
+      '</div><button id="export-png" type="button" aria-label="Export Diagram as PNG" title="Export Diagram as PNG">PNG</button></header>'
+    );
     expect(body).toContain('<main id="stage" tabindex="0">');
   });
 
   it('escapes the labels it is given', () => {
     const body = viewerBody(
-      { toolbar: '"><script>', zoomOut: 'a&b', zoomIn: 'in', fit: '<b>', actualSize: 'x' },
+      { toolbar: '"><script>', zoomOut: 'a&b', zoomIn: 'in', fit: '<b>', actualSize: 'x', exportPng: '<i>' },
       escape
     );
 
     expect(body).not.toContain('<script>');
     expect(body).not.toContain('<b>');
+    expect(body).not.toContain('<i>');
     expect(body).toContain('aria-label="&quot;&gt;&lt;script&gt;"');
     expect(body).toContain('aria-label="a&amp;b"');
   });

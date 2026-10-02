@@ -46,7 +46,8 @@ select {
 	margin-left: auto;
 }
 
-#tools button {
+#tools button,
+#export-png {
 	min-width: 1.75rem;
 	padding: 0.1rem 0.5rem;
 	color: var(--vscode-button-secondaryForeground);
@@ -56,7 +57,8 @@ select {
 	cursor: pointer;
 }
 
-#tools button:hover:not(:disabled) {
+#tools button:hover:not(:disabled),
+#export-png:hover {
 	background: var(--vscode-button-secondaryHoverBackground);
 }
 

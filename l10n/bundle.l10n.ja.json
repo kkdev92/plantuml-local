@@ -60,6 +60,7 @@
   "Open a PlantUML file first.": "先に PlantUML ファイルを開いてください。",
   "Zoom": "ズーム",
   "Zoom Out": "縮小",
+  "Export Diagram as PNG": "図を PNG に書き出す",
   "Zoom In": "拡大",
   "Fit": "全体",
   "Actual Size": "実寸",
