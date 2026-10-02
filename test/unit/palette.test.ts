@@ -148,6 +148,29 @@ describe('ThemePalettes', () => {
     expect(await palettes.resolve(diagram('!theme for-white-page'), false)).toBe(false);
   });
 
+  it('draws a diagram with the Azure icons in the light palette, without measuring', async () => {
+    const render = engine();
+    const palettes = new ThemePalettes(render);
+
+    for (const include of [
+      '!include <azure/AzureCommon>',
+      '  !include_once <azure/Compute/AzureFunction>',
+      '!include<azure/AzureCommon>',
+    ]) {
+      expect(await palettes.resolve(diagram(include), true)).toBe(false);
+      expect(await palettes.resolve(diagram(include), false)).toBe(false);
+    }
+    // Not an include the engine reads: a comment, a label, a capitalised directive.
+    for (const line of [
+      "' !include <azure/AzureCommon>",
+      'note: !include <azure/AzureCommon>',
+      '!INCLUDE <azure/AzureCommon>',
+    ]) {
+      expect(await palettes.resolve(diagram(line), true)).toBe(true);
+    }
+    expect(render).not.toHaveBeenCalled();
+  });
+
   it('draws a theme made for a dark page in the dark palette', async () => {
     const palettes = new ThemePalettes(engine());
 

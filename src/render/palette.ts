@@ -24,6 +24,14 @@ const PROBE_LABEL = 'plantumlLocalProbe';
 /** WCAG's minimum contrast for text (level AA). */
 export const MIN_TEXT_CONTRAST = 4.5;
 
+/**
+ * An include of the bundled Azure library. It paints its elements white and
+ * leaves their text to the palette, which the dark one makes white: white on
+ * white. A diagram that includes it is drawn in the light palette, as one
+ * whose theme is made for a white page is.
+ */
+const AZURE_INCLUDE = /^[ \t]*!include(?:_many|_once)?[ \t]*<azure\//m;
+
 /** How many sets of `!theme` lines keep their measurement. */
 const MAX_MEASUREMENTS = 64;
 
@@ -102,6 +110,9 @@ export class ThemePalettes {
 
   /** The palette to draw `source` in when `dark` is asked for. */
   async resolve(source: string, dark: boolean): Promise<boolean> {
+    if (AZURE_INCLUDE.test(source)) {
+      return false;
+    }
     const lines = themeLines(source);
     if (lines.length === 0) {
       return dark;

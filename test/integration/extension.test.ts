@@ -305,6 +305,27 @@ describe('extension (dist)', () => {
     }
   });
 
+  it('draws a diagram with the Azure icons in the light palette in a dark theme', async () => {
+    const md = makeMd(() => '<pre></pre>');
+    api.extendMarkdownIt(md);
+    const source = [
+      '@startuml',
+      '!include <azure/AzureCommon>',
+      '!include <azure/Compute/AzureFunction>',
+      'AzureFunction(fn, "Orders", "Functions")',
+      '@enduml',
+    ].join('\n');
+
+    vscodeStub._test.setThemeKind(vscodeStub.ColorThemeKind.Dark);
+    try {
+      const html = await waitForRender(md, 'plantuml', source);
+      expect(html).toContain('plantuml-diagram--light');
+      expect(html).toContain('Orders');
+    } finally {
+      vscodeStub._test.setThemeKind(vscodeStub.ColorThemeKind.Light);
+    }
+  });
+
   it('clear-cache command empties the cache and re-renders', async () => {
     const md = makeMd(() => '<pre></pre>');
     api.extendMarkdownIt(md);
