@@ -4,7 +4,14 @@ import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { createVscodeStub, type CompletionItemStub, type TextEditorStub, type VscodeStub, type WebviewPanelStub } from './helpers/vscode-stub';
+import {
+  createVscodeStub,
+  type CompletionItemStub,
+  type FoldingRangeStub,
+  type TextEditorStub,
+  type VscodeStub,
+  type WebviewPanelStub,
+} from './helpers/vscode-stub';
 
 /**
  * Loads the built dist/extension.js with a stubbed `vscode` module and
@@ -1326,6 +1333,35 @@ describe('templates (dist)', () => {
 
     expect(inserted(complete(document, 3, 2)?.[0])).toMatch(/^@startuml\n/);
     expect(complete(document, 1, 2)).toBeUndefined();
+  });
+});
+
+describe('folding (dist)', () => {
+  const fold = (text: string): FoldingRangeStub[] | undefined => {
+    const registration = vscodeStub._test.foldingProviders[0];
+    if (registration === undefined) {
+      throw new Error('no folding provider registered');
+    }
+    return registration.provider.provideFoldingRanges(
+      makeEditor('file:///c/fold/flows.puml', text, 0, { languageId: 'plantuml' }).document
+    );
+  };
+
+  it('is registered for PlantUML files only, so Markdown keeps its own folding', () => {
+    expect(vscodeStub._test.foldingProviders).toHaveLength(1);
+    expect(vscodeStub._test.foldingProviders[0]?.selector).toEqual({ language: 'plantuml' });
+  });
+
+  it('folds by syntax, a block comment as a comment', () => {
+    expect(fold(["/'", 'note', "'/", '@startuml', 'alt', '  A -> B', 'end', '@enduml'].join('\n'))).toEqual([
+      { start: 0, end: 2, kind: vscodeStub.FoldingRangeKind.Comment },
+      { start: 3, end: 6, kind: undefined },
+      { start: 4, end: 5, kind: undefined },
+    ]);
+  });
+
+  it('gives no list for a file with nothing to fold, which leaves it folding by indentation', () => {
+    expect(fold('A -> B\n  B -> C')).toBeUndefined();
   });
 });
 

@@ -122,6 +122,19 @@ export interface UriStub {
   toString(): string;
 }
 
+/** A `vscode.FoldingRange` as the extension builds it. */
+export interface FoldingRangeStub {
+  start: number;
+  end: number;
+  kind?: number;
+}
+
+/** A folding range provider as registered, with what it was registered for. */
+export interface FoldingRegistrationStub {
+  selector: unknown;
+  provider: { provideFoldingRanges(document: TextEditorStub['document']): FoldingRangeStub[] | undefined };
+}
+
 /** A `vscode.CompletionItem` as the extension builds it. */
 export interface CompletionItemStub {
   label: string | { label: string; description?: string };
@@ -213,7 +226,13 @@ export interface VscodeStub {
       provider: CompletionRegistrationStub['provider'],
       ...triggers: string[]
     ) => { dispose(): void };
+    registerFoldingRangeProvider: (
+      selector: unknown,
+      provider: FoldingRegistrationStub['provider']
+    ) => { dispose(): void };
   };
+  FoldingRange: new (start: number, end: number, kind?: number) => FoldingRangeStub;
+  FoldingRangeKind: Record<'Comment' | 'Imports' | 'Region', number>;
   CompletionItem: new (label: CompletionItemStub['label'], kind?: number) => CompletionItemStub;
   CompletionItemKind: Record<'Keyword' | 'Value' | 'Snippet', number>;
   SnippetString: new (value: string) => { value: string };
@@ -366,6 +385,8 @@ export interface VscodeStub {
     fileWrites: string[];
     /** Completion providers registered, in order. */
     completionProviders: CompletionRegistrationStub[];
+    /** Folding range providers registered, in order. */
+    foldingProviders: FoldingRegistrationStub[];
     /** Webview panels created, in order. */
     webviewPanels: WebviewPanelStub[];
     /** Panel serializers registered, by view type. */
@@ -554,6 +575,15 @@ export function createVscodeStub(): VscodeStub {
   }
   const completionProviders: CompletionRegistrationStub[] = [];
 
+  class FoldingRange implements FoldingRangeStub {
+    constructor(
+      public start: number,
+      public end: number,
+      public kind?: number
+    ) {}
+  }
+  const foldingProviders: FoldingRegistrationStub[] = [];
+
   const webviewPanels: WebviewPanelStub[] = [];
   const webviewSerializers = new Map<
     string,
@@ -647,6 +677,8 @@ export function createVscodeStub(): VscodeStub {
     CompletionItem,
     CompletionItemKind: { Keyword: 13, Value: 11, Snippet: 14 },
     SnippetString,
+    FoldingRange,
+    FoldingRangeKind: { Comment: 1, Imports: 2, Region: 3 },
     languages: {
       createDiagnosticCollection: () => ({
         set: (uri, items) => {
@@ -659,6 +691,10 @@ export function createVscodeStub(): VscodeStub {
       }),
       registerCompletionItemProvider: (selector, provider, ...triggers) => {
         completionProviders.push({ selector, provider, triggers });
+        return { dispose: () => undefined };
+      },
+      registerFoldingRangeProvider: (selector, provider) => {
+        foldingProviders.push({ selector, provider });
         return { dispose: () => undefined };
       },
     },
@@ -988,6 +1024,7 @@ export function createVscodeStub(): VscodeStub {
       },
       fileWrites,
       completionProviders,
+      foldingProviders,
       webviewPanels,
       webviewSerializers,
       // Restored panels come with whatever options were saved: none here.

@@ -163,6 +163,14 @@ language PlantUML, with the same colouring. *Toggle Line Comment* uses `'` and
 *Toggle Block Comment* uses `/' … '/`. A `.puml` file has a preview of its own
 (below), and its diagrams can be exported to SVG.
 
+In a `.puml` file, each diagram folds from its `@start…` line, and so do block
+comments, multi-line notes, legends, headers, footers, titles and `ref over`
+blocks, `{ … }` bodies, preprocessor sections (`!if`, `!procedure`, `!foreach`,
+…), sequence groups (`alt`, `loop`, …) and activity blocks (`if`, `while`,
+`fork`). A file with none of these folds by indentation; to fold every
+PlantUML file that way, set `"editor.foldingStrategy": "indentation"` under
+`"[plantuml]"` in the settings.
+
 ### Previewing `.puml` files
 
 *PlantUML Local: Open Diagram Preview to the Side* — the preview button in the

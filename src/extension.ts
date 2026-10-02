@@ -61,6 +61,7 @@ import {
   type CompletionData,
   type Suggestions,
 } from './language/completion';
+import { foldingRanges } from './language/folding';
 import {
   checkSource,
   renderProblems,
@@ -1587,6 +1588,37 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         '!',
         '&',
         ' '
+      );
+      context.signal.addEventListener('abort', () => {
+        registration.dispose();
+      });
+    },
+  });
+
+  module.hostedServices.add({
+    id: 'plantuml.folding',
+    start: (context) => {
+      // Folding by syntax in PlantUML files (src/language/folding.ts). A
+      // file in which none is found gets no list, which leaves it folding
+      // by indentation. Markdown keeps its own folding.
+      const registration = vscode.languages.registerFoldingRangeProvider(
+        { language: 'plantuml' },
+        {
+          provideFoldingRanges: (document) => {
+            const folds = foldingRanges(document.getText());
+            if (folds.length === 0) {
+              return undefined;
+            }
+            return folds.map(
+              (fold) =>
+                new vscode.FoldingRange(
+                  fold.start,
+                  fold.end,
+                  fold.comment ? vscode.FoldingRangeKind.Comment : undefined
+                )
+            );
+          },
+        }
       );
       context.signal.addEventListener('abort', () => {
         registration.dispose();
