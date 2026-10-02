@@ -148,6 +148,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   refresh drew the ones it had evicted again, evicting others, so the
   preview never finished and kept the renderer busy. The diagrams a preview
   shows now stay cached, for the last eight documents previewed.
+- **The messages that refuse a diagram name or an empty export directory say
+  why.** A name must be ASCII letters, digits, hyphens and underscores, and
+  not a Windows device name such as `CON`, which the message did not say. An
+  empty `plantumlLocal.exportDirectory` was reported as a path with `..`.
 - **A diagram missing its `@enduml` line is drawn.** The engine failed on it
   with `java.lang.IndexOutOfBoundsException`. The preview now draws it as if
   the block ended with the line, with a note saying so, and export writes it.

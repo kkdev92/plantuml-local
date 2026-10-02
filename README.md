@@ -334,8 +334,8 @@ what ties a block to its SVG across edits, which a position could not: inserting
 a diagram above would silently repoint everything below it. Naming is therefore
 required for the bulk commands, and the single-diagram one asks when the block
 has none — or when its name could not be a file name, since names are limited
-to 128 letters, digits, hyphens and underscores. The bulk commands report such
-a block as failed.
+to 128 ASCII letters, digits, hyphens and underscores, and cannot be a Windows
+device name such as `CON`. The bulk commands report such a block as failed.
 
 With the cursor on the opening line of a block that has no usable name, the
 light bulb offers *Name this diagram for export…*: it asks for a name and

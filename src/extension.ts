@@ -516,10 +516,11 @@ function exportDirectory(
   const directory = String(settings.read({ resource: document }).values[CONFIG.EXPORT_DIRECTORY]);
   if (!isValidExportDirectory(directory)) {
     void context.notify.error(
-      context.l10n.t(
-        'plantumlLocal.exportDirectory must be a relative path without "..": {0}',
-        directory
-      )
+      directory === ''
+        ? context.l10n.t(
+            'plantumlLocal.exportDirectory is empty. Set a folder relative to the document, such as images.'
+          )
+        : context.l10n.t('plantumlLocal.exportDirectory must be a relative path without "..": {0}', directory)
     );
     return null;
   }
@@ -553,7 +554,9 @@ async function askForName(context: OperationContext, format: ExportFormat): Prom
     validate: (value: string) =>
       isValidBlockName(value)
         ? undefined
-        : context.l10n.t('Use up to 128 letters, digits, hyphens and underscores.'),
+        : context.l10n.t(
+            'Use up to 128 ASCII letters, digits, hyphens and underscores. Windows device names such as CON cannot be used.'
+          ),
   });
   return name ?? null;
 }
@@ -736,7 +739,7 @@ function exporterDeps(
       'Emoji (<:name:>) are not supported: the emoji images are not bundled.'
     ),
     invalidNameMessage: context.l10n.t(
-      'Use up to 128 letters, digits, hyphens and underscores.'
+      'Use up to 128 ASCII letters, digits, hyphens and underscores. Windows device names such as CON cannot be used.'
     ),
     severalDiagramsMessage: context.l10n.t(
       'This block holds more than one diagram, and only the first would be drawn. Give each diagram a block of its own.'
@@ -2254,7 +2257,9 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
       validate: (value: string) =>
         isValidBlockName(value)
           ? undefined
-          : context.l10n.t('Use up to 128 letters, digits, hyphens and underscores.'),
+          : context.l10n.t(
+              'Use up to 128 ASCII letters, digits, hyphens and underscores. Windows device names such as CON cannot be used.'
+            ),
     });
     if (name === undefined) {
       return;
