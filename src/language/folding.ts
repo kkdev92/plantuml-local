@@ -31,6 +31,15 @@ export interface Fold {
 }
 
 /**
+ * A procedure or function body. A function with `!return` on its first line
+ * has no end line.
+ */
+export const PROCEDURE = {
+  open: /^\s*!(?:(?:unquoted|final)\s+)*(?:procedure\s|function\s(?!.*\)\s*!?return\b))|^\s*!definelong\s/i,
+  close: /^\s*!end\s*(?:function|procedure|definelong)\b/i,
+};
+
+/**
  * Sections, by kind: the line that opens one and the line that closes it.
  * A line closes the first kind whose closing line it matches, or failing
  * that, opens the first kind whose opening line it matches.
@@ -42,11 +51,7 @@ const SECTIONS: readonly { open: RegExp; close: RegExp }[] = [
   { open: /^\s*!while\b/i, close: /^\s*!endwhile\b/i },
   { open: /^\s*!foreach\b/i, close: /^\s*!endfor\b/i },
   { open: /^\s*!startsub\b/i, close: /^\s*!endsub\b/i },
-  // A function with `!return` on its first line has no end line.
-  {
-    open: /^\s*!(?:(?:unquoted|final)\s+)*(?:procedure\s|function\s(?!.*\)\s*!?return\b))|^\s*!definelong\s/i,
-    close: /^\s*!end\s*(?:function|procedure|definelong)\b/i,
-  },
+  PROCEDURE,
   { open: /^\s*(?:#\S+?:)?if\s*[("]/i, close: /^\s*end\s*if\b/i },
   { open: /^\s*(?:#\S+?:)?while\s*\(/i, close: /^\s*(?:end\s*while|while\s*end)\b/i },
   { open: /^\s*fork\s*;?\s*$/i, close: /^\s*(?:end\s*(?:fork|merge)|fork\s*end)\b/i },
@@ -77,10 +82,10 @@ const FLOATING_TEXT = /^\s*"[^"]*"\s+as\s/i;
 /** A colon of its own, before a one-line note's text: `::` is part of a member's name. */
 const LABEL_COLON = /(?<!:):(?!:)/;
 /** Diagrams whose lines are data rather than PlantUML. */
-const DATA = /^\s*[@\\]start(?:json|yaml)\b/;
+export const DATA = /^\s*[@\\]start(?:json|yaml)\b/;
 
 /** The line that ends the multi-line note or text `line` starts, or null. */
-function textEnd(line: string): RegExp | null {
+export function textEnd(line: string): RegExp | null {
   const note = NOTE.exec(line);
   if (note !== null) {
     const rest = note[1] ?? '';

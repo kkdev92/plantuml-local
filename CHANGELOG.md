@@ -53,6 +53,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   preprocessor sections, sequence groups and activity blocks. A file with
   none of these folds by indentation, and `editor.foldingStrategy` set to
   `indentation` for `[plantuml]` folds every PlantUML file that way.
+- **An outline of `.puml` files.** The Outline view, the breadcrumbs and Go
+  to Symbol in Editor list each diagram and what it declares with a keyword
+  (participants, classes, interfaces, enums, components, nodes, packages,
+  namespaces, states and use cases), by alias with the name the diagram
+  shows beside it, under the `{ … }` body that declares them. A name that
+  only appears in a relation, or that a procedure creates, is left out.
 - **Problems panel.** The diagrams of open Markdown files are checked, with or
   without a preview, and their problems are listed on the line they are on:
   the engine's errors and warnings, what the bundled engine cannot do

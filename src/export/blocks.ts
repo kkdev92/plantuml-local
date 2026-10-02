@@ -192,7 +192,7 @@ export function blockAtLine(blocks: readonly PlantUmlBlock[], line: number): Pla
 }
 
 /** The `(id=…)` right after `@start…`: the name a diagram declares for itself. */
-const DECLARED_ID = /^\s*[@\\]start[A-Za-z0-9_]+\(id=([^)]*)\)/;
+export const DECLARED_ID = /^\s*[@\\]start[A-Za-z0-9_]+\(id=([^)]*)\)/;
 
 /**
  * Returns the diagrams of a PlantUML file, in order, each from its

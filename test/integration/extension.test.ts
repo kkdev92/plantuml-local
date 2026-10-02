@@ -7,6 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   createVscodeStub,
   type CompletionItemStub,
+  type DocumentSymbolStub,
   type FoldingRangeStub,
   type TextEditorStub,
   type VscodeStub,
@@ -308,7 +309,14 @@ function makeEditor(
         path: path.replace(/^[a-z][\w+.-]*:(\/\/[^/]*)?/i, ''),
       },
       getText: () => current,
-      lineAt: (at: number) => ({ text: current.split('\n')[at] ?? '' }),
+      lineAt: (at: number) => {
+        const lineText = current.split('\n')[at] ?? '';
+        return {
+          text: lineText,
+          range: new vscodeStub.Range(at, 0, at, lineText.length),
+          firstNonWhitespaceCharacterIndex: lineText.length - lineText.trimStart().length,
+        };
+      },
       setText: (next: string) => {
         current = next;
       },
@@ -1362,6 +1370,69 @@ describe('folding (dist)', () => {
 
   it('gives no list for a file with nothing to fold, which leaves it folding by indentation', () => {
     expect(fold('A -> B\n  B -> C')).toBeUndefined();
+  });
+});
+
+describe('symbols (dist)', () => {
+  const symbols = (text: string): DocumentSymbolStub[] => {
+    const registration = vscodeStub._test.symbolProviders[0];
+    if (registration === undefined) {
+      throw new Error('no document symbol provider registered');
+    }
+    return registration.provider.provideDocumentSymbols(
+      makeEditor('file:///c/symbols/flows.puml', text, 0, { languageId: 'plantuml' }).document
+    );
+  };
+  const at = (line: number, character: number): { line: number; character: number } => ({ line, character });
+
+  it('is registered for PlantUML files only, so Markdown keeps its outline of headings', () => {
+    expect(vscodeStub._test.symbolProviders).toHaveLength(1);
+    expect(vscodeStub._test.symbolProviders[0]?.selector).toEqual({ language: 'plantuml' });
+  });
+
+  it('gives a diagram the lines it spans, and a declaration its line, its alias and what it holds', () => {
+    const text = ['@startuml(id=orders)', 'participant "Web App" as App', 'package P {', '  class C', '}', '@enduml'];
+
+    expect(symbols(text.join('\n'))).toMatchObject([
+      {
+        name: 'orders',
+        detail: '@startuml',
+        kind: vscodeStub.SymbolKind.Module,
+        range: { start: at(0, 0), end: at(5, 7) },
+        selectionRange: { start: at(0, 0), end: at(0, 20) },
+        children: [
+          {
+            name: 'App',
+            detail: 'Web App',
+            kind: vscodeStub.SymbolKind.Object,
+            range: { start: at(1, 0), end: at(1, 28) },
+            selectionRange: { start: at(1, 0), end: at(1, 28) },
+            children: [],
+          },
+          {
+            name: 'P',
+            detail: '',
+            kind: vscodeStub.SymbolKind.Package,
+            range: { start: at(2, 0), end: at(4, 1) },
+            selectionRange: { start: at(2, 0), end: at(2, 11) },
+            children: [
+              {
+                name: 'C',
+                kind: vscodeStub.SymbolKind.Class,
+                range: { start: at(3, 0), end: at(3, 9) },
+                // From the keyword, past the indentation.
+                selectionRange: { start: at(3, 2), end: at(3, 9) },
+                children: [],
+              },
+            ],
+          },
+        ],
+      },
+    ]);
+  });
+
+  it('lists nothing for a file that declares nothing', () => {
+    expect(symbols('A -> B\nB -> C')).toEqual([]);
   });
 });
 
