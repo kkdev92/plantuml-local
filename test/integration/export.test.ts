@@ -75,6 +75,8 @@ const deps: ExporterDeps = {
       })
     ),
   // Every test writes under a name of its own.
+  wroteLast: () => false,
+  noteWritten: () => Promise.resolve(),
   confirmReplace: () => Promise.reject(new Error('unexpected question: a file already exists')),
   writeFile: (path, content) =>
     import('node:fs/promises').then(async (fs) => {

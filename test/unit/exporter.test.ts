@@ -15,6 +15,7 @@ import {
   writeDocuments,
   type ExporterDeps,
 } from '../../src/export/exporter';
+import { isLastExport, withExport, type ExportRecords } from '../../src/export/ownership';
 
 /** The start of a PNG of `width`×`height` pixels: its signature and IHDR chunk. */
 function pngOf(width: number, height: number): Uint8Array {
@@ -40,6 +41,8 @@ function makeDeps(
 } {
   // The files already there, by path: read back before writing.
   const disk = new Map(Object.entries(files ?? {}));
+  // What the export wrote, kept as the extension keeps it.
+  let records: ExportRecords = {};
   const deps = {
     render: vi.fn((source: string) => Promise.resolve(`<svg>${source}</svg>`)),
     isDark: (): boolean => false,
@@ -47,6 +50,12 @@ function makeDeps(
     readExisting: (path: string): Promise<Uint8Array | null> => {
       const content = disk.get(path);
       return Promise.resolve(typeof content === 'string' ? new TextEncoder().encode(content) : (content ?? null));
+    },
+    wroteLast: (path: string, document: string, existing: Uint8Array): boolean =>
+      isLastExport(records, path, document, existing),
+    noteWritten: (path: string, document: string, content: Uint8Array): Promise<void> => {
+      records = withExport(records, path, document, content);
+      return Promise.resolve();
     },
     // Declines, so a question no test expected writes nothing.
     confirmReplace: vi.fn((): Promise<'replace' | 'keep' | undefined> => Promise.resolve(undefined)),
@@ -202,6 +211,51 @@ describe('exportOne', () => {
     expect(result).toEqual({ name: 'orders', path: '/repo/docs/images/orders.svg', error: null });
     expect(deps.confirmReplace).not.toHaveBeenCalled();
     expect(deps.writeFile).not.toHaveBeenCalled();
+  });
+
+  it('replaces the file it exported, unchanged since, without asking', async () => {
+    const deps = makeDeps();
+    const [first] = findPlantUmlBlocks('```plantuml\nx\n```');
+    const [second] = findPlantUmlBlocks('```plantuml\ny\n```');
+
+    await exportOne(deps, DOC, 'images', first!, 'orders');
+    const result = await exportOne(deps, DOC, 'images', second!, 'orders');
+
+    expect(result?.path).toBe('/repo/docs/images/orders.svg');
+    expect(deps.confirmReplace).not.toHaveBeenCalled();
+    expect(deps.writeFile).toHaveBeenLastCalledWith(
+      '/repo/docs/images/orders.svg',
+      expect.stringContaining('y</svg>'),
+      true
+    );
+  });
+
+  it("asks about that file once it has changed, and about another document's", async () => {
+    const deps = makeDeps();
+    const [first] = findPlantUmlBlocks('```plantuml\nx\n```');
+    const [second] = findPlantUmlBlocks('```plantuml\ny\n```');
+    await exportOne(deps, DOC, 'images', first!, 'orders');
+
+    // A document beside it naming a diagram alike.
+    expect(await exportOne(deps, '/repo/docs/other.md', 'images', second!, 'orders')).toBeNull();
+    // Edited by hand since.
+    await deps.writeFile('/repo/docs/images/orders.svg', '<svg>edited</svg>', true);
+    expect(await exportOne(deps, DOC, 'images', second!, 'orders')).toBeNull();
+
+    expect(deps.confirmReplace).toHaveBeenCalledTimes(2);
+  });
+
+  it('takes a file that holds the diagram already as its export', async () => {
+    const svg = '<svg><rect width="100%" height="100%" fill="#FFFFFF"/>x</svg>';
+    const deps = makeDeps({}, { '/repo/docs/images/orders.svg': svg });
+    const [first] = findPlantUmlBlocks('```plantuml\nx\n```');
+    const [second] = findPlantUmlBlocks('```plantuml\ny\n```');
+
+    await exportOne(deps, DOC, 'images', first!, 'orders');
+    await exportOne(deps, DOC, 'images', second!, 'orders');
+
+    expect(deps.confirmReplace).not.toHaveBeenCalled();
+    expect(deps.writeFile).toHaveBeenCalledOnce();
   });
 
   it('reports a target it cannot check, such as a folder, without writing', async () => {
@@ -648,6 +702,24 @@ describe('exportAll', () => {
 
     expect(outcome).toBeNull();
     expect(deps.writeFile).not.toHaveBeenCalled();
+  });
+
+  it('asks only about the files it did not write, and replaces its own whatever the answer', async () => {
+    const deps = makeDeps({ confirmReplace: vi.fn(() => Promise.resolve('keep' as const)) });
+    await exportMarkdown(deps, DOC, 'images', document);
+    await deps.writeFile('/repo/docs/images/two.svg', 'edited', true);
+    deps.writeFile.mockClear();
+
+    const changed = document.replace('\na\n', '\nA\n').replace('\nb\n', '\nB\n');
+    const outcome = await exportMarkdown(deps, DOC, 'images', changed);
+
+    expect(deps.confirmReplace).toHaveBeenCalledOnce();
+    expect(deps.confirmReplace).toHaveBeenCalledWith(['/repo/docs/images/two.svg'], true);
+    expect(outcome?.written.map((r) => r.name)).toEqual(['one']);
+    expect(outcome?.kept).toBe(1);
+    expect(deps.writeFile.mock.calls.map((call) => [call[0], call[2]])).toEqual([
+      ['/repo/docs/images/one.svg', true],
+    ]);
   });
 
   it('does not ask about a file that already holds its diagram', async () => {

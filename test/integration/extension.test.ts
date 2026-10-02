@@ -44,17 +44,18 @@ let extension: ExtensionModule;
  * Enough of an ExtensionContext for the framework to build every capability
  * adapter. It wires storage, secrets and webviews at activation regardless of
  * whether the extension declares any, so these have to exist even though this
- * extension uses none of them.
+ * extension uses only the workspace state, where the export records are kept.
  */
 interface ContextStub {
   subscriptions: { dispose(): void }[];
   globalState: { get(): undefined; update(): Promise<void>; keys(): string[]; setKeysForSync(): void };
-  workspaceState: { get(): undefined; update(): Promise<void>; keys(): string[] };
+  workspaceState: { get(key: string): unknown; update(key: string, value: unknown): Promise<void>; keys(): string[] };
   secrets: { get(): Promise<undefined>; store(): Promise<void>; delete(): Promise<void> };
   extensionUri: unknown;
 }
 
 function createContextStub(): ContextStub {
+  const workspace = new Map<string, unknown>();
   return {
     subscriptions: [],
     globalState: {
@@ -63,7 +64,17 @@ function createContextStub(): ContextStub {
       keys: () => [],
       setKeysForSync: () => undefined,
     },
-    workspaceState: { get: () => undefined, update: async () => undefined, keys: () => [] },
+    workspaceState: {
+      get: (key) => workspace.get(key),
+      update: async (key, value) => {
+        if (value === undefined) {
+          workspace.delete(key);
+        } else {
+          workspace.set(key, value);
+        }
+      },
+      keys: () => [...workspace.keys()],
+    },
     secrets: { get: async () => undefined, store: async () => undefined, delete: async () => undefined },
     extensionUri: { scheme: 'file', fsPath: '/ext', toString: () => 'file:///ext' },
   };
@@ -1061,6 +1072,54 @@ describe('export (dist)', () => {
       await exportSvg();
       expect(vscodeStub._test.modals.length).toBe(modalsAfter);
       expect(vscodeStub._test.fileWrites.length).toBe(writesAfter);
+    });
+
+    it('replaces a file it exported as the diagram changes, until the file is edited or open with edits', async () => {
+      const target = 'file:///c/owned/images/orders.svg';
+      const exportLabel = async (label: string): Promise<void> => {
+        vscodeStub._test.setActiveEditor(
+          makeEditor('file:///c/owned/doc.md', NAMED_BLOCK.replace('hi', label), 1)
+        );
+        await exportSvg();
+      };
+      await exportLabel('first');
+      const modalsBefore = vscodeStub._test.modals.length;
+
+      await exportLabel('second');
+      expect(vscodeStub._test.modals.length).toBe(modalsBefore);
+      expect(vscodeStub._test.writtenFiles.get(target)).toContain('second');
+
+      // Edited by hand since: asked about, and kept as the stub declines.
+      vscodeStub._test.writtenFiles.set(target, '<svg>edited</svg>');
+      vscodeStub._test.writtenBytes.delete(target);
+      await exportLabel('third');
+      expect(vscodeStub._test.writtenFiles.get(target)).toBe('<svg>edited</svg>');
+
+      // Replaced once told to, it is the export's again; open with unsaved
+      // edits, it is asked about all the same.
+      vscodeStub._test.messageReply = 'Replace';
+      try {
+        await exportLabel('fourth');
+      } finally {
+        vscodeStub._test.messageReply = null;
+      }
+      const open = Object.assign(makeEditor(target, '<svg>typing</svg>', 0, { languageId: 'xml' }).document, {
+        isDirty: true,
+      });
+      vscodeStub._test.openDocuments.push(open);
+      try {
+        await exportLabel('fifth');
+      } finally {
+        vscodeStub._test.openDocuments.splice(vscodeStub._test.openDocuments.indexOf(open), 1);
+      }
+      expect(vscodeStub._test.writtenFiles.get(target)).toContain('fourth');
+
+      const asked = 'owned/images/orders.svg already exists with different contents. Replace it?';
+      expect(vscodeStub._test.modals.slice(modalsBefore).map((modal) => modal.message)).toEqual([
+        asked,
+        asked,
+        asked,
+      ]);
     });
 
     it('export-all asks once for every file it would replace, and can keep them', async () => {

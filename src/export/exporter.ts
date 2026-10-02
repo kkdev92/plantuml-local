@@ -34,10 +34,22 @@ export interface ExporterDeps {
    */
   readExisting(path: string): Promise<Uint8Array | null>;
   /**
+   * Whether `existing`, the file at `path`, is what an export from
+   * `document` last wrote there, unchanged since (src/export/ownership.ts).
+   * Such a file is replaced without asking.
+   */
+  wroteLast(path: string, document: string, existing: Uint8Array): boolean;
+  /**
+   * Records that the file at `path` holds `content`, exported from
+   * `document`. Never rejects: a record that is not kept only means the
+   * next export asks.
+   */
+  noteWritten(path: string, document: string, content: Uint8Array): Promise<void>;
+  /**
    * Asks before replacing files that hold something other than their
-   * diagram: 'replace' them, 'keep' them and write only the rest, or
-   * undefined to write nothing. `canKeep` says whether there is a rest:
-   * more than one diagram is being exported.
+   * diagram, and that the export did not write: 'replace' them, 'keep'
+   * them and write only the rest, or undefined to write nothing. `canKeep`
+   * says whether there is a rest: more than one diagram is being exported.
    */
   confirmReplace(
     paths: readonly string[],
@@ -121,6 +133,8 @@ export interface ExportOutcome {
 export interface Drawing {
   name: string;
   path: string;
+  /** The document the diagram is exported from. */
+  document: string;
   content: string | Uint8Array;
 }
 
@@ -287,7 +301,7 @@ async function drawBlock(
     const svg = addBackground(rendered, dark);
     const path = deps.resolve(documentPath, `${directory}/${name}.${format}`);
     if (format === 'svg') {
-      return { name, path, content: svg };
+      return { name, path, document: documentPath, content: svg };
     }
 
     // Drawn at the scale asked for, without the screen's own pixel ratio,
@@ -310,7 +324,7 @@ async function drawBlock(
     if (!isPngOfSize(png, width, height) || png.byteLength > PNG_LIMITS.bytes) {
       return { name, path: null, error: deps.pngFailedMessage };
     }
-    return { name, path, content: png };
+    return { name, path, document: documentPath, content: png };
   } catch (error: unknown) {
     const message = messageOf(error);
     return {
@@ -323,26 +337,30 @@ async function drawBlock(
 
 /**
  * Writes the drawings, asking once before replacing any file that holds
- * something else: it may be a file someone put there by hand. A file that
- * already holds its drawing is left alone, since writing it again would
- * change nothing. Null when the replacement is declined outright.
+ * something else: it may be a file someone put there by hand, or changed.
+ * A file an export from the same document wrote, unchanged since, is the
+ * export's own to replace. A file that already holds its drawing is left
+ * alone, since writing it again would change nothing. Null when the
+ * replacement is declined outright.
  */
 async function writeDrawings(
   deps: ExporterDeps,
   drawings: readonly Drawing[]
 ): Promise<Pick<ExportOutcome, 'written' | 'failed' | 'kept'> | null> {
   const failed: ExportResult[] = [];
-  const checked: { drawing: Drawing; existing: Uint8Array | null }[] = [];
+  const checked: { drawing: Drawing; existing: Uint8Array | null; own: boolean }[] = [];
   for (const drawing of drawings) {
     try {
-      checked.push({ drawing, existing: await deps.readExisting(drawing.path) });
+      const existing = await deps.readExisting(drawing.path);
+      const own = existing !== null && deps.wroteLast(drawing.path, drawing.document, existing);
+      checked.push({ drawing, existing, own });
     } catch (error: unknown) {
       failed.push({ name: drawing.name, path: null, error: messageOf(error) });
     }
   }
 
   const replacing = checked.filter(
-    ({ drawing, existing }) => existing !== null && !holds(existing, drawing.content)
+    ({ drawing, existing, own }) => existing !== null && !own && !holds(existing, drawing.content)
   );
   let replace = false;
   if (replacing.length > 0) {
@@ -358,15 +376,17 @@ async function writeDrawings(
 
   const written: ExportResult[] = [];
   let kept = 0;
-  for (const { drawing, existing } of checked) {
+  for (const { drawing, existing, own } of checked) {
     const result = { name: drawing.name, path: drawing.path, error: null };
     if (existing !== null && holds(existing, drawing.content)) {
+      await deps.noteWritten(drawing.path, drawing.document, bytesOf(drawing.content));
       written.push(result);
-    } else if (existing !== null && !replace) {
+    } else if (existing !== null && !own && !replace) {
       kept += 1;
     } else {
       try {
         await deps.writeFile(drawing.path, drawing.content, existing !== null);
+        await deps.noteWritten(drawing.path, drawing.document, bytesOf(drawing.content));
         written.push(result);
       } catch (error: unknown) {
         failed.push({ name: drawing.name, path: null, error: messageOf(error) });

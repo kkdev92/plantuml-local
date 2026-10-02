@@ -340,13 +340,18 @@ line, `@startuml(id=orders-api)`; a file holding a single diagram may leave it
 out, and the diagram is named after the file. References are inserted into
 Markdown only.
 
-A file already at the target is replaced only when you say so. If it holds the
-diagram already, nothing is written; if it holds something else — a file put
-there by hand, or another block's export — the command asks first, once for all
-the files it would replace, and the bulk commands can keep those files and
-write the rest. Each file is written under a temporary name beside the target
-and then renamed over it, so an export that fails part way never leaves half an
-image behind.
+A file already at the target is replaced only when you say so, or when the
+export put it there. If it holds the diagram already, nothing is written. If
+the export wrote it from the same document and it has not changed since, it is
+replaced without a question, so exporting an edited diagram again just updates
+its file. Anything else — a file put there by hand, another document's export,
+a file changed since or open with unsaved edits — the command asks about first,
+once for all the files it would replace, and the bulk commands can keep those
+files and write the rest. What the export wrote is kept in the workspace's
+state on this machine: each file, its document and a SHA-256 of the contents,
+no diagram. On another machine, the first export asks. Each file is written
+under a temporary name beside the target and then renamed over it, so an
+export that fails part way never leaves half an image behind.
 
 The `#plantuml-local` fragment on the inserted reference does two jobs. GitHub
 ignores it and renders the SVG, while this extension's preview hides marked
