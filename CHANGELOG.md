@@ -48,6 +48,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Markdown document, as the bare diagram in an empty block or between the
   diagrams of a `.puml` file. Each draws as it is, with its names to tab
   through.
+- **Folding in `.puml` files.** Each diagram folds from its start line, and
+  so do block comments, multi-line notes and texts, `{ … }` bodies,
+  preprocessor sections, sequence groups and activity blocks. A file with
+  none of these folds by indentation, and `editor.foldingStrategy` set to
+  `indentation` for `[plantuml]` folds every PlantUML file that way.
 - **Problems panel.** The diagrams of open Markdown files are checked, with or
   without a preview, and their problems are listed on the line they are on:
   the engine's errors and warnings, what the bundled engine cannot do
