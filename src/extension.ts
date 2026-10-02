@@ -1460,7 +1460,9 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         return;
       }
       context.logger.info(`Exported ${String(result.path)}`);
-      await announceExport(context, context.l10n.t('Exported {0}', String(result.path)), false, result.path ?? undefined);
+      // The file as the Explorer names it, rather than its encoded URI.
+      const written = vscode.workspace.asRelativePath(vscode.Uri.parse(String(result.path)));
+      await announceExport(context, context.l10n.t('Exported {0}', written), false, result.path ?? undefined);
     };
 
   module.commands.handle(ExportSvg, {

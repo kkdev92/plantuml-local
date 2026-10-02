@@ -132,6 +132,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The message after exporting a diagram names the file as the Explorer
+  does**, `docs/images/orders.svg`, rather than by its encoded URI,
+  `file:///c%3A/…/orders.svg`.
 - **A diagram missing its `@enduml` line is drawn.** The engine failed on it
   with `java.lang.IndexOutOfBoundsException`. The preview now draws it as if
   the block ended with the line, with a note saying so, and export writes it.

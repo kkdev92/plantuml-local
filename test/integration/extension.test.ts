@@ -1357,7 +1357,8 @@ describe('export (dist)', () => {
 
       expect(panel.disposed).toBe(true);
       expect(vscodeStub._test.writtenBytes.get('file:///c/png/images/orders.png')).toEqual(png);
-      expect(vscodeStub._test.notifications.info.at(-1)).toBe('Exported file:///c/png/images/orders.png');
+      // Named as the Explorer names it, not by its URI.
+      expect(vscodeStub._test.notifications.info.at(-1)).toBe('Exported png/images/orders.png');
     });
 
     it('writes nothing when the page cannot draw it, or sends back another size', async () => {
