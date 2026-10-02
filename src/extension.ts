@@ -889,15 +889,15 @@ function runBulkExport(
 
 /**
  * One summary notification for a bulk export, warnings when warranted.
- * `plantUml` says the document was a PlantUML file, which names its
- * diagrams differently.
+ * `unnamedDiagrams` says how many of the unnamed are diagrams of PlantUML
+ * files, which are named differently.
  */
 async function reportOutcome(
   context: OperationContext,
   outcome: ExportOutcome,
   extra: readonly string[],
   forceWarn: boolean,
-  plantUml = false
+  unnamedDiagrams = 0
 ): Promise<void> {
   const messages: string[] = [];
   if (outcome.written.length > 0) {
@@ -913,19 +913,20 @@ async function reportOutcome(
       context.logger.warn(`Export failed for ${failure.name}: ${String(failure.error)}`);
     }
   }
-  if (outcome.unnamed > 0) {
-    // Naming is what keeps a file tied to its block across edits; a
-    // positional name would move the moment a block is inserted above.
+  // Naming is what keeps a file tied to its block across edits; a
+  // positional name would move the moment a block is inserted above.
+  const unnamedBlocks = outcome.unnamed - unnamedDiagrams;
+  if (unnamedBlocks > 0) {
     messages.push(
-      plantUml
-        ? context.l10n.t(
-            '{0} unnamed diagram(s) skipped — name one with @startuml(id=my-diagram)',
-            String(outcome.unnamed)
-          )
-        : context.l10n.t(
-            '{0} unnamed block(s) skipped — name one with ```plantuml my-diagram',
-            String(outcome.unnamed)
-          )
+      context.l10n.t('{0} unnamed block(s) skipped — name one with ```plantuml my-diagram', String(unnamedBlocks))
+    );
+  }
+  if (unnamedDiagrams > 0) {
+    messages.push(
+      context.l10n.t(
+        '{0} unnamed diagram(s) skipped — name one with @startuml(id=my-diagram)',
+        String(unnamedDiagrams)
+      )
     );
   }
   if (messages.length === 0) {
@@ -973,6 +974,15 @@ const MAX_FOLDER_DIAGRAMS = 2000;
 interface FolderSource {
   uri: vscode.Uri;
   blocks: PlantUmlBlock[];
+  /** A PlantUML file rather than a Markdown document. */
+  plantUml: boolean;
+}
+
+/** How many diagrams of the PlantUML files among `sources` have no name. */
+function unnamedDiagrams(sources: readonly FolderSource[]): number {
+  return sources
+    .filter((source) => source.plantUml)
+    .reduce((sum, source) => sum + source.blocks.filter((block) => block.name === null).length, 0);
 }
 
 /**
@@ -1039,7 +1049,7 @@ async function folderSources(folder: vscode.Uri, signal: AbortSignal): Promise<F
     const name = withoutExtension(uri.path.slice(uri.path.lastIndexOf('/') + 1));
     const blocks = !document.plantUml ? findPlantUmlBlocks(text) : diagram ? findFileDiagrams(text, name) : [];
     if (blocks.length > 0) {
-      sources.push({ uri, blocks });
+      sources.push({ uri, blocks, plantUml: document.plantUml });
     }
   }
   return signal.aborted ? undefined : sources;
@@ -1501,7 +1511,7 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         outcome,
         [],
         false,
-        document.textDocument.languageId === 'plantuml'
+        document.textDocument.languageId === 'plantuml' ? outcome.unnamed : 0
       );
     },
   });
@@ -1632,7 +1642,7 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
       }
       if (named === 0) {
         const unnamed = sources.reduce((sum, source) => sum + source.blocks.length, 0);
-        await reportOutcome(context, { written: [], failed: [], unnamed, kept: 0 }, [], false);
+        await reportOutcome(context, { written: [], failed: [], unnamed, kept: 0 }, [], false, unnamedDiagrams(sources));
         return;
       }
 
@@ -1710,7 +1720,7 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
       if (outcome === undefined || outcome === null) {
         return;
       }
-      await reportOutcome(context, outcome, [], false);
+      await reportOutcome(context, outcome, [], false, unnamedDiagrams(sources));
     };
 
   module.commands.handle(ExportFolderSvg, {

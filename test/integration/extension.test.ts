@@ -1310,6 +1310,30 @@ describe('export (dist)', () => {
 
       expect(vscodeStub._test.notifications.warn.at(-1)).toBe('Choose a folder in the workspace.');
     });
+
+    it('says how to name the unnamed diagrams of each kind of document', async () => {
+      const unnamedBlock = ['```plantuml', '@startuml', 'E -> F', '@enduml', '```'].join('\n');
+      const unnamedDiagrams = '@startuml\nA -> B\n@enduml\n@startuml\nC -> D\n@enduml';
+      vscodeStub._test.writtenFiles.set('file:///c/mixed/a.md', `${block('one', 'first')}\n\n${unnamedBlock}`);
+      vscodeStub._test.writtenFiles.set('file:///c/mixed/b.puml', unnamedDiagrams);
+      vscodeStub._test.writtenFiles.set('file:///c/unnamed/c.puml', unnamedDiagrams);
+
+      vscodeStub._test.messageReply = 'Export';
+      try {
+        await exportFolder('file:///c/mixed');
+        // Nothing named, so nothing to export.
+        await exportFolder('file:///c/unnamed');
+      } finally {
+        vscodeStub._test.messageReply = null;
+      }
+
+      expect(vscodeStub._test.notifications.warn.slice(-2)).toEqual([
+        'Exported 1 diagram(s)' +
+          ' · 1 unnamed block(s) skipped — name one with ```plantuml my-diagram' +
+          ' · 2 unnamed diagram(s) skipped — name one with @startuml(id=my-diagram)',
+        '2 unnamed diagram(s) skipped — name one with @startuml(id=my-diagram)',
+      ]);
+    });
   });
 
   describe('PNG', () => {
