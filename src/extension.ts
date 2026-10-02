@@ -655,6 +655,7 @@ function exporterDeps(
           ),
     pngFailedMessage: context.l10n.t('The PNG could not be made as asked.'),
     sameFileMessage: context.l10n.t('Another diagram is exported to the same file.'),
+    changedMessage: context.l10n.t('The file changed while the export was running, so it was left as it is.'),
     pngScale: (): number => {
       const scale = settings.read({ resource: document }).values[CONFIG.EXPORT_PNG_SCALE];
       return PNG_SCALES.includes(scale as 1 | 2 | 4) ? Number(scale) : 2;

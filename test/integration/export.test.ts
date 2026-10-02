@@ -61,6 +61,7 @@ const deps: ExporterDeps = {
   pngTooLargeMessage: (width, height) => `The PNG would be ${String(width)}×${String(height)} pixels.`,
   pngFailedMessage: 'The PNG could not be made as asked.',
   sameFileMessage: 'Another diagram is exported to the same file.',
+  changedMessage: 'The file changed while the export was running, so it was left as it is.',
   pngScale: () => 2,
   // No canvas here: these tests export SVG.
   toPng: () => Promise.reject(new Error('no canvas')),

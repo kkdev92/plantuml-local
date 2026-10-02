@@ -95,6 +95,8 @@ export interface ExporterDeps {
   pngFailedMessage: string;
   /** Localised reason given for a diagram headed for the file another one is written to. */
   sameFileMessage: string;
+  /** Localised reason given for a file that changed after the export looked at it. */
+  changedMessage: string;
 }
 
 /** The largest PNG made: pixels a side and in all, and bytes. */
@@ -340,7 +342,9 @@ async function drawBlock(
  * something else: it may be a file someone put there by hand, or changed.
  * A file an export from the same document wrote, unchanged since, is the
  * export's own to replace. A file that already holds its drawing is left
- * alone, since writing it again would change nothing. Null when the
+ * alone, since writing it again would change nothing. A file that changed
+ * after it was looked at, while the question was open say, is no longer
+ * the one the answer was about, and is left as it is. Null when the
  * replacement is declined outright.
  */
 async function writeDrawings(
@@ -385,7 +389,12 @@ async function writeDrawings(
       kept += 1;
     } else {
       try {
-        await deps.writeFile(drawing.path, drawing.content, existing !== null);
+        const now = existing === null ? null : await deps.readExisting(drawing.path);
+        if (existing !== null && now !== null && !holds(now, existing)) {
+          failed.push({ name: drawing.name, path: null, error: deps.changedMessage });
+          continue;
+        }
+        await deps.writeFile(drawing.path, drawing.content, now !== null);
         await deps.noteWritten(drawing.path, drawing.document, bytesOf(drawing.content));
         written.push(result);
       } catch (error: unknown) {
