@@ -318,7 +318,9 @@ The first four are also in the editor's right-click menu: the single exports app
 with the cursor inside a block, the other two whenever the file contains a
 diagram — so the menu of an ordinary Markdown file stays untouched. Run from
 the command palette while the preview has focus, they use the only open
-Markdown document, or ask which one when several are open.
+Markdown document, or ask which one when several are open. The message each
+export ends with offers *Reveal in Explorer View*, which selects the file it
+wrote, or the first of them, in the Explorer.
 
 The word after the language — `orders-api` above — names the output file. It is
 what ties a block to its SVG across edits, which a position could not: inserting
