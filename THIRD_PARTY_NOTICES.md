@@ -14,7 +14,7 @@ in [`third-party/`](third-party).
 | [Graphviz](https://graphviz.org/) | (in Viz.js WebAssembly) | EPL-1.0 | [graphviz-LICENSE.txt](third-party/graphviz-LICENSE.txt) |
 | [Expat](https://libexpat.github.io/) | (in Viz.js WebAssembly) | MIT | [expat-LICENSE.txt](third-party/expat-LICENSE.txt) |
 | [happy-dom](https://github.com/capricorn86/happy-dom) | 20.14.5 | MIT | [happy-dom-LICENSE.txt](third-party/happy-dom-LICENSE.txt) |
-| [entities](https://github.com/fb55/entities) | 7.0.1 | BSD-2-Clause | [entities-LICENSE.txt](third-party/entities-LICENSE.txt) |
+| [entities](https://github.com/fb55/entities) | 4.5.0, 7.0.1 | BSD-2-Clause | [entities-LICENSE.txt](third-party/entities-LICENSE.txt) |
 | [whatwg-mimetype](https://github.com/jsdom/whatwg-mimetype) | 3.0.0 | MIT | [whatwg-mimetype-LICENSE.txt](third-party/whatwg-mimetype-LICENSE.txt) |
 | [ws](https://github.com/websockets/ws) | 8.21.3 | MIT | [ws-LICENSE.txt](third-party/ws-LICENSE.txt) |
 | [buffer-image-size](https://github.com/netroy/buffer-image-size) | 0.6.4 | MIT | [buffer-image-size-LICENSE.txt](third-party/buffer-image-size-LICENSE.txt) |
@@ -103,4 +103,6 @@ document the way VS Code's preview does. markdown-it's own dependencies are
 bundled with it: linkify-it (Copyright (c) 2015 Vitaly Puzrin), mdurl
 (Copyright (c) 2015 Vitaly Puzrin, Alex Kocharin; its `parse()` is based on
 Node.js's `url` code, Copyright Joyent, Inc. and other Node contributors),
-punycode.js and uc.micro (Copyright Mathias Bynens), all under the MIT License.
+punycode.js and uc.micro (Copyright Mathias Bynens), all under the MIT License,
+and entities 4.5.0 (Copyright (c) Felix Böhm, BSD-2-Clause), an older version
+of the entities package that happy-dom brings, with the same licence text.

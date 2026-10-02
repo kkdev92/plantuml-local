@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-10-03
+
 ### Added
 
 - **`.puml` files open as PlantUML.** Files ending in `.puml`, `.plantuml`,
@@ -124,9 +126,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   report a block whose name cannot be a file name as failed, instead of
   counting it with the unnamed blocks.
 - `markdown-it` 14.3.2 ships with the extension, with its dependencies
-  linkify-it, mdurl, punycode.js and uc.micro. The export commands use it to
-  find the diagram blocks of a document the way VS Code's preview does. Their
-  licences are listed in `THIRD_PARTY_NOTICES.md`.
+  linkify-it, mdurl, punycode.js, uc.micro and entities 4.5.0 (beside the
+  entities 7.0.1 that happy-dom already brought). The export commands use it
+  to find the diagram blocks of a document the way VS Code's preview does.
+  Their licences are listed in `THIRD_PARTY_NOTICES.md`.
 - `@plantuml/core` is pinned to 1.2026.8, the engine already shipped, rather
   than `^1.2026.8`, so an install cannot pick up an engine the tests did not
   run against.
@@ -621,7 +624,8 @@ First public release.
 - happy-dom's bundled self-signed TLS certificate (unused fetch machinery) is
   stripped from the worker bundle at build time.
 
-[Unreleased]: https://github.com/kkdev92/plantuml-local/compare/v0.11.1...HEAD
+[Unreleased]: https://github.com/kkdev92/plantuml-local/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/kkdev92/plantuml-local/compare/v0.11.1...v0.12.0
 [0.11.1]: https://github.com/kkdev92/plantuml-local/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/kkdev92/plantuml-local/compare/v0.10.1...v0.11.0
 [0.10.1]: https://github.com/kkdev92/plantuml-local/compare/v0.10.0...v0.10.1
