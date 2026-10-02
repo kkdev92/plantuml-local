@@ -160,6 +160,11 @@
         "category": "PlantUML Local"
       },
       {
+        "command": "plantumlLocal.assignDiagramName",
+        "title": "%command.assignDiagramName.title%",
+        "category": "PlantUML Local"
+      },
+      {
         "command": "plantumlLocal.openPreview",
         "title": "%command.openPreview.title%",
         "category": "PlantUML Local"
@@ -217,6 +222,10 @@
         {
           "command": "plantumlLocal.openPreviewToSide",
           "when": "editorLangId == plantuml && !notebookEditorFocused"
+        },
+        {
+          "command": "plantumlLocal.assignDiagramName",
+          "when": "false"
         }
       ]
     },

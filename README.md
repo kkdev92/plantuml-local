@@ -327,6 +327,13 @@ has none — or when its name could not be a file name, since names are limited
 to 128 letters, digits, hyphens and underscores. The bulk commands report such
 a block as failed.
 
+With the cursor on the opening line of a block that has no usable name, the
+light bulb offers *Name this diagram for export…*: it asks for a name and
+writes it on that line, as one edit that Undo takes back. In a `.puml` file it
+does the same on a `@startuml` line, as `(id=…)`; other diagram types get no
+id, since PlantUML documents that form for `@startuml` only. Nothing is written
+if the document changed in the meantime.
+
 All but the reference update also work in a `.puml` file, which writes each
 of its diagrams to a file of its own. A diagram is named by an id on its start
 line, `@startuml(id=orders-api)`; a file holding a single diagram may leave it
