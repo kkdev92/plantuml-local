@@ -59,6 +59,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   namespaces, states and use cases), by alias with the name the diagram
   shows beside it, under the `{ … }` body that declares them. A name that
   only appears in a relation, or that a procedure creates, is left out.
+- **Draw diagrams again on save, or on request.**
+  `plantumlLocal.preview.updateMode` set to `onSave` draws a changed diagram
+  again when its file is saved, and `manual` only with *Clear Render Cache
+  and Re-render*, instead of as you type. Until then the Markdown preview and
+  the `.puml` preview keep the diagram they show, with a note that it is not
+  updated.
 - **Problems panel.** The diagrams of open Markdown files are checked, with or
   without a preview, and their problems are listed on the line they are on:
   the engine's errors and warnings, what the bundled engine cannot do

@@ -70,5 +70,7 @@
   "The PNG would be {0}×{1} pixels, larger than a PNG is made (8192 a side, 16 million in all), even at a scale of 1. Export it as SVG instead.": "PNG は {0}×{1} ピクセルになり、倍率 1 でも書き出せる大きさ (1 辺 8192、全体で 1600 万ピクセル) を超えます。SVG で書き出してください。",
   "The PNG would be {0}×{1} pixels, larger than a PNG is made (8192 a side, 16 million in all). It fits at plantumlLocal.exportPngScale {2}.": "PNG は {0}×{1} ピクセルになり、書き出せる大きさ (1 辺 8192、全体で 1600 万ピクセル) を超えます。plantumlLocal.exportPngScale を {2} にすれば書き出せます。",
   "The PNG could not be made as asked.": "PNG を求めたとおりに作れませんでした。",
-  "File name for the exported PNG (without .png)": "書き出す PNG のファイル名 (.png は不要)"
+  "File name for the exported PNG (without .png)": "書き出す PNG のファイル名 (.png は不要)",
+  "Not updated: the diagram is drawn again when the file is saved.": "未更新です。ファイルを保存すると描き直します。",
+  "Not updated: run \"PlantUML Local: Clear Render Cache and Re-render\" to draw it again.": "未更新です。「PlantUML Local: 描画キャッシュを捨てて描き直す」で描き直します。"
 }

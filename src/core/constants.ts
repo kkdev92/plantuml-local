@@ -46,6 +46,7 @@ export const CONFIG = {
   EXPORT_THEME: 'exportTheme',
   EXPORT_PNG_SCALE: 'exportPngScale',
   HIDE_EXPORTED_IMAGES: 'hideExportedImages',
+  PREVIEW_UPDATE_MODE: 'preview.updateMode',
   DIAGNOSTICS_ENABLED: 'diagnostics.enabled',
 } as const;
 
@@ -98,6 +99,13 @@ export const DIAGRAM_BACKDROP = { light: '#FFFFFF', dark: '#1b1b1b' } as const;
  * without batching it would refresh the preview five times.
  */
 export const REFRESH_DEBOUNCE_MS = 80;
+
+/**
+ * How long after a save to refresh the Markdown preview. A save also marks
+ * the document changed, and VS Code's preview waits 300 ms before the
+ * update that schedules, dropping a refresh asked for in the meantime.
+ */
+export const SAVE_REFRESH_DELAY_MS = 400;
 
 /**
  * How long a document must stay unchanged before its diagrams are checked

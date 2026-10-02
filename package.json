@@ -266,6 +266,17 @@
           "default": true,
           "description": "%config.hideExportedImages.description%"
         },
+        "plantumlLocal.preview.updateMode": {
+          "type": "string",
+          "enum": [
+            "onChange",
+            "onSave",
+            "manual"
+          ],
+          "default": "onChange",
+          "scope": "resource",
+          "description": "%config.preview.updateMode.description%"
+        },
         "plantumlLocal.diagnostics.enabled": {
           "type": "boolean",
           "default": true,

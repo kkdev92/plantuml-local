@@ -103,6 +103,8 @@ export class DiagramViewer {
   private target: { name: string | null; index: number } = { name: null, index: 0 };
   /** Counts draws, so an older render finishing late is dropped. */
   private generation = 0;
+  /** Says the diagram is not drawn again since the file changed, or ''. */
+  private note = '';
 
   constructor(
     private readonly panel: ViewerPanel,
@@ -151,9 +153,20 @@ export class DiagramViewer {
     }
   }
 
+  /**
+   * Keeps the diagram shown, saying with `note` that the file has changed
+   * since it was drawn, for a file drawn again only on save or on request.
+   * A render still in progress keeps the note once it lands.
+   */
+  async stale(note: string): Promise<void> {
+    this.note = note;
+    await this.status(note, false, false);
+  }
+
   /** Lists the diagrams of `text` and draws the one shown, again. */
   async update(text: string): Promise<void> {
     const generation = ++this.generation;
+    this.note = '';
     const diagrams = findFileDiagrams(text, this.fileName);
     const { labels } = this.deps;
     const index =
@@ -209,7 +222,7 @@ export class DiagramViewer {
       // from 0 and the engine's line from 1.
       const failure = recognizeEngineError(svg);
       if (failure === null) {
-        await this.status('', false, false);
+        await this.status(this.note, false, false);
       } else {
         const line = failure.line === null ? null : diagram.sourceLine + failure.line;
         await this.status(labels.engineError(failure.message, line), true, false);

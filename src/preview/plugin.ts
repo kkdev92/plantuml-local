@@ -28,6 +28,10 @@ import type { RenderLog } from '../core/types';
  *    diagram appears. Cache hits never request a refresh, so the cycle
  *    always terminates.
  *
+ * With the update mode `onSave` or `manual`, a block that already shows a
+ * diagram starts no render at step 2 until its document is saved or
+ * everything is drawn again; the diagram stays, marked as not updated.
+ *
  * This module deliberately has no dependency on the `vscode` module —
  * everything host-specific arrives through {@link PluginDeps} — so the
  * whole cycle is unit-testable.
@@ -51,7 +55,15 @@ export interface PluginLabels {
   pages: string;
   /** Note above a diagram drawn with `end`, the end line its block lacks. */
   missingEnd(end: string): string;
+  /** Note above a diagram not drawn again since its block changed. */
+  notUpdated(mode: Exclude<UpdateMode, 'onChange'>): string;
 }
+
+/**
+ * When a changed block is drawn again: as it changes, once the document is
+ * saved, or only when everything is drawn again on request.
+ */
+export type UpdateMode = 'onChange' | 'onSave' | 'manual';
 
 export interface PluginDeps {
   /** Whether diagrams should currently render in dark colours. */
@@ -69,6 +81,8 @@ export interface PluginDeps {
   escapeHtml(text: string): string;
   /** Whether images marked {@link EXPORT_FRAGMENT} are hidden in the preview. */
   hideExportedImages(): boolean;
+  /** When the changed blocks of `document`, a URI, are drawn again. */
+  updateMode(document: string): UpdateMode;
   log: RenderLog;
   labels: PluginLabels;
 }
@@ -78,6 +92,12 @@ export interface PlantUmlPlugin {
   extendMarkdownIt(md: MarkdownIt): MarkdownIt;
   /** Drops all cached renders (theme switches, user command). */
   clearCache(): void;
+  /**
+   * Takes the blocks of `document` as they are now, `sources`, for the ones
+   * to draw, as when it is saved with `onSave`. The caller refreshes the
+   * preview.
+   */
+  accept(document: string, sources: readonly string[]): void;
 }
 
 interface BoundedStore {
@@ -148,6 +168,8 @@ export function createPlantUmlPlugin(deps: PluginDeps): PlantUmlPlugin {
    * author types.
    */
   const shown = createBoundedStore(MAX_CACHE_ENTRIES, MAX_CACHE_BYTES);
+  /** Document → the sources of its blocks when last accepted, as on a save. */
+  const accepted = new Map<string, ReadonlySet<string>>();
 
   function cacheKey(source: string, dark: boolean): string {
     return `${dark ? 'dark' : 'light'}\n${source}`;
@@ -158,18 +180,21 @@ export function createPlantUmlPlugin(deps: PluginDeps): PlantUmlPlugin {
   }
 
   /**
-   * Where a block sits: the document VS Code is previewing and how many
-   * ```plantuml blocks come before it. Undefined when the document is not
-   * known (markdown-it rendering a plain string), so a diagram is never
-   * carried over to another document.
+   * The document VS Code is previewing, as a URI, or undefined when it is
+   * not known (markdown-it rendering a plain string).
    */
-  function positionKey(tokens: { type: string; info: string }[], index: number, env: unknown): string | undefined {
+  function documentOf(env: unknown): string | undefined {
     // A vscode.Uri, whose toString() is the URI.
     const document = (env as { currentDocument?: { toString(): string } | null } | undefined)
       ?.currentDocument;
-    if (document === undefined || document === null) {
-      return undefined;
-    }
+    return document === undefined || document === null ? undefined : document.toString();
+  }
+
+  /**
+   * Where a block sits: its document and how many ```plantuml blocks come
+   * before it, so a diagram is never carried over to another document.
+   */
+  function positionKey(tokens: { type: string; info: string }[], index: number, document: string): string {
     let ordinal = 0;
     for (let i = 0; i < index; i++) {
       const token = tokens[i];
@@ -177,7 +202,7 @@ export function createPlantUmlPlugin(deps: PluginDeps): PlantUmlPlugin {
         ordinal++;
       }
     }
-    return `${document.toString()}\n${String(ordinal)}`;
+    return `${document}\n${String(ordinal)}`;
   }
 
   function startRender(source: string, dark: boolean, key: string): void {
@@ -233,6 +258,10 @@ export function createPlantUmlPlugin(deps: PluginDeps): PlantUmlPlugin {
       failed.clear();
       shown.clear();
       deps.requestRefresh();
+    },
+
+    accept(document: string, sources: readonly string[]): void {
+      accepted.set(document, new Set(sources));
     },
 
     extendMarkdownIt(md: MarkdownIt): MarkdownIt {
@@ -297,7 +326,8 @@ export function createPlantUmlPlugin(deps: PluginDeps): PlantUmlPlugin {
         const dark = deps.isDark();
         const key = cacheKey(shape.source, dark);
 
-        const position = positionKey(tokens, index, env);
+        const document = documentOf(env);
+        const position = document === undefined ? undefined : positionKey(tokens, index, document);
 
         const html = rendered.get(key);
         if (html !== undefined) {
@@ -312,8 +342,20 @@ export function createPlantUmlPlugin(deps: PluginDeps): PlantUmlPlugin {
           return errorBlock(message, source);
         }
 
-        startRender(shape.source, dark, key);
         const previous = position !== undefined ? shown.get(position) : undefined;
+        const mode = document === undefined ? 'onChange' : deps.updateMode(document);
+        if (
+          previous !== undefined &&
+          document !== undefined &&
+          mode !== 'onChange' &&
+          accepted.get(document)?.has(source) !== true
+        ) {
+          return (
+            notice + `<div class="plantuml-notice">${deps.escapeHtml(deps.labels.notUpdated(mode))}</div>` + previous
+          );
+        }
+
+        startRender(shape.source, dark, key);
         return (
           notice +
           (previous ??

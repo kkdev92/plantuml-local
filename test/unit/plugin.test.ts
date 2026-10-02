@@ -1,7 +1,7 @@
 import type MarkdownIt from 'markdown-it';
 import { describe, expect, it, vi } from 'vitest';
 
-import { createPlantUmlPlugin, type PluginDeps } from '../../src/preview/plugin';
+import { createPlantUmlPlugin, type PluginDeps, type UpdateMode } from '../../src/preview/plugin';
 
 /**
  * The plugin is exercised through a minimal stand-in for markdown-it:
@@ -18,10 +18,11 @@ const LABELS = {
   severalDiagrams: 'one diagram per block',
   pages: 'no pages',
   missingEnd: (end: string): string => `no ${end}`,
+  notUpdated: (mode: string): string => `not updated (${mode})`,
 };
 
 interface Harness {
-  deps: PluginDeps & { render: ReturnType<typeof vi.fn> };
+  deps: PluginDeps & { render: ReturnType<typeof vi.fn>; updateMode: ReturnType<typeof vi.fn> };
   plugin: ReturnType<typeof createPlantUmlPlugin>;
   /**
    * Renders one fence. `env` is what VS Code passes (`currentDocument` in a
@@ -40,6 +41,7 @@ function makeHarness(options?: {
   hideExportedImages?: boolean;
   render?: (source: string, dark: boolean) => Promise<string>;
   resolvePalette?: (source: string, dark: boolean) => Promise<boolean>;
+  updateMode?: UpdateMode;
 }): Harness {
   let refreshCount = 0;
   let pending: Promise<unknown> = Promise.resolve();
@@ -65,6 +67,7 @@ function makeHarness(options?: {
       refreshCount += 1;
     },
     escapeHtml: (text) => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'),
+    updateMode: vi.fn((): UpdateMode => options?.updateMode ?? 'onChange'),
     log: { debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
     labels: LABELS,
   };
@@ -398,6 +401,54 @@ describe('createPlantUmlPlugin', () => {
       h.fence('plantuml', SOURCE);
 
       expect(h.fence('plantuml', EDITED)).toContain('plantuml-loading');
+    });
+  });
+
+  describe('drawn again on a save or on request', () => {
+    const DOC = { currentDocument: 'file:///docs/a.md' };
+    const EDITED = '@startuml\nAlice -> Bob : Hello!\n@enduml';
+
+    it('with onSave, keeps what an edited block showed, marked as not updated, until the document is saved', async () => {
+      const h = makeHarness({ updateMode: 'onSave' });
+      h.fence('plantuml', SOURCE, DOC);
+      await h.settle();
+      h.fence('plantuml', SOURCE, DOC);
+
+      const edited = h.fence('plantuml', EDITED, DOC);
+      expect(edited).toContain('not updated (onSave)');
+      expect(edited).toContain(`<svg>${SOURCE}</svg>`);
+      expect(h.deps.render).toHaveBeenCalledTimes(1);
+      expect(h.deps.updateMode).toHaveBeenCalledWith('file:///docs/a.md');
+      // Changed back to what it showed: up to date again.
+      expect(h.fence('plantuml', SOURCE, DOC)).not.toContain('not updated');
+
+      h.plugin.accept('file:///docs/a.md', [EDITED]);
+      const saved = h.fence('plantuml', EDITED, DOC);
+      expect(saved).not.toContain('not updated');
+      expect(saved).toContain(`<svg>${SOURCE}</svg>`);
+      await h.settle();
+      expect(h.fence('plantuml', EDITED, DOC)).toContain(`<svg>${EDITED}</svg>`);
+    });
+
+    it('with manual, draws an edited block again only once everything is', async () => {
+      const h = makeHarness({ updateMode: 'manual' });
+      h.fence('plantuml', SOURCE, DOC);
+      await h.settle();
+      h.fence('plantuml', SOURCE, DOC);
+
+      expect(h.fence('plantuml', EDITED, DOC)).toContain('not updated (manual)');
+      h.plugin.clearCache();
+      expect(h.fence('plantuml', EDITED, DOC)).toContain('plantuml-loading');
+      await h.settle();
+      expect(h.fence('plantuml', EDITED, DOC)).toContain(`<svg>${EDITED}</svg>`);
+    });
+
+    it('draws a block shown for the first time, and one of an unknown document, whatever the mode', async () => {
+      const h = makeHarness({ updateMode: 'manual' });
+      expect(h.fence('plantuml', SOURCE, DOC)).toContain('plantuml-loading');
+      expect(h.fence('plantuml', EDITED)).toContain('plantuml-loading');
+      await h.settle();
+      expect(h.deps.render).toHaveBeenCalledTimes(2);
     });
   });
 
