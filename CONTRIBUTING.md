@@ -110,6 +110,30 @@ at the tag of the bundled `@plantuml/core`.
   node scripts/extract-grammar-checklist.mjs --source ../plantuml
   ```
 
+### Remote Windows
+
+In a WSL, Dev Container or SSH window, VS Code runs the extension on the remote
+machine, and the Markdown preview, the `.puml` preview and the PNG panel on the
+local one. CI does not run in a remote window. To check a change to rendering,
+the previews or exporting there, in WSL and in a Dev Container:
+
+1. Build the VSIX with `npm run package`.
+2. Open a folder holding a Markdown file with a ```` ```plantuml ```` block and
+   a `.puml` file: in WSL with **WSL: Connect to WSL** and **File > Open
+   Folder...**, and in a container with **Dev Containers: Open Folder in
+   Container...**, from the **Debian** template and, in another folder, the
+   **Alpine** one (musl rather than glibc).
+3. Run **Extensions: Install from VSIX...** in that window and pick the VSIX.
+4. Open the Markdown file's preview: the block is drawn, and **Developer: Show
+   Running Extensions** lists PlantUML Local with the remote's name beside it.
+5. Check that **PlantUML Local: Open Diagram Preview to the Side** draws the
+   `.puml` file, and that **PlantUML Local: Export Diagram as SVG** and
+   **PlantUML Local: Export Diagram as PNG** write their files into the
+   folder's `images` directory.
+
+The VSIX stays installed in that WSL distribution or container until it is
+uninstalled there.
+
 ### Commit Messages
 
 Use [Conventional Commits](https://www.conventionalcommits.org/): `feat:`, `fix:`, `docs:`, `test:`, `chore:`, `refactor:`.
