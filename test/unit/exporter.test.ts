@@ -5,12 +5,14 @@ import { describe, expect, it, vi } from 'vitest';
 import { findFileDiagrams, findPlantUmlBlocks } from '../../src/export/blocks';
 import {
   addBackground,
+  drawDocument,
   exportAll,
   exportOne,
   isPngOfSize,
   isValidExportDirectory,
   PNG_LIMITS,
   svgSize,
+  writeDocuments,
   type ExporterDeps,
 } from '../../src/export/exporter';
 
@@ -67,6 +69,7 @@ function makeDeps(
     pngTooLargeMessage: (width: number, height: number, fits: number | null): string =>
       `too large: ${String(width)}×${String(height)}, fits ${String(fits)}`,
     pngFailedMessage: 'no PNG',
+    sameFileMessage: 'same file',
     ...overrides,
   };
   return deps as ExporterDeps & {
@@ -481,6 +484,42 @@ describe('exportOne as a PNG', () => {
   });
 });
 
+describe('writeDocuments', () => {
+  const blocks = (text: string): ReturnType<typeof findPlantUmlBlocks> => findPlantUmlBlocks(text);
+
+  it('writes what several documents drew, asking once before replacing their files', async () => {
+    const deps = makeDeps(
+      { confirmReplace: vi.fn(() => Promise.resolve('replace' as const)) },
+      { '/repo/a/images/one.svg': 'old one', '/repo/b/images/two.svg': 'old two' }
+    );
+    const drawn = [
+      await drawDocument(deps, '/repo/a/doc.md', 'images', blocks('```plantuml one\na\n```\n\n```plantuml\nx\n```')),
+      await drawDocument(deps, '/repo/b/doc.md', 'images', blocks('```plantuml two\nb\n```')),
+    ];
+
+    const outcome = await writeDocuments(deps, drawn);
+
+    expect(deps.confirmReplace).toHaveBeenCalledOnce();
+    expect(deps.confirmReplace).toHaveBeenCalledWith(['/repo/a/images/one.svg', '/repo/b/images/two.svg'], true);
+    expect(outcome?.written.map((r) => r.path)).toEqual(['/repo/a/images/one.svg', '/repo/b/images/two.svg']);
+    expect(outcome?.unnamed).toBe(1);
+  });
+
+  it('fails a diagram headed for the file another one is written to, whatever the case', async () => {
+    const deps = makeDeps();
+    const drawn = [
+      await drawDocument(deps, '/repo/docs/a.md', 'images', blocks('```plantuml orders\na\n```')),
+      await drawDocument(deps, '/repo/docs/b.md', 'images', blocks('```plantuml Orders\nb\n```')),
+    ];
+
+    const outcome = await writeDocuments(deps, drawn);
+
+    expect(outcome?.written.map((r) => r.path)).toEqual(['/repo/docs/images/orders.svg']);
+    expect(outcome?.failed).toEqual([{ name: 'Orders', path: null, error: 'same file' }]);
+    expect(deps.writeFile).toHaveBeenCalledOnce();
+  });
+});
+
 describe('exportAll', () => {
   const document = [
     '```plantuml one',
@@ -622,6 +661,19 @@ describe('exportAll', () => {
     expect(deps.confirmReplace).not.toHaveBeenCalled();
     expect(outcome?.written.map((r) => r.name)).toEqual(['one', 'two']);
     expect(deps.writeFile).toHaveBeenCalledOnce();
+  });
+
+  it('fails a second block of the same name instead of writing over the first', async () => {
+    const deps = makeDeps();
+    const outcome = await exportMarkdown(deps, DOC, 'images', '```plantuml one\na\n```\n\n```plantuml one\nb\n```');
+
+    expect(outcome?.written.map((r) => r.name)).toEqual(['one']);
+    expect(outcome?.failed.map((r) => [r.name, r.error])).toEqual([['one', 'same file']]);
+    expect(deps.writeFile).toHaveBeenCalledWith(
+      '/repo/docs/images/one.svg',
+      expect.stringContaining('a</svg>'),
+      false
+    );
   });
 
   it('returns an empty outcome for a document with no diagrams', async () => {

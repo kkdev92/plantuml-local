@@ -311,8 +311,9 @@ reference whose target is `images/orders-api.svg#plantuml-local`.
 | `PlantUML Local: Export All Diagrams as SVG` | Writes every **named** block in the file |
 | `PlantUML Local: Export All Diagrams and Update References` | The above, then inserts or updates the image line after each block |
 | `PlantUML Local: Export Diagram as PNG` | Writes the block under the cursor, or the only block in the file, as a PNG (below) |
+| `PlantUML Local: Export All Diagrams in Folder as SVG` | Writes every **named** block of the Markdown and PlantUML files in a folder (below) |
 
-All four are also in the editor's right-click menu: the single exports appear
+The first four are also in the editor's right-click menu: the single exports appear
 with the cursor inside a block, the other two whenever the file contains a
 diagram — so the menu of an ordinary Markdown file stays untouched. Run from
 the command palette while the preview has focus, they use the only open
@@ -386,6 +387,18 @@ than shrunk, and the message names the largest scale it would fit at. Its text
 is drawn with the fonts of the machine that exports it, where an SVG's is drawn
 with those of whoever views it. The PNG export covers one diagram at a time and
 inserts no reference.
+
+*Export All Diagrams in Folder as SVG*, also on a folder's right-click menu in
+the Explorer, does what *Export All Diagrams as SVG* does for every Markdown and
+PlantUML file under a folder, each into its own export directory, with the
+unsaved edits of open files. It skips `.git`, `.hg`, `.svn`, `node_modules`,
+`dist` and `build` folders, follows no symbolic link or junction, and leaves out
+a PlantUML file without a start line, which only other files include. It asks
+before drawing, naming the documents, and then once for all the files it would
+replace. A diagram headed for the same file as another — two documents beside
+each other naming a block alike — is reported instead of written over it. A
+folder of more than 500 documents or 2,000 named diagrams is refused rather than
+exported in part, and cancelling while it draws writes nothing.
 
 `plantumlLocal.exportDirectory` (default `images`) decides where files go,
 relative to the Markdown file rather than to the workspace root, so moving a

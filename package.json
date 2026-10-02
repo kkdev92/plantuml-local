@@ -155,6 +155,11 @@
         "category": "PlantUML Local"
       },
       {
+        "command": "plantumlLocal.exportFolderSvg",
+        "title": "%command.exportFolderSvg.title%",
+        "category": "PlantUML Local"
+      },
+      {
         "command": "plantumlLocal.openPreview",
         "title": "%command.openPreview.title%",
         "category": "PlantUML Local"
@@ -187,6 +192,13 @@
           "command": "plantumlLocal.exportAllAndUpdateRefs",
           "when": "editorLangId == markdown && plantumlLocal.hasDiagrams",
           "group": "2_plantuml@4"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "plantumlLocal.exportFolderSvg",
+          "when": "explorerResourceIsFolder",
+          "group": "7_plantuml@1"
         }
       ],
       "editor/title": [

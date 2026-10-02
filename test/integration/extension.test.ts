@@ -719,6 +719,7 @@ describe('export (dist)', () => {
     try {
       await vscodeStub._test.registeredCommands.get('plantumlLocal.exportSvg')?.();
       await vscodeStub._test.registeredCommands.get('plantumlLocal.exportPng')?.();
+      await vscodeStub._test.registeredCommands.get('plantumlLocal.exportFolderSvg')?.(vscodeStub.Uri.parse('file:///c/docs'));
     } finally {
       vscodeStub.workspace.isTrusted = true;
     }
@@ -1138,6 +1139,64 @@ describe('export (dist)', () => {
         [...vscodeStub._test.writtenFiles.keys()].filter((key) => key.startsWith('file:///c/failing/'))
       ).toEqual([]);
       expect(vscodeStub._test.notifications.error.at(-1)).toMatch(/^Could not export the diagram: /);
+    });
+  });
+
+  describe('a folder', () => {
+    const exportFolder = async (folder?: string): Promise<void> => {
+      await vscodeStub._test.registeredCommands.get('plantumlLocal.exportFolderSvg')?.(
+        folder === undefined ? undefined : vscodeStub.Uri.parse(folder)
+      );
+    };
+    const block = (name: string, label: string): string =>
+      ['```plantuml ' + name, '@startuml', `A -> B : ${label}`, '@enduml', '```'].join('\n');
+
+    it('exports the named diagrams of its documents once that is confirmed, beside each document', async () => {
+      vscodeStub._test.writtenFiles.set('file:///c/tree/a.md', block('one', 'first'));
+      vscodeStub._test.writtenFiles.set('file:///c/tree/sub/b.puml', '@startuml(id=two)\nC -> D : second\n@enduml');
+      vscodeStub._test.writtenFiles.set('file:///c/tree/lib.iuml', '!procedure $box()\n!endprocedure');
+      vscodeStub._test.writtenFiles.set('file:///c/tree/node_modules/pkg/c.md', block('three', 'third'));
+      const modals = vscodeStub._test.modals.length;
+
+      vscodeStub._test.messageReply = 'Export';
+      try {
+        await exportFolder('file:///c/tree');
+      } finally {
+        vscodeStub._test.messageReply = null;
+      }
+
+      expect(vscodeStub._test.modals.slice(modals)).toEqual([
+        {
+          message: 'Export 2 named diagram(s) from 2 document(s) in tree?',
+          detail: 'tree/a.md\ntree/sub/b.puml',
+          buttons: ['Export'],
+        },
+      ]);
+      expect(vscodeStub._test.writtenFiles.get('file:///c/tree/images/one.svg')).toContain('first');
+      expect(vscodeStub._test.writtenFiles.get('file:///c/tree/sub/images/two.svg')).toContain('second');
+      expect([...vscodeStub._test.writtenFiles.keys()].filter((key) => key.includes('three'))).toEqual([]);
+      expect(vscodeStub._test.notifications.info.at(-1)).toBe('Exported 2 diagram(s)');
+    });
+
+    it('writes nothing when the export is not confirmed, or no folder is picked', async () => {
+      vscodeStub._test.writtenFiles.set('file:///c/declined/a.md', block('one', 'first'));
+      const modals = vscodeStub._test.modals.length;
+
+      // Dismissed, as the stub answers by default.
+      await exportFolder('file:///c/declined');
+      // No folder passed, and none picked.
+      await exportFolder();
+
+      expect(vscodeStub._test.modals.slice(modals).map((modal) => modal.message)).toEqual([
+        'Export 1 named diagram(s) from 1 document(s) in declined?',
+      ]);
+      expect(vscodeStub._test.writtenFiles.has('file:///c/declined/images/one.svg')).toBe(false);
+    });
+
+    it('refuses a folder outside the workspace', async () => {
+      await exportFolder('file:///elsewhere/docs');
+
+      expect(vscodeStub._test.notifications.warn.at(-1)).toBe('Choose a folder in the workspace.');
     });
   });
 

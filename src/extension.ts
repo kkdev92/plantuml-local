@@ -45,13 +45,18 @@ import {
 } from './export/blocks';
 import {
   PNG_SCALES,
+  drawDocument,
   exportAll,
   exportOne,
   isValidExportDirectory,
+  writeDocuments,
+  type DrawnDocument,
   type ExportFormat,
   type ExporterDeps,
   type ExportOutcome,
 } from './export/exporter';
+import { MAX_DOCUMENTS, findDocuments } from './export/folder';
+import { START, forEachCodeLine } from './core/shape';
 import { lineAfterEdits, planReferenceEdits, type ReferenceEdit } from './export/references';
 import {
   lineContext,
@@ -138,6 +143,14 @@ export const ExportPng = defineCommandContract<readonly [], void>({
 /** Writes every named diagram in the active document to SVG files. */
 export const ExportAllSvg = defineCommandContract<readonly [], void>({
   id: COMMANDS.EXPORT_ALL_SVG,
+});
+
+/**
+ * Writes every named diagram of the Markdown and PlantUML files in a folder
+ * to SVG files: the folder the Explorer passes, or one picked.
+ */
+export const ExportFolderSvg = defineCommandContract<readonly unknown[], void>({
+  id: COMMANDS.EXPORT_FOLDER_SVG,
 });
 
 /**
@@ -617,6 +630,7 @@ function exporterDeps(
             String(fits)
           ),
     pngFailedMessage: context.l10n.t('The PNG could not be made as asked.'),
+    sameFileMessage: context.l10n.t('Another diagram is exported to the same file.'),
     pngScale: (): number => {
       const scale = settings.read({ resource: document }).values[CONFIG.EXPORT_PNG_SCALE];
       return PNG_SCALES.includes(scale as 1 | 2 | 4) ? Number(scale) : 2;
@@ -782,6 +796,85 @@ async function reportOutcome(
   } else {
     await context.notify.info(summary);
   }
+}
+
+/** The most named diagrams exported from one folder. */
+const MAX_FOLDER_DIAGRAMS = 2000;
+
+/** A document of a folder export, and its diagrams. */
+interface FolderSource {
+  uri: vscode.Uri;
+  blocks: PlantUmlBlock[];
+}
+
+/**
+ * The folder to export: the one the Explorer passes, or one picked. Null
+ * after saying why there is none.
+ */
+async function folderToExport(context: OperationContext, target: unknown): Promise<vscode.Uri | null> {
+  // Anyone can run the command with anything, so only a URI is taken; one
+  // that is not in the workspace is refused below.
+  const passed =
+    typeof target === 'object' && target !== null && typeof (target as { scheme?: unknown }).scheme === 'string'
+      ? vscode.Uri.parse((target as vscode.Uri).toString())
+      : undefined;
+  const folder =
+    passed ??
+    (
+      await vscode.window.showOpenDialog({
+        canSelectFiles: false,
+        canSelectFolders: true,
+        canSelectMany: false,
+        defaultUri: vscode.workspace.workspaceFolders?.[0]?.uri,
+        openLabel: context.l10n.t('Export Diagrams'),
+      })
+    )?.[0];
+  if (folder === undefined) {
+    return null;
+  }
+  if (vscode.workspace.getWorkspaceFolder(folder) === undefined) {
+    void context.notify.warn(context.l10n.t('Choose a folder in the workspace.'));
+    return null;
+  }
+  return folder;
+}
+
+/**
+ * The documents under `folder` that hold diagrams, with their unsaved
+ * edits; null when there are too many, undefined once cancelled.
+ */
+async function folderSources(folder: vscode.Uri, signal: AbortSignal): Promise<FolderSource[] | null | undefined> {
+  const documents = await findDocuments(
+    {
+      readDirectory: async (path) => vscode.workspace.fs.readDirectory(vscode.Uri.parse(path)),
+      join: (path, name) => vscode.Uri.joinPath(vscode.Uri.parse(path), name).toString(),
+    },
+    folder.toString(),
+    () => signal.aborted
+  );
+  if (documents === null) {
+    return null;
+  }
+  const sources: FolderSource[] = [];
+  for (const document of documents) {
+    if (signal.aborted) {
+      return undefined;
+    }
+    const uri = vscode.Uri.parse(document.path);
+    const open = vscode.workspace.textDocuments.find((candidate) => candidate.uri.toString() === uri.toString());
+    const text = open?.getText() ?? new TextDecoder().decode(await vscode.workspace.fs.readFile(uri));
+    // A PlantUML file without a start line is lines to include, not a diagram.
+    let diagram = false;
+    forEachCodeLine(text, (line) => {
+      diagram ||= START.test(line);
+    });
+    const name = withoutExtension(uri.path.slice(uri.path.lastIndexOf('/') + 1));
+    const blocks = !document.plantUml ? findPlantUmlBlocks(text) : diagram ? findFileDiagrams(text, name) : [];
+    if (blocks.length > 0) {
+      sources.push({ uri, blocks });
+    }
+  }
+  return signal.aborted ? undefined : sources;
 }
 
 /**
@@ -1291,6 +1384,127 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
       }
 
       await reportOutcome(context, reported, extra, applyFailed);
+    },
+  });
+
+  module.commands.handle(ExportFolderSvg, {
+    inject: { renderer: Renderer, palettes: Palettes, settings: Settings.token },
+    execute: async (
+      context: OperationContext,
+      args,
+      { renderer, palettes, settings }
+    ): Promise<void> => {
+      // It reads files and writes them, so like the other exports it does
+      // not run in an untrusted workspace.
+      if (!vscode.workspace.isTrusted) {
+        void context.notify.warn(
+          context.l10n.t('Exporting needs a trusted workspace. The preview works either way.')
+        );
+        return;
+      }
+      const folder = await folderToExport(context, args[0]);
+      if (folder === null) {
+        return;
+      }
+      const where = vscode.workspace.asRelativePath(folder);
+
+      const sources = await context.progress.run(
+        { title: context.l10n.t('Looking for diagrams…'), cancellable: true },
+        (_report, signal) => folderSources(folder, signal)
+      );
+      if (sources === undefined) {
+        return;
+      }
+      // Part of a folder is never exported as if it were the whole.
+      if (sources === null) {
+        void context.notify.warn(
+          context.l10n.t('{0} holds more than {1} documents. Export a folder inside it.', where, String(MAX_DOCUMENTS))
+        );
+        return;
+      }
+      const named = sources.reduce((sum, source) => sum + source.blocks.filter((block) => block.name !== null).length, 0);
+      if (named > MAX_FOLDER_DIAGRAMS) {
+        void context.notify.warn(
+          context.l10n.t(
+            '{0} holds more than {1} named diagrams. Export a folder inside it.',
+            where,
+            String(MAX_FOLDER_DIAGRAMS)
+          )
+        );
+        return;
+      }
+      if (named === 0) {
+        const unnamed = sources.reduce((sum, source) => sum + source.blocks.length, 0);
+        await reportOutcome(context, { written: [], failed: [], unnamed, kept: 0 }, [], false);
+        return;
+      }
+
+      const planned: (FolderSource & { directory: string })[] = [];
+      for (const source of sources) {
+        const directory = exportDirectory(context, settings, source.uri);
+        if (directory === null) {
+          return;
+        }
+        planned.push({ ...source, directory });
+      }
+
+      // Asked before anything is drawn, with the documents it would write from.
+      const documents = planned.map((source) => vscode.workspace.asRelativePath(source.uri));
+      const listed = documents.slice(0, 20);
+      if (documents.length > listed.length) {
+        listed.push(context.l10n.t('…and {0} more', String(documents.length - listed.length)));
+      }
+      const go: vscode.MessageItem = { title: context.l10n.t('Export') };
+      const answer = await vscode.window.showInformationMessage(
+        context.l10n.t(
+          'Export {0} named diagram(s) from {1} document(s) in {2}?',
+          String(named),
+          String(planned.length),
+          where
+        ),
+        { modal: true, detail: listed.join('\n') },
+        go
+      );
+      if (answer !== go) {
+        return;
+      }
+
+      const outcome = await context.progress.run(
+        { title: context.l10n.t('Exporting diagrams…'), cancellable: true },
+        async (report, signal) => {
+          const drawn: DrawnDocument[] = [];
+          for (const [index, source] of planned.entries()) {
+            if (signal.aborted) {
+              return undefined;
+            }
+            const document = vscode.workspace.asRelativePath(source.uri);
+            report.report({
+              message: `${document} (${String(index + 1)}/${String(planned.length)})`,
+              increment: 100 / planned.length,
+            });
+            const result = await drawDocument(
+              exporterDeps(context, renderer, palettes, settings, source.uri),
+              source.uri.toString(),
+              source.directory,
+              source.blocks
+            );
+            // Several documents are exported, so each failure names its own.
+            drawn.push({
+              ...result,
+              failed: result.failed.map((failure) => ({ ...failure, name: `${document}: ${failure.name}` })),
+            });
+          }
+          // Nothing is written once cancelled.
+          if (signal.aborted) {
+            return undefined;
+          }
+          return writeDocuments(exporterDeps(context, renderer, palettes, settings, folder), drawn);
+        }
+      );
+      if (outcome === undefined || outcome === null) {
+        return;
+      }
+      await reportOutcome(context, outcome, [], false);
     },
   });
 

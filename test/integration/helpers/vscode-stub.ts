@@ -311,6 +311,8 @@ export interface VscodeStub {
     showInformationMessage: (...args: unknown[]) => Promise<unknown>;
     showWarningMessage: (...args: unknown[]) => Promise<unknown>;
     showErrorMessage: (...args: unknown[]) => Promise<unknown>;
+    /** Picks nothing, as when the dialog is dismissed. */
+    showOpenDialog: (options: unknown) => Promise<UriStub[] | undefined>;
     onDidChangeActiveColorTheme: (listener: () => void) => { dispose(): void };
     onDidChangeActiveTextEditor: (
       listener: (editor: TextEditorStub | undefined) => void
@@ -359,6 +361,8 @@ export interface VscodeStub {
     /** One of `_test.openDocuments`, or a FileNotFound error. */
     openTextDocument: (uri: { toString(): string }) => Promise<TextEditorStub['document']>;
     asRelativePath: (uri: { toString(): string }) => string;
+    /** The workspace is taken to be /c, as `asRelativePath` takes it. */
+    getWorkspaceFolder: (uri: { toString(): string }) => { uri: UriStub; name: string; index: number } | undefined;
     /**
      * Backed by `_test.writtenFiles`. A path with files below it is a folder,
      * and anything else not in the map does not exist.
@@ -368,6 +372,7 @@ export interface VscodeStub {
       writeFile: (uri: UriStub, content: Uint8Array) => Promise<void>;
       stat: (uri: UriStub) => Promise<{ type: number; ctime: number; mtime: number; size: number }>;
       readFile: (uri: UriStub) => Promise<Uint8Array>;
+      readDirectory: (uri: UriStub) => Promise<[string, number][]>;
       rename: (source: UriStub, target: UriStub, options?: { overwrite?: boolean }) => Promise<void>;
       delete: (uri: UriStub) => Promise<void>;
       isWritableFileSystem: (scheme: string) => boolean | undefined;
@@ -812,6 +817,7 @@ export function createVscodeStub(): VscodeStub {
         notifications.error.push(String(args[0]));
         return answer(args);
       },
+      showOpenDialog: async () => undefined,
       onDidChangeActiveColorTheme: (listener) => {
         themeListeners.push(listener);
         return { dispose: () => undefined };
@@ -961,6 +967,8 @@ export function createVscodeStub(): VscodeStub {
       },
       // Enough of the real rule for labels: the workspace is taken to be /c.
       asRelativePath: (uri) => uri.toString().replace(/^file:\/\/\/c\//, ''),
+      getWorkspaceFolder: (uri) =>
+        uri.toString().startsWith('file:///c/') ? { uri: makeUri('file:///c'), name: 'c', index: 0 } : undefined,
       fs: {
         createDirectory: async () => undefined,
         writeFile: async (uri, content) => {
@@ -978,6 +986,17 @@ export function createVscodeStub(): VscodeStub {
             return { type: FileType.Directory, ctime: 0, mtime: 0, size: 0 };
           }
           throw new FileSystemError(`${key} not found`, 'FileNotFound');
+        },
+        readDirectory: async (uri) => {
+          const prefix = `${uri.toString()}/`;
+          const entries = new Map<string, number>();
+          for (const file of writtenFiles.keys()) {
+            if (file.startsWith(prefix)) {
+              const [name = '', ...below] = file.slice(prefix.length).split('/');
+              entries.set(name, below.length === 0 ? FileType.File : FileType.Directory);
+            }
+          }
+          return [...entries];
         },
         readFile: async (uri) => {
           const content = writtenFiles.get(uri.toString());

@@ -17,6 +17,7 @@ export const COMMANDS = {
   OPEN_PREVIEW: `${EXTENSION_ID}.openPreview`,
   OPEN_PREVIEW_TO_SIDE: `${EXTENSION_ID}.openPreviewToSide`,
   EXPORT_PNG: `${EXTENSION_ID}.exportPng`,
+  EXPORT_FOLDER_SVG: `${EXTENSION_ID}.exportFolderSvg`,
 } as const;
 
 /** The view type of the diagram viewer's panels. */

@@ -81,6 +81,8 @@ export interface ExporterDeps {
   pngTooLargeMessage(width: number, height: number, fits: number | null): string;
   /** Localised reason given for a PNG that could not be made as asked. */
   pngFailedMessage: string;
+  /** Localised reason given for a diagram headed for the file another one is written to. */
+  sameFileMessage: string;
 }
 
 /** The largest PNG made: pixels a side and in all, and bytes. */
@@ -116,7 +118,7 @@ export interface ExportOutcome {
 }
 
 /** A diagram rendered and ready to write: the SVG's text, or a PNG. */
-interface Drawing {
+export interface Drawing {
   name: string;
   path: string;
   content: string | Uint8Array;
@@ -397,24 +399,31 @@ export async function exportOne(
   return outcome.written[0] ?? outcome.failed[0] ?? null;
 }
 
+/** A document's named blocks drawn as SVG, for {@link writeDocuments}. */
+export interface DrawnDocument {
+  drawings: readonly Drawing[];
+  failed: readonly ExportResult[];
+  /** Blocks skipped because they carry no name. */
+  unnamed: number;
+}
+
 /**
- * Exports every named block of a document: its ` ```plantuml ` blocks
+ * Draws every named block of a document: its ` ```plantuml ` blocks
  * (findPlantUmlBlocks) or the diagrams of a PlantUML file
- * (findFileDiagrams). Null when replacing the files already there is
- * declined, in which case nothing is written.
+ * (findFileDiagrams).
  *
  * Unnamed blocks are counted rather than guessed at: a positional name
  * would move the moment a block is inserted above it, silently orphaning
  * whatever already referenced the old file. A name that cannot be a file
  * name is a failure, not a missing name.
  */
-export async function exportAll(
+export async function drawDocument(
   deps: ExporterDeps,
   documentPath: string,
   directory: string,
   blocks: readonly PlantUmlBlock[],
   onProgress?: (done: number, total: number, name: string) => void
-): Promise<ExportOutcome | null> {
+): Promise<DrawnDocument> {
   const named = blocks.filter(
     (block): block is PlantUmlBlock & { name: string } => block.name !== null
   );
@@ -430,6 +439,32 @@ export async function exportAll(
       failed.push(drawing);
     }
   }
+  return { drawings, failed, unnamed: blocks.length - named.length };
+}
+
+/**
+ * Writes what {@link drawDocument} drew, of one document or several, asking
+ * once before replacing files. A drawing headed for the same file as one
+ * before it fails rather than overwrite it; files are compared regardless
+ * of case, as Windows and macOS compare them. Null when replacing the
+ * files already there is declined, in which case nothing is written.
+ */
+export async function writeDocuments(
+  deps: ExporterDeps,
+  documents: readonly DrawnDocument[]
+): Promise<ExportOutcome | null> {
+  const failed = documents.flatMap((document) => document.failed);
+  const drawings: Drawing[] = [];
+  const taken = new Set<string>();
+  for (const drawing of documents.flatMap((document) => document.drawings)) {
+    const file = drawing.path.toLowerCase();
+    if (taken.has(file)) {
+      failed.push({ name: drawing.name, path: null, error: deps.sameFileMessage });
+    } else {
+      taken.add(file);
+      drawings.push(drawing);
+    }
+  }
 
   const outcome = await writeDrawings(deps, drawings);
   if (outcome === null) {
@@ -438,7 +473,22 @@ export async function exportAll(
   return {
     written: outcome.written,
     failed: [...failed, ...outcome.failed],
-    unnamed: blocks.length - named.length,
+    unnamed: documents.reduce((sum, document) => sum + document.unnamed, 0),
     kept: outcome.kept,
   };
+}
+
+/**
+ * Exports every named block of a document as SVG (see {@link drawDocument}).
+ * Null when replacing the files already there is declined, in which case
+ * nothing is written.
+ */
+export async function exportAll(
+  deps: ExporterDeps,
+  documentPath: string,
+  directory: string,
+  blocks: readonly PlantUmlBlock[],
+  onProgress?: (done: number, total: number, name: string) => void
+): Promise<ExportOutcome | null> {
+  return writeDocuments(deps, [await drawDocument(deps, documentPath, directory, blocks, onProgress)]);
 }
