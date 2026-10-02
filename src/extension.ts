@@ -67,6 +67,7 @@ import {
   type CompletionData,
   type Suggestions,
 } from './language/completion';
+import { namesDiagram, unnamedAt, withName } from './language/code-actions';
 import { foldingRanges } from './language/folding';
 import { declarations, type Declaration } from './language/symbols';
 import {
@@ -151,6 +152,15 @@ export const ExportAllSvg = defineCommandContract<readonly [], void>({
  */
 export const ExportFolderSvg = defineCommandContract<readonly unknown[], void>({
   id: COMMANDS.EXPORT_FOLDER_SVG,
+});
+
+/**
+ * Writes a name for the diagram starting on a line of a document, asked for:
+ * the code action's command, given the document's URI, the line and the
+ * version the action was offered on.
+ */
+export const AssignDiagramName = defineCommandContract<readonly unknown[], void>({
+  id: COMMANDS.ASSIGN_DIAGRAM_NAME,
 });
 
 /**
@@ -1946,6 +1956,89 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
           provideDocumentSymbols: (document) =>
             declarations(document.getText()).map((declared) => symbolOf(document, declared)),
         }
+      );
+      context.signal.addEventListener('abort', () => {
+        registration.dispose();
+      });
+    },
+  });
+
+  module.commands.handle(AssignDiagramName, async (context: OperationContext, args): Promise<void> => {
+    const [uri, line, version] = args;
+    const document = vscode.workspace.textDocuments.find((candidate) => candidate.uri.toString() === uri);
+    if (document === undefined || typeof line !== 'number') {
+      return;
+    }
+    // Offered on the document as it was then: edited since, the line may
+    // start another diagram, or none.
+    const unchanged = (): boolean => document.version === version;
+    const plantUml = document.languageId === 'plantuml';
+    const stale = (): void => {
+      void context.notify.warn(context.l10n.t('The document changed. Name the diagram again from its line.'));
+    };
+    const target = unchanged()
+      ? unnamedAt(document.getText(), line, plantUml, withoutExtension(fileNameOf(document)))
+      : undefined;
+    if (target === undefined) {
+      stale();
+      return;
+    }
+
+    const name = await context.ask.text({
+      prompt:
+        target.current === null
+          ? context.l10n.t('Name for the diagram, which its exported files take')
+          : context.l10n.t('Name for the diagram, in place of {0}', target.current),
+      placeHolder: 'my-diagram',
+      validate: (value: string) =>
+        isValidBlockName(value)
+          ? undefined
+          : context.l10n.t('Use up to 128 letters, digits, hyphens and underscores.'),
+    });
+    if (name === undefined) {
+      return;
+    }
+    const written = document.lineAt(line);
+    const named = unchanged() ? withName(written.text, name, plantUml) : null;
+    if (named === null) {
+      stale();
+      return;
+    }
+    // One edit to the line, so one Undo takes the name away again.
+    const edit = new vscode.WorkspaceEdit();
+    edit.replace(document.uri, written.range, named);
+    await vscode.workspace.applyEdit(edit);
+  });
+
+  module.hostedServices.add({
+    id: 'plantuml.codeActions',
+    inject: { l10n: Localization },
+    start: (context, { l10n }) => {
+      // Offers a name to a diagram without a usable one
+      // (src/language/code-actions.ts), on the line the name goes on only:
+      // anywhere in the block, every unnamed diagram would show a light bulb.
+      const registration = vscode.languages.registerCodeActionsProvider(
+        [{ language: 'markdown' }, { language: 'plantuml' }],
+        {
+          provideCodeActions: (document, range) => {
+            const line = range.start.line;
+            const plantUml = document.languageId === 'plantuml';
+            if (
+              !namesDiagram(document.lineAt(line).text, plantUml) ||
+              unnamedAt(document.getText(), line, plantUml, withoutExtension(fileNameOf(document))) === undefined
+            ) {
+              return undefined;
+            }
+            const action = new vscode.CodeAction(l10n.t('Name this diagram for export…'), vscode.CodeActionKind.QuickFix);
+            action.command = {
+              title: action.title,
+              command: COMMANDS.ASSIGN_DIAGRAM_NAME,
+              arguments: [document.uri.toString(), line, document.version],
+            };
+            return [action];
+          },
+        },
+        { providedCodeActionKinds: [vscode.CodeActionKind.QuickFix] }
       );
       context.signal.addEventListener('abort', () => {
         registration.dispose();

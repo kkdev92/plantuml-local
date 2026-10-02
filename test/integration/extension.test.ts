@@ -6,6 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import {
   createVscodeStub,
+  type CodeActionStub,
   type CompletionItemStub,
   type DocumentSymbolStub,
   type FoldingRangeStub,
@@ -1530,6 +1531,90 @@ describe('symbols (dist)', () => {
 
   it('lists nothing for a file that declares nothing', () => {
     expect(symbols('A -> B\nB -> C')).toEqual([]);
+  });
+});
+
+describe('naming a diagram (dist)', () => {
+  const actionsAt = (editor: TextEditorStub, line: number): CodeActionStub[] | undefined => {
+    const registration = vscodeStub._test.actionProviders[0];
+    if (registration === undefined) {
+      throw new Error('no code action provider registered');
+    }
+    const at = new vscodeStub.Position(line, 0);
+    return registration.provider.provideCodeActions(editor.document, { start: at, end: at });
+  };
+  const run = async (action: CodeActionStub | undefined): Promise<void> => {
+    await vscodeStub._test.registeredCommands.get(action?.command?.command ?? '')?.(...(action?.command?.arguments ?? []));
+  };
+
+  it('is offered for Markdown and PlantUML files, as a quick fix', () => {
+    expect(vscodeStub._test.actionProviders).toHaveLength(1);
+    expect(vscodeStub._test.actionProviders[0]?.selector).toEqual([{ language: 'markdown' }, { language: 'plantuml' }]);
+    expect(vscodeStub._test.actionProviders[0]?.metadata).toEqual({ providedCodeActionKinds: ['quickfix'] });
+  });
+
+  it('names an unnamed block on its opening line, changing that line only', async () => {
+    const text = ['# Doc', '', '```plantuml', '@startuml', 'A -> B', '@enduml', '```'].join('\n');
+    const editor = makeEditor('file:///c/naming/doc.md', text, 2);
+    vscodeStub._test.setActiveEditor(editor);
+    vscodeStub._test.openDocument(editor.document);
+
+    expect(actionsAt(editor, 3)).toBeUndefined();
+    const [action] = actionsAt(editor, 2) ?? [];
+    expect(action).toMatchObject({
+      title: 'Name this diagram for export…',
+      kind: 'quickfix',
+      command: { command: 'plantumlLocal.assignDiagramName', arguments: ['file:///c/naming/doc.md', 2, 1] },
+    });
+
+    vscodeStub._test.inputBoxReply = 'orders';
+    try {
+      await run(action);
+    } finally {
+      vscodeStub._test.inputBoxReply = null;
+    }
+    expect(vscodeStub._test.inputBoxPrompts.at(-1)).toBe('Name for the diagram, which its exported files take');
+    expect(editor.document.getText()).toBe(text.replace('```plantuml', '```plantuml orders'));
+    // Named now: nothing more is offered.
+    expect(actionsAt(editor, 2)).toBeUndefined();
+  });
+
+  it('writes nothing once the document has changed since the name was offered', async () => {
+    const text = ['```plantuml', 'A -> B', '```'].join('\n');
+    const editor = makeEditor('file:///c/naming/changed.md', text, 0);
+    vscodeStub._test.setActiveEditor(editor);
+    vscodeStub._test.openDocument(editor.document);
+    const [action] = actionsAt(editor, 0) ?? [];
+    const command = action?.command;
+    if (command === undefined) {
+      throw new Error('no action offered');
+    }
+
+    vscodeStub._test.inputBoxReply = 'orders';
+    try {
+      // As though offered on an earlier version of the document.
+      await run({ ...action!, command: { ...command, arguments: ['file:///c/naming/changed.md', 0, 0] } });
+    } finally {
+      vscodeStub._test.inputBoxReply = null;
+    }
+    expect(editor.document.getText()).toBe(text);
+    expect(vscodeStub._test.notifications.warn.at(-1)).toBe('The document changed. Name the diagram again from its line.');
+  });
+
+  it('gives a @startuml diagram of a PlantUML file an id, and no other kind', async () => {
+    const text = ['@startuml(id=first)', 'A -> B', '@enduml', '@startuml', 'C -> D', '@enduml', '@startmindmap', '* root', '@endmindmap'].join('\n');
+    const editor = makeEditor('file:///c/naming/flows.puml', text, 3, { languageId: 'plantuml' });
+    vscodeStub._test.setActiveEditor(editor);
+    vscodeStub._test.openDocument(editor.document);
+
+    expect(actionsAt(editor, 6)).toBeUndefined();
+    vscodeStub._test.inputBoxReply = 'second';
+    try {
+      await run((actionsAt(editor, 3) ?? [])[0]);
+    } finally {
+      vscodeStub._test.inputBoxReply = null;
+    }
+    expect(editor.document.getText().split('\n')[3]).toBe('@startuml(id=second)');
   });
 });
 

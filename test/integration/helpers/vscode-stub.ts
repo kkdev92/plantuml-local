@@ -155,6 +155,25 @@ export interface SymbolRegistrationStub {
   provider: { provideDocumentSymbols(document: TextEditorStub['document']): DocumentSymbolStub[] };
 }
 
+/** A `vscode.CodeAction` as the extension builds it. */
+export interface CodeActionStub {
+  title: string;
+  kind: string;
+  command?: { title: string; command: string; arguments?: unknown[] };
+}
+
+/** A code action provider as registered, with what it was registered for. */
+export interface ActionRegistrationStub {
+  selector: unknown;
+  provider: {
+    provideCodeActions(
+      document: TextEditorStub['document'],
+      range: { start: PositionStub; end: PositionStub }
+    ): CodeActionStub[] | undefined;
+  };
+  metadata: unknown;
+}
+
 /** A `vscode.CompletionItem` as the extension builds it. */
 export interface CompletionItemStub {
   label: string | { label: string; description?: string };
@@ -254,7 +273,14 @@ export interface VscodeStub {
       selector: unknown,
       provider: SymbolRegistrationStub['provider']
     ) => { dispose(): void };
+    registerCodeActionsProvider: (
+      selector: unknown,
+      provider: ActionRegistrationStub['provider'],
+      metadata?: unknown
+    ) => { dispose(): void };
   };
+  CodeAction: new (title: string, kind: string) => CodeActionStub;
+  CodeActionKind: Record<'QuickFix', string>;
   DocumentSymbol: new (
     name: string,
     detail: string,
@@ -427,6 +453,8 @@ export interface VscodeStub {
     foldingProviders: FoldingRegistrationStub[];
     /** Document symbol providers registered, in order. */
     symbolProviders: SymbolRegistrationStub[];
+    /** Code action providers registered, in order. */
+    actionProviders: ActionRegistrationStub[];
     /** Webview panels created, in order. */
     webviewPanels: WebviewPanelStub[];
     /** Panel serializers registered, by view type. */
@@ -639,6 +667,15 @@ export function createVscodeStub(): VscodeStub {
   }
   const symbolProviders: SymbolRegistrationStub[] = [];
 
+  class CodeAction implements CodeActionStub {
+    command?: CodeActionStub['command'];
+    constructor(
+      public title: string,
+      public kind: string
+    ) {}
+  }
+  const actionProviders: ActionRegistrationStub[] = [];
+
   const webviewPanels: WebviewPanelStub[] = [];
   const webviewSerializers = new Map<
     string,
@@ -735,6 +772,9 @@ export function createVscodeStub(): VscodeStub {
     FoldingRange,
     FoldingRangeKind: { Comment: 1, Imports: 2, Region: 3 },
     DocumentSymbol,
+    CodeAction,
+    // A string here, where VS Code has a CodeActionKind; tests compare it as one.
+    CodeActionKind: { QuickFix: 'quickfix' },
     SymbolKind: { Module: 1, Namespace: 2, Package: 3, Class: 4, Enum: 9, Interface: 10, Object: 18 },
     languages: {
       createDiagnosticCollection: () => ({
@@ -756,6 +796,10 @@ export function createVscodeStub(): VscodeStub {
       },
       registerDocumentSymbolProvider: (selector, provider) => {
         symbolProviders.push({ selector, provider });
+        return { dispose: () => undefined };
+      },
+      registerCodeActionsProvider: (selector, provider, metadata) => {
+        actionProviders.push({ selector, provider, metadata });
         return { dispose: () => undefined };
       },
     },
@@ -1102,6 +1146,7 @@ export function createVscodeStub(): VscodeStub {
       completionProviders,
       foldingProviders,
       symbolProviders,
+      actionProviders,
       webviewPanels,
       webviewSerializers,
       // Restored panels come with whatever options were saved: none here.

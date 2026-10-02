@@ -81,5 +81,9 @@
   "{0} holds more than {1} named diagrams. Export a folder inside it.": "{0} には {1} を超える名前付きの図があります。中のフォルダーを書き出してください。",
   "…and {0} more": "…ほか {0} 件",
   "Export": "書き出す",
-  "Export {0} named diagram(s) from {1} document(s) in {2}?": "{2} の {1} 個の文書から、名前付きの図を {0} 個書き出しますか?"
+  "Export {0} named diagram(s) from {1} document(s) in {2}?": "{2} の {1} 個の文書から、名前付きの図を {0} 個書き出しますか?",
+  "The document changed. Name the diagram again from its line.": "文書が変更されました。図の行からもう一度名前を付けてください。",
+  "Name for the diagram, which its exported files take": "図の名前 (書き出すファイルの名前になります)",
+  "Name for the diagram, in place of {0}": "図の名前 ({0} を置き換えます)",
+  "Name this diagram for export…": "この図に書き出し用の名前を付ける…"
 }
