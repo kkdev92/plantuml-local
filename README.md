@@ -341,15 +341,15 @@ device name such as `CON`. The bulk commands report such a block as failed.
 With the cursor on the opening line of a block that has no usable name, the
 light bulb offers *Name this diagram for export…*: it asks for a name and
 writes it on that line, as one edit that Undo takes back. In a `.puml` file it
-does the same on a `@startuml` line, as `(id=…)`; other diagram types get no
-id, since PlantUML documents that form for `@startuml` only. Nothing is written
-if the document changed in the meantime.
+does the same on the start line of any diagram, as `(id=…)` after
+`@startuml`, `@startmindmap` and the rest. Nothing is written if the document
+changed in the meantime.
 
 All but the reference update also work in a `.puml` file, which writes each
 of its diagrams to a file of its own. A diagram is named by an id on its start
-line, `@startuml(id=orders-api)`; a file holding a single diagram may leave it
-out, and the diagram is named after the file. References are inserted into
-Markdown only.
+line, `@startuml(id=orders-api)` or `@startmindmap(id=roadmap)`; a file
+holding a single diagram may leave it out, and the diagram is named after the
+file. References are inserted into Markdown only.
 
 A file already at the target is replaced only when you say so, or when the
 export put it there. If it holds the diagram already, nothing is written. If

@@ -82,10 +82,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   *Reveal in Explorer View*, which selects the file it wrote, or the first of
   them, in the Explorer.
 - **Name a diagram from the editor.** On the opening line of a block with no
-  usable name, or on the `@startuml` line of such a diagram in a `.puml`
-  file, the light bulb offers *Name this diagram for export…*, which asks for
-  a name and writes it on that line (as `(id=…)` after `@startuml`) in one
-  edit. Nothing is written if the document changed in the meantime.
+  usable name, or on the start line of such a diagram in a `.puml` file, the
+  light bulb offers *Name this diagram for export…*, which asks for a name and
+  writes it on that line (as `(id=…)` after `@startuml`, `@startmindmap` and
+  the rest) in one edit. Nothing is written if the document changed in the
+  meantime.
 - **Problems panel.** The diagrams of open Markdown files are checked, with or
   without a preview, and their problems are listed on the line they are on:
   the engine's errors and warnings, what the bundled engine cannot do

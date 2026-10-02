@@ -1901,20 +1901,26 @@ describe('naming a diagram (dist)', () => {
     expect(vscodeStub._test.notifications.warn.at(-1)).toBe('The document changed. Name the diagram again from its line.');
   });
 
-  it('gives a @startuml diagram of a PlantUML file an id, and no other kind', async () => {
+  it('gives every kind of diagram of a PlantUML file an id', async () => {
     const text = ['@startuml(id=first)', 'A -> B', '@enduml', '@startuml', 'C -> D', '@enduml', '@startmindmap', '* root', '@endmindmap'].join('\n');
     const editor = makeEditor('file:///c/naming/flows.puml', text, 3, { languageId: 'plantuml' });
     vscodeStub._test.setActiveEditor(editor);
     vscodeStub._test.openDocument(editor.document);
 
-    expect(actionsAt(editor, 6)).toBeUndefined();
-    vscodeStub._test.inputBoxReply = 'second';
-    try {
-      await run((actionsAt(editor, 3) ?? [])[0]);
-    } finally {
-      vscodeStub._test.inputBoxReply = null;
+    for (const [line, name] of [
+      [3, 'second'],
+      [6, 'mind'],
+    ] as const) {
+      vscodeStub._test.inputBoxReply = name;
+      try {
+        await run((actionsAt(editor, line) ?? [])[0]);
+      } finally {
+        vscodeStub._test.inputBoxReply = null;
+      }
     }
-    expect(editor.document.getText().split('\n')[3]).toBe('@startuml(id=second)');
+    const lines = editor.document.getText().split('\n');
+    expect(lines[3]).toBe('@startuml(id=second)');
+    expect(lines[6]).toBe('@startmindmap(id=mind)');
   });
 });
 

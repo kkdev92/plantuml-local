@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { namesDiagram, unnamedAt, withName } from '../../src/language/code-actions';
 
 describe('namesDiagram', () => {
-  it('takes the opening line of a diagram block, or a @startuml line', () => {
+  it('takes the opening line of a diagram block, or the start line of a diagram', () => {
     for (const line of ['```plantuml', '~~~puml orders', '> ```plantuml', '  - ```plantuml x']) {
       expect(namesDiagram(line, false), line).toBe(true);
     }
@@ -11,7 +11,8 @@ describe('namesDiagram', () => {
       expect(namesDiagram(line, false), line).toBe(false);
     }
     expect(namesDiagram('@startuml(id=orders)', true)).toBe(true);
-    expect(namesDiagram('@startmindmap', true)).toBe(false);
+    expect(namesDiagram('@startmindmap', true)).toBe(true);
+    expect(namesDiagram('A -> B', true)).toBe(false);
   });
 });
 
@@ -44,7 +45,7 @@ describe('unnamedAt', () => {
     expect(unnamedAt(markdown, 13, false, 'doc')).toBeUndefined();
   });
 
-  it('offers an id to a @startuml diagram of a PlantUML file, and to no other kind', () => {
+  it('offers an id to every kind of diagram of a PlantUML file', () => {
     const file = [
       '@startuml(id=orders)',
       'A -> B',
@@ -58,12 +59,16 @@ describe('unnamedAt', () => {
       '@startmindmap',
       '* root',
       '@endmindmap',
+      '@startjson(id=data)',
+      '{"a": 1}',
+      '@endjson',
     ].join('\n');
 
     expect(unnamedAt(file, 0, true, 'flows')).toBeUndefined();
     expect(unnamedAt(file, 3, true, 'flows')).toEqual({ current: null });
     expect(unnamedAt(file, 6, true, 'flows')).toEqual({ current: 'a b' });
-    expect(unnamedAt(file, 9, true, 'flows')).toBeUndefined();
+    expect(unnamedAt(file, 9, true, 'flows')).toEqual({ current: null });
+    expect(unnamedAt(file, 12, true, 'flows')).toBeUndefined();
   });
 
   it('leaves the only diagram of a file alone while the file name can name it', () => {
@@ -82,9 +87,11 @@ describe('withName', () => {
     expect(withName('```js', 'orders', false)).toBeNull();
   });
 
-  it('adds or replaces the id after @startuml', () => {
+  it('adds or replaces the id after the start line of any kind of diagram', () => {
     expect(withName('@startuml', 'orders', true)).toBe('@startuml(id=orders)');
     expect(withName('  @startuml(id=a b) <<x>>', 'orders', true)).toBe('  @startuml(id=orders) <<x>>');
-    expect(withName('@startmindmap', 'orders', true)).toBeNull();
+    expect(withName('@startmindmap', 'orders', true)).toBe('@startmindmap(id=orders)');
+    expect(withName('@startgantt(id=a b)', 'plan', true)).toBe('@startgantt(id=plan)');
+    expect(withName('A -> B', 'orders', true)).toBeNull();
   });
 });
