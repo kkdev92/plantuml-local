@@ -171,6 +171,15 @@ describe('ThemePalettes', () => {
     expect(render).not.toHaveBeenCalled();
   });
 
+  it('measures a diagram with the Azure icons that picks a theme, like any other', async () => {
+    const render = engine();
+    const palettes = new ThemePalettes(render);
+
+    // The theme colours the text, the same in either palette.
+    expect(await palettes.resolve(diagram('!theme for-dark-page', '!include <azure/AzureCommon>'), false)).toBe(true);
+    expect(render).toHaveBeenCalled();
+  });
+
   it('draws a theme made for a dark page in the dark palette', async () => {
     const palettes = new ThemePalettes(engine());
 

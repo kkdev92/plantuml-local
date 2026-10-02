@@ -27,8 +27,10 @@ export const MIN_TEXT_CONTRAST = 4.5;
 /**
  * An include of the bundled Azure library. It paints its elements white and
  * leaves their text to the palette, which the dark one makes white: white on
- * white. A diagram that includes it is drawn in the light palette, as one
- * whose theme is made for a white page is.
+ * white. A diagram that includes it and picks no theme is drawn in the light
+ * palette, as one whose theme is made for a white page is. A theme sets the
+ * text colour itself, the same in either palette, so a diagram with one is
+ * measured like any other.
  */
 const AZURE_INCLUDE = /^[ \t]*!include(?:_many|_once)?[ \t]*<azure\//m;
 
@@ -110,12 +112,9 @@ export class ThemePalettes {
 
   /** The palette to draw `source` in when `dark` is asked for. */
   async resolve(source: string, dark: boolean): Promise<boolean> {
-    if (AZURE_INCLUDE.test(source)) {
-      return false;
-    }
     const lines = themeLines(source);
     if (lines.length === 0) {
-      return dark;
+      return AZURE_INCLUDE.test(source) ? false : dark;
     }
     const measured = await this.measure(lines.join('\n'), lines);
     return measured === undefined ? dark : choosePalette(dark, measured);
