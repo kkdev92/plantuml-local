@@ -167,6 +167,11 @@ export const ExportFolderSvg = defineCommandContract<readonly unknown[], void>({
   id: COMMANDS.EXPORT_FOLDER_SVG,
 });
 
+/** Writes the named diagrams of the documents under a folder to PNG files. */
+export const ExportFolderPng = defineCommandContract<readonly unknown[], void>({
+  id: COMMANDS.EXPORT_FOLDER_PNG,
+});
+
 /**
  * Writes a name for the diagram starting on a line of a document, asked for:
  * the code action's command, given the document's URI, the line and the
@@ -541,21 +546,20 @@ function relocateEngineErrors(
   return { ...outcome, failed };
 }
 
+/** A panel that draws SVGs into PNGs, one at a time, until it is disposed. */
+interface PngPanel {
+  draw(svg: string, width: number, height: number, background: string): Promise<Uint8Array>;
+  dispose(): void;
+}
+
 /**
- * Draws `svg` into a PNG of `width`×`height` pixels, in a webview: the
- * extension host has no canvas, and a converter shipped instead would
- * bring its own licence and fonts. The panel opens beside the editor
- * without taking the focus, and closes once the PNG is back. It keeps its
- * page while hidden behind another tab, so switching tabs meanwhile does
- * not stop it.
+ * Opens a panel that draws PNGs in a webview: the extension host has no
+ * canvas, and a converter shipped instead would bring its own licence and
+ * fonts. The panel opens beside the editor without taking the focus, and
+ * says `body` meanwhile. It keeps its page while hidden behind another tab,
+ * so switching tabs does not stop it.
  */
-function drawPng(
-  l10n: { t(message: string, ...args: string[]): string },
-  svg: string,
-  width: number,
-  height: number,
-  background: string
-): Promise<Uint8Array> {
+function openPngPanel(l10n: { t(message: string, ...args: string[]): string }, body: string): PngPanel {
   const media = vscode.Uri.joinPath(vscode.Uri.file(__dirname), '..', 'media', 'png');
   const panel = vscode.window.createWebviewPanel(
     PNG_PANEL_TYPE,
@@ -570,42 +574,99 @@ function drawPng(
     csp: generateCSP(panel.webview, { nonce, imgSrc: ['blob:'] }),
     scripts: [panel.webview.asWebviewUri(vscode.Uri.joinPath(media, 'png.js')).toString()],
     nonce,
-    body: `<p>${escapeHtml(l10n.t('Drawing a PNG of {0}×{1} pixels…', String(width), String(height)))}</p>`,
+    body: `<p>${escapeHtml(body)}</p>`,
   });
 
-  return new Promise((resolve, reject) => {
-    let done = false;
-    const finish = (result: Uint8Array | Error): void => {
-      if (done) {
-        return;
+  // The drawing under way, whose request waits here until the page is
+  // ready for it: the page answers one at a time, in order.
+  let pending: ((result: Uint8Array | Error) => void) | null = null;
+  let request: unknown = null;
+  let ready = false;
+  let closed = false;
+  const closedError = (): Error => new Error(l10n.t('The PNG was not finished: its panel was closed.'));
+  // The page is untrusted: only these three answers are acted on.
+  panel.webview.onDidReceiveMessage((message: unknown) => {
+    const { type, data, error } = (message ?? {}) as { type?: unknown; data?: unknown; error?: unknown };
+    if (type === 'ready') {
+      ready = true;
+      if (request !== null) {
+        void panel.webview.postMessage(request);
+        request = null;
       }
-      done = true;
-      clearTimeout(timer);
-      panel.dispose();
-      if (result instanceof Error) {
-        reject(result);
-      } else {
-        resolve(result);
-      }
-    };
-    const timer = setTimeout(() => {
-      finish(new Error(l10n.t('The PNG was not drawn within 30 seconds.')));
-    }, 30_000);
-    // The page is untrusted: only these three answers are acted on.
-    panel.webview.onDidReceiveMessage((message: unknown) => {
-      const { type, data, error } = (message ?? {}) as { type?: unknown; data?: unknown; error?: unknown };
-      if (type === 'ready') {
-        void panel.webview.postMessage({ type: 'draw', svg, width, height, background });
-      } else if (type === 'png' && data instanceof Uint8Array) {
-        finish(data);
-      } else if (type === 'error') {
-        finish(new Error(l10n.t('The PNG could not be drawn: {0}', String(error))));
-      }
-    });
-    panel.onDidDispose(() => {
-      finish(new Error(l10n.t('The PNG was not finished: its panel was closed.')));
-    });
+    } else if (type === 'png' && data instanceof Uint8Array) {
+      pending?.(data);
+    } else if (type === 'error') {
+      pending?.(new Error(l10n.t('The PNG could not be drawn: {0}', String(error))));
+    }
   });
+  panel.onDidDispose(() => {
+    closed = true;
+    pending?.(closedError());
+  });
+
+  return {
+    draw: (svg, width, height, background): Promise<Uint8Array> =>
+      new Promise((resolve, reject) => {
+        if (closed) {
+          reject(closedError());
+          return;
+        }
+        const finish = (result: Uint8Array | Error): void => {
+          pending = null;
+          clearTimeout(timer);
+          if (result instanceof Error) {
+            reject(result);
+          } else {
+            resolve(result);
+          }
+        };
+        pending = finish;
+        const timer = setTimeout(() => {
+          finish(new Error(l10n.t('The PNG was not drawn within 30 seconds.')));
+          // An answer coming later would be taken for the next drawing's.
+          panel.dispose();
+        }, 30_000);
+        const drawing = { type: 'draw', svg, width, height, background };
+        if (ready) {
+          void panel.webview.postMessage(drawing);
+        } else {
+          request = drawing;
+        }
+      }),
+    dispose: (): void => {
+      panel.dispose();
+    },
+  };
+}
+
+/** A {@link PngPanel} opened at the first drawing, so a run that draws none opens none. */
+function lazyPngPanel(l10n: { t(message: string, ...args: string[]): string }, body: string): PngPanel {
+  let panel: PngPanel | null = null;
+  return {
+    draw: (svg, width, height, background): Promise<Uint8Array> => {
+      panel ??= openPngPanel(l10n, body);
+      return panel.draw(svg, width, height, background);
+    },
+    dispose: (): void => {
+      panel?.dispose();
+    },
+  };
+}
+
+/** Draws `svg` into a PNG of `width`×`height` pixels, in a panel that closes once it is back. */
+async function drawPng(
+  l10n: { t(message: string, ...args: string[]): string },
+  svg: string,
+  width: number,
+  height: number,
+  background: string
+): Promise<Uint8Array> {
+  const panel = openPngPanel(l10n, l10n.t('Drawing a PNG of {0}×{1} pixels…', String(width), String(height)));
+  try {
+    return await panel.draw(svg, width, height, background);
+  } finally {
+    panel.dispose();
+  }
 }
 
 /**
@@ -1437,12 +1498,23 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
     },
   });
 
-  module.commands.handle(ExportFolderSvg, {
-    inject: { renderer: Renderer, palettes: Palettes, settings: Settings.token, exportRecords: ExportedFiles.token },
-    execute: async (
+  /** Exports the named diagrams of the documents under a folder, as `format`. */
+  const exportFolder =
+    (format: ExportFormat) =>
+    async (
       context: OperationContext,
-      args,
-      { renderer, palettes, settings, exportRecords }
+      args: readonly unknown[],
+      {
+        renderer,
+        palettes,
+        settings,
+        exportRecords,
+      }: {
+        renderer: RendererClient;
+        palettes: ThemePalettes;
+        settings: SettingsReader;
+        exportRecords: TypedStorage<ExportRecords>;
+      }
     ): Promise<void> => {
       // It reads files and writes them, so like the other exports it does
       // not run in an untrusted workspace.
@@ -1523,26 +1595,35 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         { title: context.l10n.t('Exporting diagrams…'), cancellable: true },
         async (report, signal) => {
           const drawn: DrawnDocument[] = [];
-          for (const [index, source] of planned.entries()) {
-            if (signal.aborted) {
-              return undefined;
+          // One panel draws every PNG: opened at the first, closed after the last.
+          const pngs = lazyPngPanel(context.l10n, context.l10n.t('Drawing PNGs…'));
+          try {
+            for (const [index, source] of planned.entries()) {
+              if (signal.aborted) {
+                return undefined;
+              }
+              const document = vscode.workspace.asRelativePath(source.uri);
+              report.report({
+                message: `${document} (${String(index + 1)}/${String(planned.length)})`,
+                increment: 100 / planned.length,
+              });
+              const deps = exporterDeps(context, renderer, palettes, settings, exportRecords, source.uri);
+              const result = await drawDocument(
+                { ...deps, toPng: (svg, width, height, background) => pngs.draw(svg, width, height, background) },
+                source.uri.toString(),
+                source.directory,
+                source.blocks,
+                undefined,
+                format
+              );
+              // Several documents are exported, so each failure names its own.
+              drawn.push({
+                ...result,
+                failed: result.failed.map((failure) => ({ ...failure, name: `${document}: ${failure.name}` })),
+              });
             }
-            const document = vscode.workspace.asRelativePath(source.uri);
-            report.report({
-              message: `${document} (${String(index + 1)}/${String(planned.length)})`,
-              increment: 100 / planned.length,
-            });
-            const result = await drawDocument(
-              exporterDeps(context, renderer, palettes, settings, exportRecords, source.uri),
-              source.uri.toString(),
-              source.directory,
-              source.blocks
-            );
-            // Several documents are exported, so each failure names its own.
-            drawn.push({
-              ...result,
-              failed: result.failed.map((failure) => ({ ...failure, name: `${document}: ${failure.name}` })),
-            });
+          } finally {
+            pngs.dispose();
           }
           // Nothing is written once cancelled.
           if (signal.aborted) {
@@ -1555,7 +1636,16 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         return;
       }
       await reportOutcome(context, outcome, [], false);
-    },
+    };
+
+  module.commands.handle(ExportFolderSvg, {
+    inject: { renderer: Renderer, palettes: Palettes, settings: Settings.token, exportRecords: ExportedFiles.token },
+    execute: exportFolder('svg'),
+  });
+
+  module.commands.handle(ExportFolderPng, {
+    inject: { renderer: Renderer, palettes: Palettes, settings: Settings.token, exportRecords: ExportedFiles.token },
+    execute: exportFolder('png'),
   });
 
   module.hostedServices.add({

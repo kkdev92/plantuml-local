@@ -1379,6 +1379,46 @@ describe('export (dist)', () => {
       );
       expect(writtenUnder('file:///c/pngwide/')).toEqual([]);
     });
+
+    it('exports the named diagrams of a folder as PNG, drawn one after another in one panel', async () => {
+      const block = (name: string, label: string): string =>
+        ['```plantuml ' + name, '@startuml', `A -> B : ${label}`, '@enduml', '```'].join('\n');
+      vscodeStub._test.writtenFiles.set('file:///c/pngtree/a.md', block('one', 'first'));
+      vscodeStub._test.writtenFiles.set('file:///c/pngtree/sub/b.md', block('two', 'second'));
+      const panels = vscodeStub._test.webviewPanels.length;
+
+      vscodeStub._test.messageReply = 'Export';
+      try {
+        const done = Promise.resolve(
+          vscodeStub._test.registeredCommands.get('plantumlLocal.exportFolderPng')?.(
+            vscodeStub.Uri.parse('file:///c/pngtree')
+          )
+        );
+        expect(await waitFor(() => vscodeStub._test.webviewPanels.length > panels, 30_000)).toBe(true);
+        const panel = vscodeStub._test.webviewPanels[panels]!;
+        expect(panel.webview.html).toContain('Drawing PNGs…');
+        panel.receive({ type: 'ready' });
+        for (const index of [0, 1]) {
+          expect(await waitFor(() => panel.webview.posted.length > index, 30_000)).toBe(true);
+          const draw = panel.webview.posted[index] as { width: number; height: number };
+          panel.receive({ type: 'png', data: pngOf(draw.width, draw.height) });
+        }
+        await done;
+        expect(panel.disposed).toBe(true);
+      } finally {
+        vscodeStub._test.messageReply = null;
+      }
+
+      // One panel for both, closed once they are drawn.
+      expect(vscodeStub._test.webviewPanels).toHaveLength(panels + 1);
+      expect(writtenUnder('file:///c/pngtree/').sort()).toEqual([
+        'file:///c/pngtree/a.md',
+        'file:///c/pngtree/images/one.png',
+        'file:///c/pngtree/sub/b.md',
+        'file:///c/pngtree/sub/images/two.png',
+      ]);
+      expect(vscodeStub._test.notifications.info.at(-1)).toBe('Exported 2 diagram(s)');
+    });
   });
 });
 

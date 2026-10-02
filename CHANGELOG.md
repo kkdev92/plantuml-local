@@ -73,7 +73,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   documents or 2,000 named diagrams is refused rather than exported in part,
   and cancelling writes nothing. A diagram headed for the same file as
   another, in one document or several, is now reported instead of written
-  over it.
+  over it. *Export All Diagrams in Folder as PNG* does the same with PNGs,
+  drawn one after another in a single panel.
 - **Name a diagram from the editor.** On the opening line of a block with no
   usable name, or on the `@startuml` line of such a diagram in a `.puml`
   file, the light bulb offers *Name this diagram for export…*, which asks for

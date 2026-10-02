@@ -609,6 +609,23 @@ describe('writeDocuments', () => {
     expect(outcome?.failed).toEqual([{ name: 'Orders', path: null, error: 'same file' }]);
     expect(deps.writeFile).toHaveBeenCalledOnce();
   });
+
+  it('draws and writes PNGs when asked to', async () => {
+    const deps = makeDeps({
+      render: vi.fn(() => Promise.resolve('<svg viewBox="0 0 10 10" width="30" height="20"><g/></svg>')),
+    });
+    const drawn = [
+      await drawDocument(deps, '/repo/a/doc.md', 'images', blocks('```plantuml one\na\n```\n\n```plantuml\nx\n```'), undefined, 'png'),
+      await drawDocument(deps, '/repo/b/doc.md', 'images', blocks('```plantuml two\nb\n```'), undefined, 'png'),
+    ];
+
+    const outcome = await writeDocuments(deps, drawn);
+
+    expect(deps.toPng).toHaveBeenCalledTimes(2);
+    expect(outcome?.written.map((r) => r.path)).toEqual(['/repo/a/images/one.png', '/repo/b/images/two.png']);
+    expect(outcome?.unnamed).toBe(1);
+    expect(deps.writeFile).toHaveBeenCalledWith('/repo/a/images/one.png', pngOf(60, 40), false);
+  });
 });
 
 describe('exportAll', () => {
