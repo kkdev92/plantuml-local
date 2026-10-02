@@ -547,6 +547,13 @@ CI runs the test suite on Windows, macOS and Linux (x64 on Windows and Linux,
 ARM64 on macOS). The extension is plain JavaScript and WebAssembly, so other
 combinations are expected to work; please open an issue if one does not.
 
+In a remote window (WSL, a Dev Container, SSH), PlantUML Local is installed on
+the remote machine and runs there, so that is where diagrams are rendered and
+exported files are written. The previews, and the panel a PNG is drawn in,
+stay on your own computer: SVGs travel to them, and PNGs back, over VS Code's
+own connection to that machine, and a PNG's text is drawn with your computer's
+fonts. No rendering service is involved either way.
+
 ---
 
 ## Troubleshooting
