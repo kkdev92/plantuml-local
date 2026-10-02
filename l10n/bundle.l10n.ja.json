@@ -56,5 +56,10 @@
   "Choose a diagram in the list.": "一覧から図を選んでください。",
   "The file holds no diagram.": "このファイルには図がありません。",
   "Pages after newpage cannot be drawn, so only the first page would be. Give each page a diagram of its own.": "newpage 以降のページは描けないため、最初のページしか描かれません。ページごとに図を分けてください。",
-  "Open a PlantUML file first.": "先に PlantUML ファイルを開いてください。"
+  "Open a PlantUML file first.": "先に PlantUML ファイルを開いてください。",
+  "Zoom": "ズーム",
+  "Zoom Out": "縮小",
+  "Zoom In": "拡大",
+  "Fit": "全体",
+  "Actual Size": "実寸"
 }

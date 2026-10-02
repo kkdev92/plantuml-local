@@ -175,6 +175,14 @@ editor's own group (or hold Alt on the button). A panel left open comes back
 when VS Code restarts, on the same diagram when that diagram has a name, and
 otherwise asking which one to show.
 
+The diagram is first fitted to the panel, never past 100% — the size the
+diagram gives itself, which PlantUML's `scale` sets. The buttons above it zoom
+out and in, fit it, and show it at 100%; so do the keys `-`, `+`, `0` and `1`.
+Ctrl+wheel (Cmd on macOS) or a pinch zooms at the pointer, the wheel scrolls,
+dragging moves the diagram, and the arrow keys move it by 40 pixels (200 with
+Shift). Each diagram keeps its zoom and position while it is redrawn, while
+the panel is hidden, and across a restart.
+
 The panel shows the SVG as an image, so nothing in it can run, and loads
 nothing but its own script and stylesheet.
 
