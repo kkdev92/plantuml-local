@@ -32,6 +32,7 @@
   "PlantUML reported an error: {0}": "PlantUML がエラーを報告しました: {0}",
   "PlantUML reported an error at line {0}: {1}": "PlantUML が {0} 行目でエラーを報告しました: {1}",
   "Exported {0}": "{0} に書き出しました",
+  "Reveal in Explorer View": "エクスプローラー ビューで表示",
   "Exporting diagrams…": "図を書き出しています…",
   "Exported {0} diagram(s)": "{0} 個の図を書き出しました",
   "{0} failed": "{0} 個が失敗しました",

@@ -415,6 +415,8 @@ export interface VscodeStub {
   /** Test hooks. */
   _test: {
     executedCommands: string[];
+    /** Commands executed, with their arguments, in order. */
+    commandCalls: { id: string; args: unknown[] }[];
     registeredCommands: Map<string, (...args: unknown[]) => unknown>;
     themeListeners: (() => void)[];
     setThemeKind(kind: number): void;
@@ -441,6 +443,11 @@ export interface VscodeStub {
      * offered, dismisses it. Defaults to dismissal.
      */
     messageReply: string | null;
+    /**
+     * The button title a message that is not modal answers with; `null`, or
+     * a title not offered, dismisses it. Defaults to dismissal.
+     */
+    notificationReply: string | null;
     /** Modal messages shown, in order. */
     modals: ModalStub[];
     /** Makes `workspace.fs.rename` fail, as a write that cannot complete would. */
@@ -530,6 +537,7 @@ function joinUri(base: { toString(): string }, parts: string[]): UriStub {
 
 export function createVscodeStub(): VscodeStub {
   const executedCommands: string[] = [];
+  const commandCalls: { id: string; args: unknown[] }[] = [];
   const registeredCommands = new Map<string, (...args: unknown[]) => unknown>();
   const themeListeners: (() => void)[] = [];
   const editorListeners: ((editor: TextEditorStub | undefined) => void)[] = [];
@@ -579,6 +587,7 @@ export function createVscodeStub(): VscodeStub {
     openDocuments: [] as TextEditorStub['document'][],
     visibleEditors: [] as TextEditorStub[],
     messageReply: null as string | null,
+    notificationReply: null as string | null,
     modals: [] as ModalStub[],
     failRename: false,
   };
@@ -597,7 +606,10 @@ export function createVscodeStub(): VscodeStub {
   function answer(args: unknown[]): unknown {
     const options = args[1] as { modal?: boolean; detail?: string } | undefined;
     if (options?.modal !== true) {
-      return undefined;
+      const offered = args.slice(1).filter(
+        (item): item is { title: string } => typeof item === 'object' && item !== null && 'title' in item
+      );
+      return offered.find((item) => item.title === hooks.notificationReply);
     }
     const items = args.slice(2) as { title: string }[];
     hooks.modals.push({
@@ -1086,6 +1098,7 @@ export function createVscodeStub(): VscodeStub {
       },
       executeCommand: async (id, ...args) => {
         executedCommands.push(id);
+        commandCalls.push({ id, args });
         if (id === 'setContext') {
           contextKeys.set(String(args[0]), args[1]);
         }
@@ -1102,6 +1115,7 @@ export function createVscodeStub(): VscodeStub {
     },
     _test: {
       executedCommands,
+      commandCalls,
       registeredCommands,
       themeListeners,
       setThemeKind: (kind) => {
@@ -1134,6 +1148,12 @@ export function createVscodeStub(): VscodeStub {
       },
       set messageReply(value: string | null) {
         hooks.messageReply = value;
+      },
+      get notificationReply() {
+        return hooks.notificationReply;
+      },
+      set notificationReply(value: string | null) {
+        hooks.notificationReply = value;
       },
       modals: hooks.modals,
       get failRename() {

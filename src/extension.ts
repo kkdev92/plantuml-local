@@ -891,10 +891,34 @@ async function reportOutcome(
 
   const summary = messages.join(' · ');
   context.logger.info(summary);
-  if (forceWarn || outcome.failed.length > 0 || outcome.unnamed > 0) {
-    await context.notify.warn(summary);
-  } else {
-    await context.notify.info(summary);
+  await announceExport(
+    context,
+    summary,
+    forceWarn || outcome.failed.length > 0 || outcome.unnamed > 0,
+    outcome.written[0]?.path ?? undefined
+  );
+}
+
+/**
+ * Shows how an export went, with a button that selects `written`, a file
+ * it wrote, in the Explorer view.
+ */
+async function announceExport(
+  context: OperationContext,
+  message: string,
+  warn: boolean,
+  written: string | undefined
+): Promise<void> {
+  if (written === undefined) {
+    await (warn ? context.notify.warn(message) : context.notify.info(message));
+    return;
+  }
+  const reveal = { title: context.l10n.t('Reveal in Explorer View'), value: 'reveal' as const };
+  const choice = await (warn
+    ? context.notify.warn(message, { actions: [reveal] })
+    : context.notify.info(message, { actions: [reveal] }));
+  if (choice === 'reveal') {
+    await vscode.commands.executeCommand('revealInExplorer', vscode.Uri.parse(written));
   }
 }
 
@@ -1387,7 +1411,7 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         return;
       }
       context.logger.info(`Exported ${String(result.path)}`);
-      await context.notify.info(context.l10n.t('Exported {0}', String(result.path)));
+      await announceExport(context, context.l10n.t('Exported {0}', String(result.path)), false, result.path ?? undefined);
     };
 
   module.commands.handle(ExportSvg, {

@@ -1200,6 +1200,31 @@ describe('export (dist)', () => {
       ).toEqual([]);
       expect(vscodeStub._test.notifications.error.at(-1)).toMatch(/^Could not export the diagram: /);
     });
+
+    it('offers to reveal the file it wrote in the Explorer view', async () => {
+      const revealed = (): string[] =>
+        vscodeStub._test.commandCalls
+          .filter((call) => call.id === 'revealInExplorer')
+          .map((call) => String(call.args[0]));
+      const before = revealed().length;
+      vscodeStub._test.setActiveEditor(makeEditor('file:///c/reveal/doc.md', NAMED_BLOCK, 1));
+
+      // Dismissed, as the stub answers by default.
+      await exportSvg();
+      expect(revealed()).toHaveLength(before);
+
+      vscodeStub._test.notificationReply = 'Reveal in Explorer View';
+      try {
+        await exportSvg();
+        await vscodeStub._test.registeredCommands.get('plantumlLocal.exportAllSvg')?.();
+      } finally {
+        vscodeStub._test.notificationReply = null;
+      }
+      expect(revealed().slice(before)).toEqual([
+        'file:///c/reveal/images/orders.svg',
+        'file:///c/reveal/images/orders.svg',
+      ]);
+    });
   });
 
   describe('a folder', () => {

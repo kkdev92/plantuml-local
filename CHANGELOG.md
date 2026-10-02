@@ -75,6 +75,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   another, in one document or several, is now reported instead of written
   over it. *Export All Diagrams in Folder as PNG* does the same with PNGs,
   drawn one after another in a single panel.
+- **Reveal what an export wrote.** The message an export ends with offers
+  *Reveal in Explorer View*, which selects the file it wrote, or the first of
+  them, in the Explorer.
 - **Name a diagram from the editor.** On the opening line of a block with no
   usable name, or on the `@startuml` line of such a diagram in a `.puml`
   file, the light bulb offers *Name this diagram for export…*, which asks for
