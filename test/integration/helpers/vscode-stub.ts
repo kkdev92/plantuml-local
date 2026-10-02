@@ -157,6 +157,8 @@ export interface WebviewPanelStub {
   visible: boolean;
   /** How many times `reveal` was called. */
   revealed: number;
+  /** Whether `dispose` was called. */
+  disposed: boolean;
   webview: {
     html: string;
     /** As set after creation, which a restored panel needs. */
@@ -337,6 +339,8 @@ export interface VscodeStub {
     contextKeys: Map<string, unknown>;
     /** Files written through `workspace.fs`, uri string → UTF-8 content. */
     writtenFiles: Map<string, string>;
+    /** The same files' bytes as written, for binary content such as a PNG. */
+    writtenBytes: Map<string, Uint8Array>;
     /** First argument of each show*Message call. */
     notifications: { info: string[]; warn: string[]; error: string[] };
     /** Lines written to any log output channel, as `level: message`. */
@@ -441,6 +445,7 @@ export function createVscodeStub(): VscodeStub {
   const selectionListeners: ((event: { textEditor: TextEditorStub }) => void)[] = [];
   const contextKeys = new Map<string, unknown>();
   const writtenFiles = new Map<string, string>();
+  const writtenBytes = new Map<string, Uint8Array>();
   const notifications = { info: [] as string[], warn: [] as string[], error: [] as string[] };
   const logs: string[] = [];
   const configuration = new Map<string, unknown>();
@@ -569,6 +574,7 @@ export function createVscodeStub(): VscodeStub {
       options,
       visible: true,
       revealed: 0,
+      disposed: false,
       webview: {
         html: '',
         options,
@@ -587,6 +593,10 @@ export function createVscodeStub(): VscodeStub {
       onDidDispose: (listener) => subscribe(disposed, listener),
       onDidChangeViewState: () => ({ dispose: () => undefined }),
       dispose: () => {
+        if (panel.disposed) {
+          return;
+        }
+        panel.disposed = true;
         for (const listener of [...disposed]) listener();
       },
       receive: (message) => {
@@ -863,6 +873,7 @@ export function createVscodeStub(): VscodeStub {
         writeFile: async (uri, content) => {
           fileWrites.push(uri.toString());
           writtenFiles.set(uri.toString(), Buffer.from(content).toString('utf8'));
+          writtenBytes.set(uri.toString(), Uint8Array.from(content));
         },
         stat: async (uri) => {
           const key = uri.toString();
@@ -880,7 +891,8 @@ export function createVscodeStub(): VscodeStub {
           if (content === undefined) {
             throw new FileSystemError(`${uri.toString()} not found`, 'FileNotFound');
           }
-          return Buffer.from(content, 'utf8');
+          // A file a test put there as text has no bytes of its own.
+          return writtenBytes.get(uri.toString()) ?? Buffer.from(content, 'utf8');
         },
         rename: async (source, target, options) => {
           const content = writtenFiles.get(source.toString());
@@ -890,10 +902,17 @@ export function createVscodeStub(): VscodeStub {
           if (writtenFiles.has(target.toString()) && options?.overwrite !== true) {
             throw new FileSystemError(`${target.toString()} already exists`, 'FileExists');
           }
+          const bytes = writtenBytes.get(source.toString());
           writtenFiles.delete(source.toString());
+          writtenBytes.delete(source.toString());
           writtenFiles.set(target.toString(), content);
+          writtenBytes.delete(target.toString());
+          if (bytes !== undefined) {
+            writtenBytes.set(target.toString(), bytes);
+          }
         },
         delete: async (uri) => {
+          writtenBytes.delete(uri.toString());
           if (!writtenFiles.delete(uri.toString())) {
             throw new FileSystemError(`${uri.toString()} not found`, 'FileNotFound');
           }
@@ -937,6 +956,7 @@ export function createVscodeStub(): VscodeStub {
       },
       contextKeys,
       writtenFiles,
+      writtenBytes,
       notifications,
       logs,
       get inputBoxReply() {

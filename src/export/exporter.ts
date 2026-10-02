@@ -4,13 +4,14 @@ import { recognizeEngineError } from '../render/engine-error';
 import { isValidBlockName, type PlantUmlBlock } from './blocks';
 
 /**
- * Renders diagrams to SVG files next to the document.
+ * Renders diagrams to SVG files next to the document, or one to a PNG.
  *
  * The preview keeps its SVG in memory, which is enough to look at and no
  * use to anyone else: GitHub renders a ` ```plantuml ` block as source,
  * not as a diagram. Exporting writes the same sanitised SVG the preview
  * receives to a file, so the document can reference it and be readable
- * outside VS Code.
+ * outside VS Code. A PNG is that SVG drawn at a scale, for where SVG
+ * does not go, such as a slide or a chat.
  *
  * Like the markdown-it plugin, this module has no dependency on the
  * `vscode` module — the file system and the renderer arrive through
@@ -28,10 +29,10 @@ export interface ExporterDeps {
    */
   resolvePalette(source: string, dark: boolean): Promise<boolean>;
   /**
-   * The text of the file at `path`, or null when there is none. Rejects
+   * The bytes of the file at `path`, or null when there is none. Rejects
    * for a folder, which a diagram is never written in place of.
    */
-  readExisting(path: string): Promise<string | null>;
+  readExisting(path: string): Promise<Uint8Array | null>;
   /**
    * Asks before replacing files that hold something other than their
    * diagram: 'replace' them, 'keep' them and write only the rest, or
@@ -43,11 +44,18 @@ export interface ExporterDeps {
     canKeep: boolean
   ): Promise<'replace' | 'keep' | undefined>;
   /**
-   * Writes `content` to `path`, creating parent directories. Unless
-   * `replace` is set, a file that has appeared there since the check is
-   * an error rather than something to write over.
+   * Writes `content` to `path`, text as UTF-8, creating parent
+   * directories. Unless `replace` is set, a file that has appeared there
+   * since the check is an error rather than something to write over.
    */
-  writeFile(path: string, content: string, replace: boolean): Promise<void>;
+  writeFile(path: string, content: string | Uint8Array, replace: boolean): Promise<void>;
+  /** The scale a PNG is drawn at: 1, 2 or 4 times the diagram's size. */
+  pngScale(): number;
+  /**
+   * Draws `svg` at `width`×`height` pixels on `background` and returns the
+   * PNG, or rejects with a reason fit to show.
+   */
+  toPng(svg: string, width: number, height: number, background: string): Promise<Uint8Array>;
   /** Joins a document path's directory with a relative path. */
   resolve(documentPath: string, relative: string): string;
   /** Localised reason given for a block carrying a URL-based include. */
@@ -66,7 +74,20 @@ export interface ExporterDeps {
    * blames (counting from 1), or null when it names none.
    */
   engineErrorMessage(message: string, line: number | null): string;
+  /**
+   * Localised reason given for a PNG past the size one can have: its
+   * size, and the largest scale it fits at, or null when none does.
+   */
+  pngTooLargeMessage(width: number, height: number, fits: number | null): string;
+  /** Localised reason given for a PNG that could not be made as asked. */
+  pngFailedMessage: string;
 }
+
+/** The largest PNG made: pixels a side and in all, and bytes. */
+export const PNG_LIMITS = { side: 8192, pixels: 16_000_000, bytes: 64 * 1024 * 1024 } as const;
+
+/** The scales a PNG can be drawn at. */
+export const PNG_SCALES = [1, 2, 4] as const;
 
 /** One diagram's outcome. */
 export interface ExportResult {
@@ -94,11 +115,63 @@ export interface ExportOutcome {
   kept: number;
 }
 
-/** A diagram rendered and ready to write. */
+/** A diagram rendered and ready to write: the SVG's text, or a PNG. */
 interface Drawing {
   name: string;
   path: string;
-  svg: string;
+  content: string | Uint8Array;
+}
+
+/** What a diagram is exported as. */
+export type ExportFormat = 'svg' | 'png';
+
+/**
+ * The size an SVG gives itself, in CSS pixels: its `width` and `height`,
+ * which PlantUML's `scale` sets, else its viewBox. Null without either.
+ */
+export function svgSize(svg: string): { width: number; height: number } | null {
+  const open = /^<svg[^>]*>/.exec(svg)?.[0] ?? '';
+  const width = Number(/\swidth="([\d.]+)"/.exec(open)?.[1]);
+  const height = Number(/\sheight="([\d.]+)"/.exec(open)?.[1]);
+  if (width > 0 && height > 0) {
+    return { width, height };
+  }
+  const viewBox = /\sviewBox="[-\d.]+[ ,]+[-\d.]+[ ,]+([\d.]+)[ ,]+([\d.]+)"/.exec(open);
+  const boxWidth = Number(viewBox?.[1]);
+  const boxHeight = Number(viewBox?.[2]);
+  return boxWidth > 0 && boxHeight > 0 ? { width: boxWidth, height: boxHeight } : null;
+}
+
+/** Whether a PNG of `width`×`height` pixels is within {@link PNG_LIMITS}. */
+function fitsPng(width: number, height: number): boolean {
+  return width <= PNG_LIMITS.side && height <= PNG_LIMITS.side && width * height <= PNG_LIMITS.pixels;
+}
+
+/**
+ * Whether `png` is a PNG of `width`×`height` pixels: its signature, then
+ * its IHDR chunk, which comes first and holds the size as two big-endian
+ * 32-bit integers. A canvas past what the browser can draw stops drawing
+ * without saying so, so the size that came back is checked, not assumed.
+ */
+export function isPngOfSize(png: Uint8Array, width: number, height: number): boolean {
+  const signature = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+  if (png.byteLength < 24 || signature.some((byte, index) => png[index] !== byte)) {
+    return false;
+  }
+  const view = new DataView(png.buffer, png.byteOffset, png.byteLength);
+  const type = String.fromCharCode(...png.subarray(12, 16));
+  return view.getUint32(8) === 13 && type === 'IHDR' && view.getUint32(16) === width && view.getUint32(20) === height;
+}
+
+/** The content as it would be written: text as UTF-8. */
+function bytesOf(content: string | Uint8Array): Uint8Array {
+  return typeof content === 'string' ? new TextEncoder().encode(content) : content;
+}
+
+/** Whether a file holds `content` already. */
+function holds(existing: Uint8Array, content: string | Uint8Array): boolean {
+  const bytes = bytesOf(content);
+  return existing.byteLength === bytes.byteLength && existing.every((byte, index) => byte === bytes[index]);
 }
 
 /**
@@ -159,7 +232,8 @@ async function drawBlock(
   documentPath: string,
   directory: string,
   block: PlantUmlBlock,
-  name: string
+  name: string,
+  format: ExportFormat
 ): Promise<Drawing | ExportResult> {
   // Names become file names, and they come from the document — so on a
   // repository someone else wrote, `x/../../..` would put a file wherever
@@ -208,11 +282,33 @@ async function drawBlock(
       };
     }
 
-    return {
-      name,
-      path: deps.resolve(documentPath, `${directory}/${name}.svg`),
-      svg: addBackground(rendered, dark),
-    };
+    const svg = addBackground(rendered, dark);
+    const path = deps.resolve(documentPath, `${directory}/${name}.${format}`);
+    if (format === 'svg') {
+      return { name, path, content: svg };
+    }
+
+    // Drawn at the scale asked for, without the screen's own pixel ratio,
+    // and refused rather than shrunk or cut when it would be too large.
+    const size = svgSize(svg);
+    if (size === null) {
+      return { name, path: null, error: deps.pngFailedMessage };
+    }
+    const scale = deps.pngScale();
+    const width = Math.ceil(size.width * scale);
+    const height = Math.ceil(size.height * scale);
+    if (!fitsPng(width, height)) {
+      const fits = [...PNG_SCALES]
+        .reverse()
+        .find((smaller) => fitsPng(Math.ceil(size.width * smaller), Math.ceil(size.height * smaller)));
+      return { name, path: null, error: deps.pngTooLargeMessage(width, height, fits ?? null) };
+    }
+    const backdrop = dark ? DIAGRAM_BACKDROP.dark : DIAGRAM_BACKDROP.light;
+    const png = await deps.toPng(svg, width, height, backdrop);
+    if (!isPngOfSize(png, width, height) || png.byteLength > PNG_LIMITS.bytes) {
+      return { name, path: null, error: deps.pngFailedMessage };
+    }
+    return { name, path, content: png };
   } catch (error: unknown) {
     const message = messageOf(error);
     return {
@@ -234,7 +330,7 @@ async function writeDrawings(
   drawings: readonly Drawing[]
 ): Promise<Pick<ExportOutcome, 'written' | 'failed' | 'kept'> | null> {
   const failed: ExportResult[] = [];
-  const checked: { drawing: Drawing; existing: string | null }[] = [];
+  const checked: { drawing: Drawing; existing: Uint8Array | null }[] = [];
   for (const drawing of drawings) {
     try {
       checked.push({ drawing, existing: await deps.readExisting(drawing.path) });
@@ -244,7 +340,7 @@ async function writeDrawings(
   }
 
   const replacing = checked.filter(
-    ({ drawing, existing }) => existing !== null && existing !== drawing.svg
+    ({ drawing, existing }) => existing !== null && !holds(existing, drawing.content)
   );
   let replace = false;
   if (replacing.length > 0) {
@@ -262,13 +358,13 @@ async function writeDrawings(
   let kept = 0;
   for (const { drawing, existing } of checked) {
     const result = { name: drawing.name, path: drawing.path, error: null };
-    if (existing === drawing.svg) {
+    if (existing !== null && holds(existing, drawing.content)) {
       written.push(result);
     } else if (existing !== null && !replace) {
       kept += 1;
     } else {
       try {
-        await deps.writeFile(drawing.path, drawing.svg, existing !== null);
+        await deps.writeFile(drawing.path, drawing.content, existing !== null);
         written.push(result);
       } catch (error: unknown) {
         failed.push({ name: drawing.name, path: null, error: messageOf(error) });
@@ -279,18 +375,19 @@ async function writeDrawings(
 }
 
 /**
- * Exports a single block under an explicit name. Null when replacing the
- * file already there is declined.
+ * Exports a single block under an explicit name, as an SVG or a PNG.
+ * Null when replacing the file already there is declined.
  */
 export async function exportOne(
   deps: ExporterDeps,
   documentPath: string,
   directory: string,
   block: PlantUmlBlock,
-  name: string
+  name: string,
+  format: ExportFormat = 'svg'
 ): Promise<ExportResult | null> {
-  const drawing = await drawBlock(deps, documentPath, directory, block, name);
-  if (!('svg' in drawing)) {
+  const drawing = await drawBlock(deps, documentPath, directory, block, name, format);
+  if (!('content' in drawing)) {
     return drawing;
   }
   const outcome = await writeDrawings(deps, [drawing]);
@@ -326,8 +423,8 @@ export async function exportAll(
   const failed: ExportResult[] = [];
   for (const [index, block] of named.entries()) {
     onProgress?.(index, named.length, block.name);
-    const drawing = await drawBlock(deps, documentPath, directory, block, block.name);
-    if ('svg' in drawing) {
+    const drawing = await drawBlock(deps, documentPath, directory, block, block.name, 'svg');
+    if ('content' in drawing) {
       drawings.push(drawing);
     } else {
       failed.push(drawing);

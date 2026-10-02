@@ -29,6 +29,7 @@ import {
   DIAGNOSTICS_DEBOUNCE_MS,
   EXTENSION_ID,
   EXTENSION_NAME,
+  PNG_PANEL_TYPE,
   REFRESH_DEBOUNCE_MS,
   VIEWER_DEBOUNCE_MS,
   VIEWER_TYPE,
@@ -42,9 +43,11 @@ import {
   type PlantUmlBlock,
 } from './export/blocks';
 import {
+  PNG_SCALES,
   exportAll,
   exportOne,
   isValidExportDirectory,
+  type ExportFormat,
   type ExporterDeps,
   type ExportOutcome,
 } from './export/exporter';
@@ -101,6 +104,8 @@ const Settings = defineSettings({
       default: 'light',
       scope: 'resource',
     }),
+    // 1, 2 or 4 in the manifest; anything else read is taken as 2.
+    [CONFIG.EXPORT_PNG_SCALE]: setting.integer({ default: 2, minimum: 1, maximum: 4, scope: 'resource' }),
     [CONFIG.HIDE_EXPORTED_IMAGES]: setting.boolean({ default: true }),
     // Resource-scoped: the diagnostics read it per document instead.
     [CONFIG.DIAGNOSTICS_ENABLED]: setting.boolean({ default: true }),
@@ -115,6 +120,11 @@ export const ClearCache = defineCommandContract<readonly [], void>({
 /** Writes the diagram under the cursor to an SVG file. */
 export const ExportSvg = defineCommandContract<readonly [], void>({
   id: COMMANDS.EXPORT_SVG,
+});
+
+/** Writes the diagram under the cursor to a PNG file, at plantumlLocal.exportPngScale. */
+export const ExportPng = defineCommandContract<readonly [], void>({
+  id: COMMANDS.EXPORT_PNG,
 });
 
 /** Writes every named diagram in the active document to SVG files. */
@@ -422,9 +432,12 @@ function exportDirectory(
 }
 
 /** Prompts for a file name for a block that does not carry one. */
-async function askForName(context: OperationContext): Promise<string | null> {
+async function askForName(context: OperationContext, format: ExportFormat): Promise<string | null> {
   const name = await context.ask.text({
-    prompt: context.l10n.t('File name for the exported SVG (without .svg)'),
+    prompt:
+      format === 'svg'
+        ? context.l10n.t('File name for the exported SVG (without .svg)')
+        : context.l10n.t('File name for the exported PNG (without .png)'),
     placeHolder: 'my-diagram',
     validate: (value: string) =>
       isValidBlockName(value)
@@ -467,6 +480,73 @@ function relocateEngineErrors(
 }
 
 /**
+ * Draws `svg` into a PNG of `width`×`height` pixels, in a webview: the
+ * extension host has no canvas, and a converter shipped instead would
+ * bring its own licence and fonts. The panel opens beside the editor
+ * without taking the focus, and closes once the PNG is back. It keeps its
+ * page while hidden behind another tab, so switching tabs meanwhile does
+ * not stop it.
+ */
+function drawPng(
+  l10n: { t(message: string, ...args: string[]): string },
+  svg: string,
+  width: number,
+  height: number,
+  background: string
+): Promise<Uint8Array> {
+  const media = vscode.Uri.joinPath(vscode.Uri.file(__dirname), '..', 'media', 'png');
+  const panel = vscode.window.createWebviewPanel(
+    PNG_PANEL_TYPE,
+    l10n.t('Exporting PNG…'),
+    { viewColumn: vscode.ViewColumn.Beside, preserveFocus: true },
+    { enableScripts: true, enableForms: false, retainContextWhenHidden: true, localResourceRoots: [media] }
+  );
+  const nonce = generateNonce();
+  panel.webview.html = createWebviewHtml({
+    title: 'PNG',
+    // The SVG is read as an image from a Blob URL.
+    csp: generateCSP(panel.webview, { nonce, imgSrc: ['blob:'] }),
+    scripts: [panel.webview.asWebviewUri(vscode.Uri.joinPath(media, 'png.js')).toString()],
+    nonce,
+    body: `<p>${escapeHtml(l10n.t('Drawing a PNG of {0}×{1} pixels…', String(width), String(height)))}</p>`,
+  });
+
+  return new Promise((resolve, reject) => {
+    let done = false;
+    const finish = (result: Uint8Array | Error): void => {
+      if (done) {
+        return;
+      }
+      done = true;
+      clearTimeout(timer);
+      panel.dispose();
+      if (result instanceof Error) {
+        reject(result);
+      } else {
+        resolve(result);
+      }
+    };
+    const timer = setTimeout(() => {
+      finish(new Error(l10n.t('The PNG was not drawn within 30 seconds.')));
+    }, 30_000);
+    // The page is untrusted: only these three answers are acted on.
+    panel.webview.onDidReceiveMessage((message: unknown) => {
+      const { type, data, error } = (message ?? {}) as { type?: unknown; data?: unknown; error?: unknown };
+      if (type === 'ready') {
+        void panel.webview.postMessage({ type: 'draw', svg, width, height, background });
+      } else if (type === 'png' && data instanceof Uint8Array) {
+        finish(data);
+      } else if (type === 'error') {
+        finish(new Error(l10n.t('The PNG could not be drawn: {0}', String(error))));
+      }
+    });
+    panel.onDidDispose(() => {
+      finish(new Error(l10n.t('The PNG was not finished: its panel was closed.')));
+    });
+  });
+}
+
+/**
  * Resolves a path against the document's own folder and writes through
  * `vscode.workspace.fs`, so exporting works on remote and virtual file
  * systems rather than only on local disk.
@@ -497,6 +577,25 @@ function exporterDeps(
       'Pages after newpage cannot be drawn, so only the first page would be. Give each page a block of its own.'
     ),
     engineErrorMessage: (message, line) => engineErrorMessage(context, message, line),
+    pngTooLargeMessage: (width, height, fits) =>
+      fits === null
+        ? context.l10n.t(
+            'The PNG would be {0}×{1} pixels, larger than a PNG is made (8192 a side, 16 million in all), even at a scale of 1. Export it as SVG instead.',
+            String(width),
+            String(height)
+          )
+        : context.l10n.t(
+            'The PNG would be {0}×{1} pixels, larger than a PNG is made (8192 a side, 16 million in all). It fits at plantumlLocal.exportPngScale {2}.',
+            String(width),
+            String(height),
+            String(fits)
+          ),
+    pngFailedMessage: context.l10n.t('The PNG could not be made as asked.'),
+    pngScale: (): number => {
+      const scale = settings.read({ resource: document }).values[CONFIG.EXPORT_PNG_SCALE];
+      return PNG_SCALES.includes(scale as 1 | 2 | 4) ? Number(scale) : 2;
+    },
+    toPng: (svg, width, height, background) => drawPng(context.l10n, svg, width, height, background),
     // Exports default to the light palette regardless of the editor theme:
     // the files face hosts like GitHub, whose background this extension
     // does not control, and a dark diagram on a white page reads as broken.
@@ -516,7 +615,7 @@ function exporterDeps(
     },
     resolve: (documentPath, relative) =>
       vscode.Uri.joinPath(vscode.Uri.parse(documentPath), '..', relative).toString(),
-    readExisting: async (path): Promise<string | null> => {
+    readExisting: async (path): Promise<Uint8Array | null> => {
       const uri = vscode.Uri.parse(path);
       let stat: vscode.FileStat;
       try {
@@ -533,7 +632,7 @@ function exporterDeps(
           context.l10n.t('{0} is a folder, not a file.', vscode.workspace.asRelativePath(uri))
         );
       }
-      return new TextDecoder().decode(await vscode.workspace.fs.readFile(uri));
+      return vscode.workspace.fs.readFile(uri);
     },
     confirmReplace: (paths, canKeep): Promise<'replace' | 'keep' | undefined> => {
       const files = paths.map((path) => vscode.workspace.asRelativePath(vscode.Uri.parse(path)));
@@ -565,7 +664,8 @@ function exporterDeps(
       const temporary = vscode.Uri.joinPath(folder, `.${name}.${random}.tmp`);
       await vscode.workspace.fs.createDirectory(folder);
       try {
-        await vscode.workspace.fs.writeFile(temporary, new TextEncoder().encode(content));
+        const bytes = typeof content === 'string' ? new TextEncoder().encode(content) : content;
+        await vscode.workspace.fs.writeFile(temporary, bytes);
         await vscode.workspace.fs.rename(temporary, target, { overwrite: replace });
       } catch (error: unknown) {
         await Promise.resolve(vscode.workspace.fs.delete(temporary)).catch(() => undefined);
@@ -973,12 +1073,13 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
     },
   });
 
-  module.commands.handle(ExportSvg, {
-    inject: { renderer: Renderer, palettes: Palettes, settings: Settings.token },
-    execute: async (
+  /** Exports the diagram under the cursor, or the only one, as `format`. */
+  const exportAtCursor =
+    (format: ExportFormat) =>
+    async (
       context: OperationContext,
-      _args,
-      { renderer, palettes, settings }
+      _args: readonly [],
+      { renderer, palettes, settings }: { renderer: RendererClient; palettes: ThemePalettes; settings: SettingsReader }
     ): Promise<void> => {
       const document = await activeDocument(context, true);
       if (document === null) {
@@ -1004,7 +1105,7 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
       // validates — is where a usable one comes from. The exporter
       // refuses it regardless; this is what makes the refusal actionable.
       const declared = block.name !== null && isValidBlockName(block.name) ? block.name : null;
-      const name = declared ?? (await askForName(context));
+      const name = declared ?? (await askForName(context, format));
       if (name === null) {
         return;
       }
@@ -1014,13 +1115,13 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         return;
       }
 
-      const result = await exportOne(
-        exporterDeps(context, renderer, palettes, settings, document.textDocument.uri),
-        document.path,
-        directory,
-        block,
-        name
-      );
+      const deps = exporterDeps(context, renderer, palettes, settings, document.textDocument.uri);
+      const result =
+        format === 'svg'
+          ? await exportOne(deps, document.path, directory, block, name)
+          : await context.progress.run({ title: context.l10n.t('Exporting PNG…') }, () =>
+              exportOne(deps, document.path, directory, block, name, 'png')
+            );
 
       if (result === null) {
         return;
@@ -1032,7 +1133,16 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
       }
       context.logger.info(`Exported ${String(result.path)}`);
       await context.notify.info(context.l10n.t('Exported {0}', String(result.path)));
-    },
+    };
+
+  module.commands.handle(ExportSvg, {
+    inject: { renderer: Renderer, palettes: Palettes, settings: Settings.token },
+    execute: exportAtCursor('svg'),
+  });
+
+  module.commands.handle(ExportPng, {
+    inject: { renderer: Renderer, palettes: Palettes, settings: Settings.token },
+    execute: exportAtCursor('png'),
   });
 
   module.commands.handle(ExportAllSvg, {

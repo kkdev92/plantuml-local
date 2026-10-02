@@ -30,6 +30,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   to a file of its own: the one under the cursor, or every named one. A
   diagram is named by an id on its start line, `@startuml(id=orders-api)`,
   and the only diagram of a file may go by the file's name instead.
+- **Export as PNG.** *Export Diagram as PNG* writes the diagram under the
+  cursor as a PNG, for where an SVG does not go, such as a slide or a chat.
+  It is drawn at `plantumlLocal.exportPngScale` times the diagram's own size
+  (1, 2 or 4; 2 by default) on the background of its palette, in a panel that
+  opens beside the editor for the time the drawing takes. A PNG larger than
+  8192 pixels a side or 16 million in all is refused, and the message names
+  the largest scale it would fit at.
 - **Suggestions while typing a diagram**, in ```` ```plantuml ```` blocks
   and `.puml` files: the start line of each diagram type the bundled engine
   draws and the end line of the open one after `@`, the preprocessor

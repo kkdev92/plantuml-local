@@ -2,14 +2,16 @@
   "extension.description": "組み込みの Markdown プレビューで ```plantuml コードブロックを図にします。Java もサーバもネットワーク接続も不要。図のソースは手元の環境で描画します。",
   "command.clearCache.title": "描画キャッシュを捨てて描き直す",
   "command.exportSvg.title": "図を SVG に書き出す",
+  "command.exportPng.title": "図を PNG に書き出す",
   "command.exportAllSvg.title": "ファイル内のすべての図を SVG に書き出す",
   "command.exportAllAndUpdateRefs.title": "すべての図を書き出して参照を更新する",
   "command.openPreview.title": "図のプレビューを開く",
   "command.openPreviewToSide.title": "図のプレビューを横に開く",
   "config.theme.description": "図の配色。\"auto\" は VS Code のテーマに追随します。!theme で選んだテーマの文字がその配色で読みにくい図は、もう一方の配色で描きます。",
   "config.logLevel.description": "出力パネル (PlantUML Local) に出すログの水準。出力パネル側のレベル選択も併せて効きます。",
-  "config.exportDirectory.description": "SVG の書き出し先。Markdown ファイルからの相対パスで指定します。同じ場所なら \".\"。絶対パスと \"..\" は拒否します。",
-  "config.exportTheme.description": "書き出す SVG の配色。書き出した図は GitHub など背景を制御できない場所で見られるため、既定は \"light\" です。\"preview\" にするとプレビューの現在の配色に従います。!theme で選んだテーマの文字がその配色で読みにくい図は、もう一方の配色で書き出します。",
+  "config.exportDirectory.description": "SVG と PNG の書き出し先。Markdown ファイルからの相対パスで指定します。同じ場所なら \".\"。絶対パスと \"..\" は拒否します。",
+  "config.exportTheme.description": "書き出す SVG と PNG の配色。書き出した図は GitHub など背景を制御できない場所で見られるため、既定は \"light\" です。\"preview\" にするとプレビューの現在の配色に従います。!theme で選んだテーマの文字がその配色で読みにくい図は、もう一方の配色で書き出します。",
+  "config.exportPngScale.description": "書き出す PNG の倍率。図そのものの大きさの 1・2・4 倍です。1 辺 8192 ピクセル、全体で 1600 万ピクセルを超える PNG は、縮めずに書き出しを止めます。",
   "config.hideExportedImages.description": "#plantuml-local が付いた画像を Markdown プレビューで隠し、ブロックの描画と書き出した SVG が二重に表示されないようにします。書き出した SVG 自体の見た目を確認したいときはオフにしてください。",
   "config.diagnostics.enabled.description": "開いている Markdown ファイルの図の問題を、プレビューを開いていなくても「問題」パネルに表示します。エンジンのエラーと警告、同梱エンジンが対応していない構文や黙って捨てる内容が対象です。"
 }

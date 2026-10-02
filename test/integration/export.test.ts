@@ -6,7 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import type { RenderResponseMessage } from '../../src/core/types';
 import { findFileDiagrams, findPlantUmlBlocks } from '../../src/export/blocks';
-import { exportAll, type ExporterDeps } from '../../src/export/exporter';
+import { exportAll, svgSize, type ExporterDeps } from '../../src/export/exporter';
 
 /**
  * Exports through the built dist/worker.js, so what lands on disk is the
@@ -58,10 +58,15 @@ const deps: ExporterDeps = {
   pagesMessage: 'Pages after newpage cannot be drawn.',
   engineErrorMessage: (message, line) =>
     line === null ? `PlantUML reported an error: ${message}` : `PlantUML reported an error at line ${String(line)}: ${message}`,
+  pngTooLargeMessage: (width, height) => `The PNG would be ${String(width)}×${String(height)} pixels.`,
+  pngFailedMessage: 'The PNG could not be made as asked.',
+  pngScale: () => 2,
+  // No canvas here: these tests export SVG.
+  toPng: () => Promise.reject(new Error('no canvas')),
   resolve: (documentPath, relative) => resolve(dirname(documentPath), relative),
   readExisting: (path) =>
     import('node:fs/promises').then((fs) =>
-      fs.readFile(path, 'utf8').catch((error: NodeJS.ErrnoException) => {
+      fs.readFile(path).catch((error: NodeJS.ErrnoException) => {
         if (error.code === 'ENOENT') {
           return null;
         }
@@ -102,6 +107,14 @@ afterAll(async () => {
 });
 
 describe('export (dist worker)', () => {
+  it('gives a PNG the size the SVG gives itself, `scale` included', async () => {
+    const plain = svgSize(await render('@startuml\nA -> B\n@enduml'));
+    const scaled = svgSize(await render('@startuml\nscale 2\nA -> B\n@enduml'));
+
+    expect(plain).not.toBeNull();
+    expect(scaled).toEqual({ width: plain!.width * 2, height: plain!.height * 2 });
+  });
+
   it('writes real SVG files beside the document', async () => {
     const document = join(workspace, 'docs/design.md');
     const text = [
