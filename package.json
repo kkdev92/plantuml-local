@@ -51,7 +51,7 @@
   "capabilities": {
     "untrustedWorkspaces": {
       "supported": true,
-      "description": "Diagrams are rendered locally in a worker thread; the extension reads no workspace files and makes no network requests. The export commands are the only actions that write files or edit the document, and they are disabled here."
+      "description": "Diagrams are rendered locally in a worker thread; the extension reads no workspace files and makes no network requests. The export commands, the only actions that write files, are disabled here; naming a diagram and inserting a template edit the document only when asked."
     },
     "virtualWorkspaces": true
   },
@@ -170,6 +170,11 @@
         "category": "PlantUML Local"
       },
       {
+        "command": "plantumlLocal.insertTemplate",
+        "title": "%command.insertTemplate.title%",
+        "category": "PlantUML Local"
+      },
+      {
         "command": "plantumlLocal.openPreview",
         "title": "%command.openPreview.title%",
         "category": "PlantUML Local"
@@ -236,6 +241,10 @@
         {
           "command": "plantumlLocal.assignDiagramName",
           "when": "false"
+        },
+        {
+          "command": "plantumlLocal.insertTemplate",
+          "when": "(editorLangId == markdown || editorLangId == plantuml) && !notebookEditorFocused"
         }
       ]
     },

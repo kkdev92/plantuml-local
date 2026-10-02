@@ -348,6 +348,7 @@ function makeEditor(
 ): TextEditorStub {
   // Mutable so the stub's workspace.applyEdit can write reference lines back.
   let current = text;
+  const inserted: { value: string; line: number; character: number; options: unknown }[] = [];
   return {
     document: {
       languageId: options?.languageId ?? 'markdown',
@@ -372,6 +373,11 @@ function makeEditor(
       },
     },
     selection: { active: { line } },
+    inserted,
+    insertSnippet: (snippet, location, options) => {
+      inserted.push({ value: snippet.value, line: location.line, character: location.character, options });
+      return Promise.resolve(true);
+    },
   };
 }
 
@@ -1473,6 +1479,78 @@ describe('export (dist)', () => {
       ]);
       expect(vscodeStub._test.notifications.info.at(-1)).toBe('Exported 2 diagram(s)');
     });
+  });
+});
+
+describe('Insert Diagram Template (dist)', () => {
+  const insert = async (editor: TextEditorStub, reply: string | null): Promise<void> => {
+    vscodeStub._test.setActiveEditor(editor);
+    vscodeStub._test.quickPickReply = reply;
+    try {
+      await vscodeStub._test.registeredCommands.get('plantumlLocal.insertTemplate')?.();
+    } finally {
+      vscodeStub._test.quickPickReply = null;
+    }
+  };
+
+  it('offers the six kinds, and inserts the one picked as one edit where a diagram can start', async () => {
+    const editor = makeEditor('file:///c/tpl/doc.md', '# Title\n\nText\n', 1);
+    const shown = vscodeStub._test.quickPicksShown.length;
+
+    await insert(editor, 'Sequence diagram');
+
+    expect(vscodeStub._test.quickPicksShown.slice(shown)).toEqual([
+      {
+        title: 'Insert Diagram Template',
+        labels: [
+          'Sequence diagram',
+          'Class diagram',
+          'Activity diagram',
+          'State diagram',
+          'Component diagram',
+          'Use case diagram',
+        ],
+      },
+    ]);
+    expect(editor.inserted).toEqual([
+      {
+        // Apart from the heading above it.
+        value: expect.stringMatching(/^\n```plantuml \$\{1:sequence-diagram\}\n@startuml\n[^]*\n@enduml\n```\n$/),
+        line: 1,
+        character: 0,
+        options: { undoStopBefore: true, undoStopAfter: true, keepWhitespace: true },
+      },
+    ]);
+  });
+
+  it('asks before adding a block after one that holds a diagram, and refuses one inside a diagram', async () => {
+    const markdown = makeEditor('file:///c/tpl/full.md', NAMED_BLOCK, 2);
+    const modals = vscodeStub._test.modals.length;
+
+    // Dismissed, as the stub answers by default.
+    await insert(markdown, 'Class diagram');
+    expect(markdown.inserted).toEqual([]);
+    vscodeStub._test.messageReply = 'Insert After It';
+    try {
+      await insert(markdown, 'Class diagram');
+    } finally {
+      vscodeStub._test.messageReply = null;
+    }
+    expect(vscodeStub._test.modals.slice(modals).map((modal) => modal.message)).toEqual([
+      'This block already holds a diagram. Insert the template as a new block after it?',
+      'This block already holds a diagram. Insert the template as a new block after it?',
+    ]);
+    // After the closing fence, the last line of the document, and apart from it.
+    expect(markdown.inserted).toMatchObject([
+      { line: 4, character: 3, value: expect.stringMatching(/^\n\n```plantuml \$\{1:class-diagram\}\n/) },
+    ]);
+
+    const flows = makeEditor('file:///c/tpl/flows.puml', '@startuml\nA -> B\n@enduml', 1, { languageId: 'plantuml' });
+    await insert(flows, 'State diagram');
+    expect(flows.inserted).toEqual([]);
+    expect(vscodeStub._test.notifications.warn.at(-1)).toBe(
+      'The cursor is in a diagram. A template is a whole diagram: put the cursor outside one.'
+    );
   });
 });
 

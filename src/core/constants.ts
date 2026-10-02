@@ -20,6 +20,7 @@ export const COMMANDS = {
   EXPORT_FOLDER_SVG: `${EXTENSION_ID}.exportFolderSvg`,
   EXPORT_FOLDER_PNG: `${EXTENSION_ID}.exportFolderPng`,
   ASSIGN_DIAGRAM_NAME: `${EXTENSION_ID}.assignDiagramName`,
+  INSERT_TEMPLATE: `${EXTENSION_ID}.insertTemplate`,
 } as const;
 
 /** The view type of the diagram viewer's panels. */

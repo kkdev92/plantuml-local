@@ -48,7 +48,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   diagram can start: as a whole ```` ```plantuml ```` block in the text of a
   Markdown document, as the bare diagram in an empty block or between the
   diagrams of a `.puml` file. Each draws as it is, with its names to tab
-  through.
+  through. *Insert Diagram Template* inserts one at the cursor from the
+  command palette, and offers a new block after a block that holds a
+  diagram.
 - **Folding in `.puml` files.** Each diagram folds from its start line, and
   so do block comments, multi-line notes and texts, `{ … }` bodies,
   preprocessor sections, sequence groups and activity blocks. A file with

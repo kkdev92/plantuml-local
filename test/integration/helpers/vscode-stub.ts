@@ -42,6 +42,9 @@ export interface TextEditorStub {
     setText(text: string): void;
   };
   selection: { active: { line: number } };
+  /** Records each snippet inserted, where and how, in `inserted`. */
+  insertSnippet?(snippet: { value: string }, location: PositionStub, options?: unknown): Promise<boolean>;
+  inserted?: { value: string; line: number; character: number; options: unknown }[];
 }
 
 interface PositionStub {
