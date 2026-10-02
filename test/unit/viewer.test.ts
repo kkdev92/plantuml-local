@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 
-import { DiagramViewer, parseRequest, type ViewerDeps } from '../../src/viewer/viewer';
+import { DiagramViewer, parseRequest, viewerBody, type ViewerDeps } from '../../src/viewer/viewer';
 
 /** A panel that keeps what it is sent. */
 function makePanel(): { post: ReturnType<typeof vi.fn>; sent: unknown[] } {
@@ -87,7 +87,13 @@ describe('DiagramViewer', () => {
       },
     ]);
     expect(of(panel.sent, 'render')).toEqual([
-      { type: 'render', svg: '<svg>@startuml\nC -> D : unnamed\n@enduml</svg>', backdrop: '#1b1b1b' },
+      {
+        type: 'render',
+        svg: '<svg>@startuml\nC -> D : unnamed\n@enduml</svg>',
+        backdrop: '#1b1b1b',
+        // Unnamed: the page keeps its zoom by its position.
+        key: '#1',
+      },
     ]);
     // The last word is an empty status: drawn and current.
     expect(panel.sent.at(-1)).toEqual({ type: 'status', text: '', error: false, clear: false });
@@ -239,7 +245,40 @@ describe('DiagramViewer', () => {
     await first;
 
     expect(of(panel.sent, 'render')).toEqual([
-      { type: 'render', svg: '<svg>@startuml\nnew\n@enduml</svg>', backdrop: '#FFFFFF' },
+      // The lone diagram of a file goes by the file's name.
+      { type: 'render', svg: '<svg>@startuml\nnew\n@enduml</svg>', backdrop: '#FFFFFF', key: 'one' },
     ]);
+  });
+});
+
+describe('viewerBody', () => {
+  const escape = (text: string): string =>
+    text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+  it('has a toolbar whose buttons name what they do and the key that does it too', () => {
+    const body = viewerBody(
+      { toolbar: 'Zoom', zoomOut: 'Zoom Out', zoomIn: 'Zoom In', fit: 'Fit', actualSize: 'Actual Size' },
+      escape
+    );
+
+    expect(body).toContain('<div id="tools" role="toolbar" aria-label="Zoom">');
+    expect(body).toContain('<button id="zoom-out" type="button" aria-label="Zoom Out" title="Zoom Out (-)">−</button>');
+    expect(body).toContain('<button id="zoom-in" type="button" aria-label="Zoom In" title="Zoom In (+)">+</button>');
+    // Fit is a toggle, pressed while the diagram is fitted.
+    expect(body).toContain('<button id="fit" type="button" aria-label="Fit" title="Fit (0)" aria-pressed="true">Fit</button>');
+    expect(body).toContain('<button id="actual" type="button" aria-label="Actual Size" title="Actual Size (1)">100%</button>');
+    expect(body).toContain('<main id="stage" tabindex="0">');
+  });
+
+  it('escapes the labels it is given', () => {
+    const body = viewerBody(
+      { toolbar: '"><script>', zoomOut: 'a&b', zoomIn: 'in', fit: '<b>', actualSize: 'x' },
+      escape
+    );
+
+    expect(body).not.toContain('<script>');
+    expect(body).not.toContain('<b>');
+    expect(body).toContain('aria-label="&quot;&gt;&lt;script&gt;"');
+    expect(body).toContain('aria-label="a&amp;b"');
   });
 });

@@ -1255,6 +1255,11 @@ describe('viewer (dist)', () => {
     expect(csp).toMatch(/script-src 'nonce-[^' ]+'(;|$)/);
     expect(csp).toMatch(/img-src [^;]*blob:/);
     expect(panel?.webview.html).toContain('/media/viewer/viewer.js');
+    // The zoom toolbar, its buttons named in the display language.
+    expect(panel?.webview.html).toContain('<div id="tools" role="toolbar" aria-label="Zoom">');
+    for (const label of ['Zoom Out', 'Zoom In', 'Fit', 'Actual Size']) {
+      expect(panel?.webview.html).toContain(`aria-label="${label}"`);
+    }
     // Nothing is sent before the page says it runs.
     expect(panel?.webview.posted).toEqual([]);
 
@@ -1268,6 +1273,8 @@ describe('viewer (dist)', () => {
       keep: { uri: 'file:///c/view/flows.puml', name: null },
     });
     expect(posted(panel!, 'render')[0]?.svg).toContain('second');
+    // What the page keeps the zoom of this diagram by.
+    expect(posted(panel!, 'render')[0]).toMatchObject({ key: '#1' });
   });
 
   it('keeps one panel per file and draws the diagram it is asked for', async () => {

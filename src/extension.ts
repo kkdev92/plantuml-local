@@ -70,7 +70,7 @@ import type { RenderLog } from './core/types';
 import { RendererClient, defaultWorkerPath } from './render/client';
 import { shareRenders, type SharedRender } from './render/memo';
 import { ThemePalettes } from './render/palette';
-import { DiagramViewer, VIEWER_BODY, type ViewerDeps } from './viewer/viewer';
+import { DiagramViewer, viewerBody, type ToolbarLabels, type ViewerDeps } from './viewer/viewer';
 
 /**
  * Extension entry point: wires VS Code, the markdown-it plugin and the render
@@ -793,6 +793,13 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
       };
       const open = new Map<string, { viewer: DiagramViewer; document: vscode.TextDocument; reveal(): void }>();
       const media = vscode.Uri.joinPath(vscode.Uri.file(__dirname), '..', 'media', 'viewer');
+      const toolbar: ToolbarLabels = {
+        toolbar: l10n.t('Zoom'),
+        zoomOut: l10n.t('Zoom Out'),
+        zoomIn: l10n.t('Zoom In'),
+        fit: l10n.t('Fit'),
+        actualSize: l10n.t('Actual Size'),
+      };
 
       /** Takes over `panel` for `document`: its options, its page and its messages. */
       const attach = (panel: vscode.WebviewPanel, document: vscode.TextDocument): DiagramViewer => {
@@ -809,7 +816,7 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
           styles: [panel.webview.asWebviewUri(vscode.Uri.joinPath(media, 'viewer.css')).toString()],
           scripts: [panel.webview.asWebviewUri(vscode.Uri.joinPath(media, 'viewer.js')).toString()],
           nonce,
-          body: VIEWER_BODY,
+          body: viewerBody(toolbar, escapeHtml),
         });
         const viewer = new DiagramViewer(
           { post: (message): Promise<boolean> => Promise.resolve(panel.webview.postMessage(message)) },

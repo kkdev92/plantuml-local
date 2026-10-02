@@ -4,9 +4,10 @@
  *
  * The page (media/viewer/viewer.js) shows the SVG through an `<img>`
  * holding a Blob URL. As an image, nothing in the SVG can run, whatever the
- * sanitiser might have missed. The page keeps no state: each time it is
- * created — again whenever the panel comes back into view — it says so, and
- * gets the list of diagrams and the drawing again.
+ * sanitiser might have missed. Each time the page is created — again
+ * whenever the panel comes back into view — it says so, and gets the list
+ * of diagrams and the drawing again. All it keeps is the file and diagram
+ * it is told to, for a restart, and how each diagram was zoomed.
  *
  * Like the exporter, this has no dependency on the `vscode` module: the
  * panel and the renderer arrive as ports, and the caller hands over the
@@ -67,11 +68,34 @@ export function parseRequest(message: unknown, count: number): ViewerRequest | n
   return null;
 }
 
-/** The body of the page; media/viewer/viewer.js fills it. */
-export const VIEWER_BODY = [
-  '<header><select id="diagrams" hidden></select><span id="status" role="status"></span></header>',
-  '<main id="stage"><img id="diagram" alt="" hidden></main>',
-].join('');
+/** The zoom toolbar's text, localised by the caller. */
+export interface ToolbarLabels {
+  toolbar: string;
+  zoomOut: string;
+  zoomIn: string;
+  fit: string;
+  actualSize: string;
+}
+
+/**
+ * The body of the page, which media/viewer/viewer.js fills. Each button's
+ * tooltip names the key that does the same.
+ */
+export function viewerBody(labels: ToolbarLabels, escape: (text: string) => string): string {
+  const button = (id: string, text: string, label: string, key: string, more = ''): string =>
+    `<button id="${id}" type="button" aria-label="${escape(label)}" title="${escape(`${label} (${key})`)}"${more}>${escape(text)}</button>`;
+  return [
+    '<header><select id="diagrams" hidden></select><span id="status" role="status"></span>',
+    `<div id="tools" role="toolbar" aria-label="${escape(labels.toolbar)}">`,
+    button('zoom-out', '−', labels.zoomOut, '-'),
+    '<span id="zoom" aria-live="polite"></span>',
+    button('zoom-in', '+', labels.zoomIn, '+'),
+    button('fit', labels.fit, labels.fit, '0', ' aria-pressed="true"'),
+    button('actual', '100%', labels.actualSize, '1'),
+    '</div></header>',
+    '<main id="stage" tabindex="0"><div id="canvas"><img id="diagram" alt="" hidden draggable="false"></div></main>',
+  ].join('');
+}
 
 /** One PlantUML file's viewer. */
 export class DiagramViewer {
@@ -177,6 +201,8 @@ export class DiagramViewer {
         type: 'render',
         svg,
         backdrop: dark ? DIAGRAM_BACKDROP.dark : DIAGRAM_BACKDROP.light,
+        // Which diagram this is, so the page keeps each one's zoom apart.
+        key: diagram.name ?? `#${String(index)}`,
       });
       // The engine draws its errors: the drawing stays, and the reason is
       // named with the line of the file it points to. sourceLine counts

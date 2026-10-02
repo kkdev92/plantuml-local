@@ -19,6 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   panel. The panel draws the diagram again as the file changes and when the
   palette changes, and comes back when VS Code restarts. It shows the SVG as
   an image, so nothing in it can run.
+- **Zoom in the `.puml` preview.** The diagram is fitted to the panel, never
+  past 100%, and can be zoomed with the buttons above it, the keys `-`, `+`,
+  `0` and `1`, Ctrl+wheel (Cmd on macOS) or a pinch at the pointer, and moved
+  with the wheel, a drag or the arrow keys. Each diagram keeps its zoom and
+  position while it is redrawn, while the panel is hidden, and across a
+  restart.
 - **Export from `.puml` files.** *Export Diagram as SVG* and *Export All
   Diagrams as SVG* work in a PlantUML file too, writing each of its diagrams
   to a file of its own: the one under the cursor, or every named one. A

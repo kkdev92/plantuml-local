@@ -1,9 +1,17 @@
 /* The diagram viewer's page. Colours come from the VS Code theme, except
    behind the diagram, which gets the backdrop of the palette it was drawn in. */
 
+html,
 body {
+	height: 100%;
+}
+
+body {
+	display: flex;
+	flex-direction: column;
 	margin: 0;
 	padding: 0;
+	overflow: hidden;
 	color: var(--vscode-foreground);
 	background: var(--vscode-editor-background);
 	font-family: var(--vscode-font-family);
@@ -12,6 +20,8 @@ body {
 
 header {
 	display: flex;
+	flex: none;
+	flex-wrap: wrap;
 	gap: 0.75rem;
 	align-items: center;
 	padding: 0.5rem 1rem;
@@ -29,14 +39,79 @@ select {
 	color: var(--vscode-errorForeground);
 }
 
-#stage {
-	margin: 1rem;
-	padding: 1rem;
-	overflow: auto;
+#tools {
+	display: flex;
+	gap: 0.25rem;
+	align-items: center;
+	margin-left: auto;
+}
+
+#tools button {
+	min-width: 1.75rem;
+	padding: 0.1rem 0.5rem;
+	color: var(--vscode-button-secondaryForeground);
+	background: var(--vscode-button-secondaryBackground);
+	border: 1px solid var(--vscode-button-border, transparent);
+	font: inherit;
+	cursor: pointer;
+}
+
+#tools button:hover:not(:disabled) {
+	background: var(--vscode-button-secondaryHoverBackground);
+}
+
+/* Not by colour alone: the pressed button is also bold. */
+#tools button[aria-pressed='true'] {
+	color: var(--vscode-button-foreground);
+	background: var(--vscode-button-background);
+	font-weight: 600;
+}
+
+#tools button[aria-pressed='true']:hover:not(:disabled) {
+	background: var(--vscode-button-hoverBackground);
+}
+
+#tools button:disabled {
+	opacity: 0.5;
+	cursor: default;
+}
+
+#zoom {
+	min-width: 3.5em;
 	text-align: center;
+	font-variant-numeric: tabular-nums;
+}
+
+button:focus-visible,
+select:focus-visible,
+#stage:focus-visible {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: -1px;
+}
+
+#stage {
+	flex: 1;
+	min-height: 0;
+	overflow: auto;
+	cursor: grab;
+}
+
+#stage.dragging {
+	cursor: grabbing;
+}
+
+/* At least the size of the stage, whatever its scroll bars take, with the
+   diagram in the middle. The page script sets the size and the padding. */
+#canvas {
+	position: relative;
+	display: grid;
+	place-items: center;
+	box-sizing: border-box;
+	min-width: 100%;
+	min-height: 100%;
 }
 
 #diagram {
-	max-width: 100%;
-	height: auto;
+	user-select: none;
+	-webkit-user-drag: none;
 }
