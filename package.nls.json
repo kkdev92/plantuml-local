@@ -8,6 +8,7 @@
   "command.exportFolderSvg.title": "Export All Diagrams in Folder as SVG",
   "command.exportFolderPng.title": "Export All Diagrams in Folder as PNG",
   "command.assignDiagramName.title": "Name Diagram for Export",
+  "command.insertTemplate.title": "Insert Diagram Template",
   "command.openPreview.title": "Open Diagram Preview",
   "command.openPreviewToSide.title": "Open Diagram Preview to the Side",
   "config.theme.description": "Diagram colour palette. \"auto\" follows the VS Code colour theme. A diagram whose !theme would be hard to read in the palette is drawn in the other one.",

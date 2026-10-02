@@ -8,6 +8,7 @@
   "command.exportFolderSvg.title": "フォルダー内のすべての図を SVG に書き出す",
   "command.exportFolderPng.title": "フォルダー内のすべての図を PNG に書き出す",
   "command.assignDiagramName.title": "図に書き出し用の名前を付ける",
+  "command.insertTemplate.title": "図のテンプレートを挿入",
   "command.openPreview.title": "図のプレビューを開く",
   "command.openPreviewToSide.title": "図のプレビューを横に開く",
   "config.theme.description": "図の配色。\"auto\" は VS Code のテーマに追随します。!theme で選んだテーマの文字がその配色で読みにくい図は、もう一方の配色で描きます。",

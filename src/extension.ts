@@ -67,9 +67,11 @@ import {
   readCompletionData,
   suggest,
   suggestTemplates,
+  TEMPLATES,
   type CompletionData,
   type Suggestions,
 } from './language/completion';
+import { templatePlace } from './language/templates';
 import { namesDiagram, unnamedAt, withName } from './language/code-actions';
 import { foldingRanges } from './language/folding';
 import { declarations, type Declaration } from './language/symbols';
@@ -180,6 +182,23 @@ export const ExportFolderPng = defineCommandContract<readonly unknown[], void>({
 export const AssignDiagramName = defineCommandContract<readonly unknown[], void>({
   id: COMMANDS.ASSIGN_DIAGRAM_NAME,
 });
+
+/** Inserts a diagram template where a diagram can start (src/language/templates.ts). */
+export const InsertTemplate = defineCommandContract<readonly [], void>({
+  id: COMMANDS.INSERT_TEMPLATE,
+});
+
+/** What each kind of template is shown as, in the display language. */
+function templateNames(l10n: { t(message: string): string }): Record<string, string> {
+  return {
+    sequence: l10n.t('Sequence diagram'),
+    class: l10n.t('Class diagram'),
+    activity: l10n.t('Activity diagram'),
+    state: l10n.t('State diagram'),
+    component: l10n.t('Component diagram'),
+    usecase: l10n.t('Use case diagram'),
+  };
+}
 
 /**
  * Exports every named diagram, then inserts or updates the marked image
@@ -1952,14 +1971,7 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
       let data: CompletionData | undefined;
       let scanned = '';
       let blocks: readonly PlantUmlBlock[] = [];
-      const templateNames: Record<string, string> = {
-        sequence: l10n.t('Sequence diagram'),
-        class: l10n.t('Class diagram'),
-        activity: l10n.t('Activity diagram'),
-        state: l10n.t('State diagram'),
-        component: l10n.t('Component diagram'),
-        usecase: l10n.t('Use case diagram'),
-      };
+      const names = templateNames(l10n);
 
       /** What the list offers at `position`, from where on its line. */
       const find = (
@@ -1989,7 +2001,7 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
           // The text of the document: a whole diagram block can start here.
           const fits = isProseLine(document.getText(), position.line);
           const before = text.slice(0, position.character);
-          return { found: fits ? suggestTemplates(before, after, true, templateNames) : null, offset: 0 };
+          return { found: fits ? suggestTemplates(before, after, true, names) : null, offset: 0 };
         }
 
         // The block's lines up to the cursor, without its quote markers.
@@ -2013,7 +2025,7 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         );
         return (
           suggest(before, after, open, data) ??
-          (open === null ? suggestTemplates(before, after, false, templateNames) : null)
+          (open === null ? suggestTemplates(before, after, false, names) : null)
         );
       };
 
@@ -2145,6 +2157,59 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         registration.dispose();
       });
     },
+  });
+
+  module.commands.handle(InsertTemplate, async (context: OperationContext): Promise<void> => {
+    const editor = vscode.window.activeTextEditor;
+    const languageId = editor?.document.languageId;
+    if (editor === undefined || (languageId !== 'markdown' && languageId !== 'plantuml')) {
+      void context.notify.warn(context.l10n.t('Open a Markdown or PlantUML file to insert a template into.'));
+      return;
+    }
+    const names = templateNames(context.l10n);
+    const picked = await context.ask.one(
+      TEMPLATES.map((template) => ({
+        label: names[template.kind] ?? template.kind,
+        description: `puml-${template.kind}`,
+        template,
+      })),
+      { title: context.l10n.t('Insert Diagram Template') }
+    );
+    if (picked === undefined) {
+      return;
+    }
+    const place = templatePlace(
+      editor.document.getText(),
+      editor.selection.active.line,
+      languageId === 'plantuml',
+      picked.template.kind,
+      picked.template.diagram
+    );
+    if (place.kind === 'refused') {
+      void context.notify.warn(
+        place.reason === 'diagram'
+          ? context.l10n.t('The cursor is in a diagram. A template is a whole diagram: put the cursor outside one.')
+          : context.l10n.t(
+              'A diagram cannot start here: put the cursor in the text of the document, not in a comment or in a block of another language.'
+            )
+      );
+      return;
+    }
+    if (place.kind === 'after') {
+      const answer = await context.notify.info(
+        context.l10n.t('This block already holds a diagram. Insert the template as a new block after it?'),
+        { modal: true, actions: [{ title: context.l10n.t('Insert After It'), value: 'after' as const }] }
+      );
+      if (answer !== 'after') {
+        return;
+      }
+    }
+    // One edit, which one Undo takes back, with the lines as they are.
+    await editor.insertSnippet(new vscode.SnippetString(place.text), new vscode.Position(place.line, place.character), {
+      undoStopBefore: true,
+      undoStopAfter: true,
+      keepWhitespace: true,
+    });
   });
 
   module.commands.handle(AssignDiagramName, async (context: OperationContext, args): Promise<void> => {
