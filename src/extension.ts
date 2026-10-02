@@ -7,6 +7,7 @@ import {
   defineExtension,
   defineModule,
   defineSettings,
+  defineStorage,
   escapeHtml,
   generateCSP,
   generateNonce,
@@ -14,6 +15,7 @@ import {
   setting,
   type OperationContext,
   type ServiceToken,
+  type TypedStorage,
 } from '@kkdev92/vscode-ext-kit';
 import type MarkdownIt from 'markdown-it';
 import { randomBytes } from 'node:crypto';
@@ -56,6 +58,7 @@ import {
   type ExportOutcome,
 } from './export/exporter';
 import { MAX_DOCUMENTS, findDocuments } from './export/folder';
+import { isLastExport, withExport, type ExportRecords } from './export/ownership';
 import { START, forEachCodeLine } from './core/shape';
 import { lineAfterEdits, planReferenceEdits, type ReferenceEdit } from './export/references';
 import {
@@ -124,6 +127,16 @@ const Settings = defineSettings({
     // Resource-scoped: the diagnostics read it per document instead.
     [CONFIG.DIAGNOSTICS_ENABLED]: setting.boolean({ default: true }),
   },
+});
+
+/**
+ * What the export commands wrote, kept in the workspace's state on this
+ * machine (src/export/ownership.ts).
+ */
+const ExportedFiles = defineStorage<ExportRecords>({
+  key: 'exportedFiles',
+  scope: 'workspace',
+  defaultValue: {},
 });
 
 /** Clears the render cache so every diagram on the page is drawn again. */
@@ -605,6 +618,7 @@ function exporterDeps(
   renderer: RendererClient,
   palettes: ThemePalettes,
   settings: SettingsReader,
+  exportRecords: TypedStorage<ExportRecords>,
   document: vscode.Uri
 ): ExporterDeps {
   return {
@@ -684,6 +698,19 @@ function exporterDeps(
       }
       return vscode.workspace.fs.readFile(uri);
     },
+    // Open with unsaved edits, it is someone's work, whoever wrote it last.
+    wroteLast: (path, source, existing): boolean =>
+      !vscode.workspace.textDocuments.some((open) => open.isDirty && open.uri.toString() === path) &&
+      isLastExport(exportRecords.get(), path, source, existing),
+    noteWritten: async (path, source, content): Promise<void> => {
+      const records = exportRecords.get();
+      const next = withExport(records, path, source, content);
+      if (next !== records) {
+        await exportRecords.set(next).catch((error: unknown) => {
+          context.logger.warn(`Could not record the export of ${path}: ${String(error)}`);
+        });
+      }
+    },
     confirmReplace: (paths, canKeep): Promise<'replace' | 'keep' | undefined> => {
       const files = paths.map((path) => vscode.workspace.asRelativePath(vscode.Uri.parse(path)));
       const replace = { title: context.l10n.t('Replace'), value: 'replace' as const };
@@ -734,12 +761,13 @@ function runBulkExport(
   renderer: RendererClient,
   palettes: ThemePalettes,
   settings: SettingsReader,
+  exportRecords: TypedStorage<ExportRecords>,
   document: ActiveDocument,
   directory: string
 ): Promise<ExportOutcome | null> {
   return context.progress.run({ title: context.l10n.t('Exporting diagrams…') }, (report) =>
     exportAll(
-      exporterDeps(context, renderer, palettes, settings, document.textDocument.uri),
+      exporterDeps(context, renderer, palettes, settings, exportRecords, document.textDocument.uri),
       document.path,
       directory,
       diagramsOf(document.textDocument, document.text),
@@ -920,6 +948,7 @@ function applyReferenceEdits(
 
 export const plantuml = defineModule('plantuml', (module): undefined => {
   module.settings.add(Settings);
+  module.storage.add(ExportedFiles);
 
   module.services.singleton(Renderer, {
     inject: { logger: Log, settings: Settings.token },
@@ -1233,7 +1262,17 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
     async (
       context: OperationContext,
       _args: readonly [],
-      { renderer, palettes, settings }: { renderer: RendererClient; palettes: ThemePalettes; settings: SettingsReader }
+      {
+        renderer,
+        palettes,
+        settings,
+        exportRecords,
+      }: {
+        renderer: RendererClient;
+        palettes: ThemePalettes;
+        settings: SettingsReader;
+        exportRecords: TypedStorage<ExportRecords>;
+      }
     ): Promise<void> => {
       const document = await activeDocument(context, true);
       if (document === null) {
@@ -1269,7 +1308,7 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         return;
       }
 
-      const deps = exporterDeps(context, renderer, palettes, settings, document.textDocument.uri);
+      const deps = exporterDeps(context, renderer, palettes, settings, exportRecords, document.textDocument.uri);
       const result =
         format === 'svg'
           ? await exportOne(deps, document.path, directory, block, name)
@@ -1290,21 +1329,21 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
     };
 
   module.commands.handle(ExportSvg, {
-    inject: { renderer: Renderer, palettes: Palettes, settings: Settings.token },
+    inject: { renderer: Renderer, palettes: Palettes, settings: Settings.token, exportRecords: ExportedFiles.token },
     execute: exportAtCursor('svg'),
   });
 
   module.commands.handle(ExportPng, {
-    inject: { renderer: Renderer, palettes: Palettes, settings: Settings.token },
+    inject: { renderer: Renderer, palettes: Palettes, settings: Settings.token, exportRecords: ExportedFiles.token },
     execute: exportAtCursor('png'),
   });
 
   module.commands.handle(ExportAllSvg, {
-    inject: { renderer: Renderer, palettes: Palettes, settings: Settings.token },
+    inject: { renderer: Renderer, palettes: Palettes, settings: Settings.token, exportRecords: ExportedFiles.token },
     execute: async (
       context: OperationContext,
       _args,
-      { renderer, palettes, settings }
+      { renderer, palettes, settings, exportRecords }
     ): Promise<void> => {
       const document = await activeDocument(context, true);
       if (document === null) {
@@ -1316,7 +1355,7 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         return;
       }
 
-      const outcome = await runBulkExport(context, renderer, palettes, settings, document, directory);
+      const outcome = await runBulkExport(context, renderer, palettes, settings, exportRecords, document, directory);
       if (outcome === null) {
         return;
       }
@@ -1331,11 +1370,11 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
   });
 
   module.commands.handle(ExportAllAndUpdateRefs, {
-    inject: { renderer: Renderer, palettes: Palettes, settings: Settings.token },
+    inject: { renderer: Renderer, palettes: Palettes, settings: Settings.token, exportRecords: ExportedFiles.token },
     execute: async (
       context: OperationContext,
       _args,
-      { renderer, palettes, settings }
+      { renderer, palettes, settings, exportRecords }
     ): Promise<void> => {
       const document = await activeDocument(context, false);
       if (document === null) {
@@ -1347,7 +1386,7 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         return;
       }
 
-      const outcome = await runBulkExport(context, renderer, palettes, settings, document, directory);
+      const outcome = await runBulkExport(context, renderer, palettes, settings, exportRecords, document, directory);
       if (outcome === null) {
         return;
       }
@@ -1398,11 +1437,11 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
   });
 
   module.commands.handle(ExportFolderSvg, {
-    inject: { renderer: Renderer, palettes: Palettes, settings: Settings.token },
+    inject: { renderer: Renderer, palettes: Palettes, settings: Settings.token, exportRecords: ExportedFiles.token },
     execute: async (
       context: OperationContext,
       args,
-      { renderer, palettes, settings }
+      { renderer, palettes, settings, exportRecords }
     ): Promise<void> => {
       // It reads files and writes them, so like the other exports it does
       // not run in an untrusted workspace.
@@ -1493,7 +1532,7 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
               increment: 100 / planned.length,
             });
             const result = await drawDocument(
-              exporterDeps(context, renderer, palettes, settings, source.uri),
+              exporterDeps(context, renderer, palettes, settings, exportRecords, source.uri),
               source.uri.toString(),
               source.directory,
               source.blocks
@@ -1508,7 +1547,7 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
           if (signal.aborted) {
             return undefined;
           }
-          return writeDocuments(exporterDeps(context, renderer, palettes, settings, folder), drawn);
+          return writeDocuments(exporterDeps(context, renderer, palettes, settings, exportRecords, folder), drawn);
         }
       );
       if (outcome === undefined || outcome === null) {

@@ -102,10 +102,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Export asks before replacing a file that holds something else.** A file
   already at the target was overwritten without a word, even one put there by
   hand. The export commands now leave a file that already holds the diagram as
-  it is, and ask before replacing any other: once for all of them, with the
-  choice of keeping those files and writing the rest. Each file is written
-  under a temporary name beside the target and renamed over it, so an export
-  that fails part way no longer leaves half an image.
+  it is, replace one they wrote from the same document if it has not changed
+  since, and ask before replacing any other: once for all of them, with the
+  choice of keeping those files and writing the rest. What they wrote is kept
+  in the workspace's state on this machine, as each file, its document and a
+  SHA-256 of the contents. Each file is written under a temporary name beside
+  the target and renamed over it, so an export that fails part way no longer
+  leaves half an image.
 - `plantumlLocal.exportDirectory` and `plantumlLocal.exportTheme` can be set
   per folder, and are read for the document being exported.
 - Block names are limited to 128 characters, and the bulk export commands
