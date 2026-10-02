@@ -499,8 +499,8 @@ themes paint no background of their own, leaving the diagram on the backdrop
 of the palette. When the theme's text would be hard to read on that backdrop,
 the diagram is drawn in the other palette instead — a theme made for a white
 page, such as `plain` or `cerulean`, gets the light palette in a dark editor.
-So does a diagram with the Azure icons, whose boxes are white whatever the
-palette. This applies to the preview and to exports alike.
+So does a diagram with the Azure icons and no theme, whose boxes are white
+whatever the palette. This applies to the preview and to exports alike.
 
 ---
 

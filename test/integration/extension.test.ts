@@ -305,22 +305,25 @@ describe('extension (dist)', () => {
     }
   });
 
-  it('draws a diagram with the Azure icons in the light palette in a dark theme', async () => {
+  it('draws a diagram with the Azure icons in the light palette in a dark theme, unless it picks a theme', async () => {
     const md = makeMd(() => '<pre></pre>');
     api.extendMarkdownIt(md);
-    const source = [
-      '@startuml',
+    const lines = [
       '!include <azure/AzureCommon>',
       '!include <azure/Compute/AzureFunction>',
       'AzureFunction(fn, "Orders", "Functions")',
       '@enduml',
-    ].join('\n');
+    ];
+    const source = ['@startuml', ...lines].join('\n');
+    // A theme made for a dark page keeps the dark one.
+    const themed = ['@startuml', '!theme cyborg', ...lines].join('\n');
 
     vscodeStub._test.setThemeKind(vscodeStub.ColorThemeKind.Dark);
     try {
       const html = await waitForRender(md, 'plantuml', source);
       expect(html).toContain('plantuml-diagram--light');
       expect(html).toContain('Orders');
+      expect(await waitForRender(md, 'plantuml', themed)).toContain('plantuml-diagram--dark');
     } finally {
       vscodeStub._test.setThemeKind(vscodeStub.ColorThemeKind.Light);
     }

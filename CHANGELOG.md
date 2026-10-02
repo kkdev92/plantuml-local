@@ -137,8 +137,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `file:///c%3A/…/orders.svg`.
 - **Diagrams with the Azure icons can be read in a dark editor.** Their boxes
   are white in either palette, and the dark palette made their text white as
-  well. Such a diagram is now drawn in the light palette, in the preview and
-  in exports.
+  well. Such a diagram, unless it picks a theme, is now drawn in the light
+  palette, in the preview and in exports.
 - **A diagram missing its `@enduml` line is drawn.** The engine failed on it
   with `java.lang.IndexOutOfBoundsException`. The preview now draws it as if
   the block ended with the line, with a note saying so, and export writes it.
