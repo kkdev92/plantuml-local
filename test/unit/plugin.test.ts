@@ -1,6 +1,7 @@
 import type MarkdownIt from 'markdown-it';
 import { describe, expect, it, vi } from 'vitest';
 
+import { MAX_CACHE_ENTRIES, MAX_DOCUMENTS_IN_VIEW } from '../../src/core/constants';
 import { createPlantUmlPlugin, type PluginDeps, type UpdateMode } from '../../src/preview/plugin';
 
 /**
@@ -520,6 +521,47 @@ describe('createPlantUmlPlugin', () => {
     const before = h.deps.render.mock.calls.length;
     expect(h.fence('plantuml', 'only')).toContain('<svg>');
     expect(h.deps.render.mock.calls.length).toBe(before);
+  });
+
+  it('keeps every diagram a preview shows, however many there are', async () => {
+    // Evicting one would have the next refresh render it again, and that
+    // render would evict another: the preview would never settle.
+    const h = makeHarness();
+    const sources = Array.from({ length: MAX_CACHE_ENTRIES + 50 }, (_, i) => `diagram ${String(i)}`);
+    // VS Code draws a preview with a new env each time.
+    const pass = (): string[] => {
+      const env = { currentDocument: 'file:///docs/big.md' };
+      return sources.map((source) => h.fence('plantuml', source, env));
+    };
+
+    pass();
+    await h.settle();
+    const rendered = h.deps.render.mock.calls.length;
+
+    const html = pass();
+    await h.started();
+    expect(h.deps.render.mock.calls.length).toBe(rendered);
+    expect(html.every((block, i) => block.includes(`<svg>${String(sources[i])}</svg>`))).toBe(true);
+  });
+
+  it('lets the diagrams of documents no longer previewed go', async () => {
+    const h = makeHarness();
+    h.fence('plantuml', 'old', { currentDocument: 'file:///docs/old.md' });
+    await h.settle();
+
+    // Other documents are previewed since, then enough diagrams to fill the cache.
+    for (let i = 0; i < MAX_DOCUMENTS_IN_VIEW; i++) {
+      h.fence('plantuml', `doc ${String(i)}`, { currentDocument: `file:///docs/${String(i)}.md` });
+    }
+    for (let i = 0; i < MAX_CACHE_ENTRIES; i++) {
+      h.fence('plantuml', `filler ${String(i)}`);
+    }
+    await h.settle();
+
+    const before = h.deps.render.mock.calls.length;
+    h.fence('plantuml', 'old');
+    await h.started();
+    expect(h.deps.render.mock.calls.length).toBe(before + 1);
   });
 });
 

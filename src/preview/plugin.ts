@@ -5,6 +5,7 @@ import {
   EXPORT_FRAGMENT,
   MAX_CACHE_BYTES,
   MAX_CACHE_ENTRIES,
+  MAX_DOCUMENTS_IN_VIEW,
   hasRemoteReference,
   isDiagramFence,
 } from '../core/constants';
@@ -117,7 +118,11 @@ interface BoundedStore {
  * than bytes on the wire — SVG is overwhelmingly ASCII, so the two are
  * close, and the point is to bound memory, not to be exact.
  */
-function createBoundedStore(maxEntries: number, maxSize: number): BoundedStore {
+function createBoundedStore(
+  maxEntries: number,
+  maxSize: number,
+  pinned: (key: string) => boolean = () => false
+): BoundedStore {
   /** Insertion order doubles as eviction order. */
   const entries = new Map<string, string>();
   let size = 0;
@@ -128,6 +133,16 @@ function createBoundedStore(maxEntries: number, maxSize: number): BoundedStore {
       size -= existing.length;
       entries.delete(key);
     }
+  }
+
+  /** The oldest entry that may go: not pinned, and not the one just set. */
+  function oldestEvictable(newest: string): string | undefined {
+    for (const key of entries.keys()) {
+      if (key !== newest && !pinned(key)) {
+        return key;
+      }
+    }
+    return undefined;
   }
 
   return {
@@ -144,7 +159,7 @@ function createBoundedStore(maxEntries: number, maxSize: number): BoundedStore {
       size += value.length;
 
       while (entries.size > maxEntries || (size > maxSize && entries.size > 1)) {
-        const oldest = entries.keys().next().value;
+        const oldest = oldestEvictable(key);
         if (oldest === undefined) {
           break;
         }
@@ -155,10 +170,46 @@ function createBoundedStore(maxEntries: number, maxSize: number): BoundedStore {
 }
 
 export function createPlantUmlPlugin(deps: PluginDeps): PlantUmlPlugin {
+  /**
+   * Document → the keys of the diagrams its latest preview showed, for the
+   * documents previewed last. Those are never evicted: with more diagrams
+   * in view than the cache holds, the next refresh would render an evicted
+   * one again, its render would evict another, and the preview would never
+   * settle.
+   */
+  const inView = new Map<string, { env: unknown; keys: Set<string> }>();
+
+  function isInView(key: string): boolean {
+    for (const pass of inView.values()) {
+      if (pass.keys.has(key)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** Notes that `document`'s preview, being drawn with `env`, shows `key`. */
+  function showing(document: string, env: unknown, key: string): void {
+    let pass = inView.get(document);
+    // VS Code draws a preview with a new env each time: a new pass.
+    if (pass === undefined || pass.env !== env) {
+      inView.delete(document);
+      pass = { env, keys: new Set<string>() };
+      inView.set(document, pass);
+      if (inView.size > MAX_DOCUMENTS_IN_VIEW) {
+        const oldest = inView.keys().next().value;
+        if (oldest !== undefined) {
+          inView.delete(oldest);
+        }
+      }
+    }
+    pass.keys.add(key);
+  }
+
   /** key → sanitised SVG in the wrapper that names its palette. */
-  const rendered = createBoundedStore(MAX_CACHE_ENTRIES, MAX_CACHE_BYTES);
+  const rendered = createBoundedStore(MAX_CACHE_ENTRIES, MAX_CACHE_BYTES, isInView);
   /** key → error message for renders that failed. */
-  const failed = createBoundedStore(MAX_CACHE_ENTRIES, MAX_CACHE_BYTES);
+  const failed = createBoundedStore(MAX_CACHE_ENTRIES, MAX_CACHE_BYTES, isInView);
   /** Keys currently rendering, so a preview refresh does not re-enqueue. */
   const inFlight = new Set<string>();
   /**
@@ -328,6 +379,9 @@ export function createPlantUmlPlugin(deps: PluginDeps): PlantUmlPlugin {
 
         const document = documentOf(env);
         const position = document === undefined ? undefined : positionKey(tokens, index, document);
+        if (document !== undefined) {
+          showing(document, env, key);
+        }
 
         const html = rendered.get(key);
         if (html !== undefined) {
