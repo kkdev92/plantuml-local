@@ -16,7 +16,7 @@
 
 import { DIAGRAM_BACKDROP, EMOJI_UNAVAILABLE, hasRemoteReference } from '../core/constants';
 import { diagramShape } from '../core/shape';
-import { blockAtLine, findFileDiagrams } from '../export/blocks';
+import { blockAtLine, findFileDiagrams, type PlantUmlBlock } from '../export/blocks';
 import { recognizeEngineError } from '../render/engine-error';
 
 /** What the viewer needs of its panel. */
@@ -47,11 +47,16 @@ export interface ViewerDeps {
   render(source: string, dark: boolean): Promise<string>;
   resolvePalette(source: string, dark: boolean): Promise<boolean>;
   isDark(): boolean;
+  /**
+   * Exports the diagram that starts on `line` of the file at `uri` as a
+   * PNG, as Export Diagram as PNG does at the cursor.
+   */
+  exportPng(uri: string, line: number): Promise<void>;
   labels: ViewerLabels;
 }
 
 /** What the page may ask for. Anything else it sends is ignored. */
-export type ViewerRequest = { type: 'ready' } | { type: 'select'; index: number };
+export type ViewerRequest = { type: 'ready' } | { type: 'select'; index: number } | { type: 'exportPng' };
 
 /** Reads a message from the page, which is untrusted, against `count` diagrams. */
 export function parseRequest(message: unknown, count: number): ViewerRequest | null {
@@ -59,8 +64,8 @@ export function parseRequest(message: unknown, count: number): ViewerRequest | n
     return null;
   }
   const { type, index } = message as { type?: unknown; index?: unknown };
-  if (type === 'ready') {
-    return { type: 'ready' };
+  if (type === 'ready' || type === 'exportPng') {
+    return { type };
   }
   if (type === 'select' && typeof index === 'number' && Number.isInteger(index)) {
     return index >= 0 && index < count ? { type: 'select', index } : null;
@@ -75,6 +80,8 @@ export interface ToolbarLabels {
   zoomIn: string;
   fit: string;
   actualSize: string;
+  /** The PNG button, which exports the diagram shown. */
+  exportPng: string;
 }
 
 /**
@@ -92,7 +99,9 @@ export function viewerBody(labels: ToolbarLabels, escape: (text: string) => stri
     button('zoom-in', '+', labels.zoomIn, '+'),
     button('fit', labels.fit, labels.fit, '0', ' aria-pressed="true"'),
     button('actual', '100%', labels.actualSize, '1'),
-    '</div></header>',
+    '</div>',
+    `<button id="export-png" type="button" aria-label="${escape(labels.exportPng)}" title="${escape(labels.exportPng)}">PNG</button>`,
+    '</header>',
     '<main id="stage" tabindex="0"><div id="canvas"><img id="diagram" alt="" hidden draggable="false"></div></main>',
   ].join('');
 }
@@ -145,6 +154,13 @@ export class DiagramViewer {
   async receive(message: unknown, text: string): Promise<void> {
     const diagrams = findFileDiagrams(text, this.fileName);
     const request = parseRequest(message, diagrams.length);
+    if (request?.type === 'exportPng') {
+      const diagram = diagrams[this.indexIn(diagrams)];
+      if (diagram !== undefined) {
+        await this.deps.exportPng(this.uri, diagram.openLine);
+      }
+      return;
+    }
     if (request?.type === 'select') {
       this.target = { name: diagrams[request.index]?.name ?? null, index: request.index };
     }
@@ -169,10 +185,7 @@ export class DiagramViewer {
     this.note = '';
     const diagrams = findFileDiagrams(text, this.fileName);
     const { labels } = this.deps;
-    const index =
-      this.target.name === null
-        ? this.target.index
-        : diagrams.findIndex((diagram) => diagram.name === this.target.name);
+    const index = this.indexIn(diagrams);
     const diagram = diagrams[index];
 
     await this.panel.post({
@@ -234,6 +247,13 @@ export class DiagramViewer {
       const message = error instanceof Error ? error.message : String(error);
       await this.status(EMOJI_UNAVAILABLE.test(message) ? labels.emojiUnavailable : message, true, true);
     }
+  }
+
+  /** Where the diagram shown is among `diagrams`: by its name, else its position. */
+  private indexIn(diagrams: readonly PlantUmlBlock[]): number {
+    return this.target.name === null
+      ? this.target.index
+      : diagrams.findIndex((diagram) => diagram.name === this.target.name);
   }
 
   private async status(text: string, error: boolean, clear: boolean): Promise<void> {

@@ -1405,6 +1405,35 @@ describe('export (dist)', () => {
       expect(writtenUnder('file:///c/pngwide/')).toEqual([]);
     });
 
+    it('exports the diagram that a file and a line name, as the .puml preview asks', async () => {
+      const flows = makeEditor('file:///c/pngview/flows.puml', '@startuml(id=orders)\nAlice -> Bob : named\n@enduml', 0, {
+        languageId: 'plantuml',
+      });
+      vscodeStub._test.openDocument(flows.document);
+      // Another document has the focus meanwhile.
+      vscodeStub._test.setActiveEditor(makeEditor('file:///c/pngview/other.md', NAMED_BLOCK, 1));
+      const before = vscodeStub._test.webviewPanels.length;
+      try {
+        const done = Promise.resolve(
+          vscodeStub._test.registeredCommands.get('plantumlLocal.exportPng')?.({
+            uri: 'file:///c/pngview/flows.puml',
+            line: 0,
+          })
+        );
+        expect(await waitFor(() => vscodeStub._test.webviewPanels.length > before, 30_000)).toBe(true);
+        const panel = vscodeStub._test.webviewPanels[before]!;
+        panel.receive({ type: 'ready' });
+        const draw = panel.webview.posted[0] as { svg: string; width: number; height: number };
+        expect(draw.svg).toContain('named');
+        panel.receive({ type: 'png', data: pngOf(draw.width, draw.height) });
+        await done;
+      } finally {
+        vscodeStub._test.closeDocument(flows.document);
+      }
+
+      expect(writtenUnder('file:///c/pngview/')).toEqual(['file:///c/pngview/images/orders.png']);
+    });
+
     it('exports the named diagrams of a folder as PNG, drawn one after another in one panel', async () => {
       const block = (name: string, label: string): string =>
         ['```plantuml ' + name, '@startuml', `A -> B : ${label}`, '@enduml', '```'].join('\n');
@@ -1812,6 +1841,32 @@ describe('viewer (dist)', () => {
     expect(posted(panel!, 'render')[0]?.svg).toContain('second');
     // What the page keeps the zoom of this diagram by.
     expect(posted(panel!, 'render')[0]).toMatchObject({ key: '#1' });
+  });
+
+  it('runs Export Diagram as PNG for the diagram shown when its PNG button is pressed', async () => {
+    vscodeStub._test.setActiveEditor(makeEditor('file:///c/viewpng/flows.puml', FLOWS, 5, { languageId: 'plantuml' }));
+    const before = vscodeStub._test.webviewPanels.length;
+    await run('plantumlLocal.openPreviewToSide');
+    const panel = vscodeStub._test.webviewPanels[before]!;
+    expect(panel.webview.html).toContain(
+      '<button id="export-png" type="button" aria-label="Export Diagram as PNG" title="Export Diagram as PNG">PNG</button>'
+    );
+    panel.receive({ type: 'ready' });
+    await waitFor(() => posted(panel, 'render').length > 0);
+    const asked = (): unknown[] =>
+      vscodeStub._test.commandCalls.filter((call) => call.id === 'plantumlLocal.exportPng').map((call) => call.args[0]);
+    const count = asked().length;
+
+    panel.receive({ type: 'exportPng' });
+    await waitFor(() => asked().length > count);
+    panel.receive({ type: 'select', index: 0 });
+    panel.receive({ type: 'exportPng' });
+    await waitFor(() => asked().length > count + 1);
+
+    expect(asked().slice(count)).toEqual([
+      { uri: 'file:///c/viewpng/flows.puml', line: 4 },
+      { uri: 'file:///c/viewpng/flows.puml', line: 0 },
+    ]);
   });
 
   it('keeps one panel per file and draws the diagram it is asked for', async () => {
