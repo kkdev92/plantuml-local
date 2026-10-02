@@ -160,6 +160,11 @@
         "category": "PlantUML Local"
       },
       {
+        "command": "plantumlLocal.exportFolderPng",
+        "title": "%command.exportFolderPng.title%",
+        "category": "PlantUML Local"
+      },
+      {
         "command": "plantumlLocal.assignDiagramName",
         "title": "%command.assignDiagramName.title%",
         "category": "PlantUML Local"
@@ -204,6 +209,11 @@
           "command": "plantumlLocal.exportFolderSvg",
           "when": "explorerResourceIsFolder",
           "group": "7_plantuml@1"
+        },
+        {
+          "command": "plantumlLocal.exportFolderPng",
+          "when": "explorerResourceIsFolder",
+          "group": "7_plantuml@2"
         }
       ],
       "editor/title": [

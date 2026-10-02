@@ -6,6 +6,7 @@
   "command.exportAllSvg.title": "Export All Diagrams as SVG",
   "command.exportAllAndUpdateRefs.title": "Export All Diagrams and Update References",
   "command.exportFolderSvg.title": "Export All Diagrams in Folder as SVG",
+  "command.exportFolderPng.title": "Export All Diagrams in Folder as PNG",
   "command.assignDiagramName.title": "Name Diagram for Export",
   "command.openPreview.title": "Open Diagram Preview",
   "command.openPreviewToSide.title": "Open Diagram Preview to the Side",

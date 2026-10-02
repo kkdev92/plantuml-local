@@ -6,6 +6,7 @@
   "command.exportAllSvg.title": "ファイル内のすべての図を SVG に書き出す",
   "command.exportAllAndUpdateRefs.title": "すべての図を書き出して参照を更新する",
   "command.exportFolderSvg.title": "フォルダー内のすべての図を SVG に書き出す",
+  "command.exportFolderPng.title": "フォルダー内のすべての図を PNG に書き出す",
   "command.assignDiagramName.title": "図に書き出し用の名前を付ける",
   "command.openPreview.title": "図のプレビューを開く",
   "command.openPreviewToSide.title": "図のプレビューを横に開く",

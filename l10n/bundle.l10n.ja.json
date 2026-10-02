@@ -64,6 +64,7 @@
   "Actual Size": "実寸",
   "Exporting PNG…": "PNG を書き出しています…",
   "Drawing a PNG of {0}×{1} pixels…": "{0}×{1} ピクセルの PNG を作っています…",
+  "Drawing PNGs…": "PNG を作っています…",
   "The PNG was not drawn within 30 seconds.": "PNG が 30 秒以内に作れませんでした。",
   "The PNG could not be drawn: {0}": "PNG を作れませんでした: {0}",
   "The PNG was not finished: its panel was closed.": "PNG を作り終える前に、そのパネルが閉じられました。",

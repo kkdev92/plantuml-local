@@ -428,7 +428,7 @@ export async function exportOne(
   return outcome.written[0] ?? outcome.failed[0] ?? null;
 }
 
-/** A document's named blocks drawn as SVG, for {@link writeDocuments}. */
+/** A document's named blocks drawn as SVG or PNG, for {@link writeDocuments}. */
 export interface DrawnDocument {
   drawings: readonly Drawing[];
   failed: readonly ExportResult[];
@@ -437,8 +437,8 @@ export interface DrawnDocument {
 }
 
 /**
- * Draws every named block of a document: its ` ```plantuml ` blocks
- * (findPlantUmlBlocks) or the diagrams of a PlantUML file
+ * Draws every named block of a document, as `format`: its ` ```plantuml `
+ * blocks (findPlantUmlBlocks) or the diagrams of a PlantUML file
  * (findFileDiagrams).
  *
  * Unnamed blocks are counted rather than guessed at: a positional name
@@ -451,7 +451,8 @@ export async function drawDocument(
   documentPath: string,
   directory: string,
   blocks: readonly PlantUmlBlock[],
-  onProgress?: (done: number, total: number, name: string) => void
+  onProgress?: (done: number, total: number, name: string) => void,
+  format: ExportFormat = 'svg'
 ): Promise<DrawnDocument> {
   const named = blocks.filter(
     (block): block is PlantUmlBlock & { name: string } => block.name !== null
@@ -461,7 +462,7 @@ export async function drawDocument(
   const failed: ExportResult[] = [];
   for (const [index, block] of named.entries()) {
     onProgress?.(index, named.length, block.name);
-    const drawing = await drawBlock(deps, documentPath, directory, block, block.name, 'svg');
+    const drawing = await drawBlock(deps, documentPath, directory, block, block.name, format);
     if ('content' in drawing) {
       drawings.push(drawing);
     } else {

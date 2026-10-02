@@ -312,6 +312,7 @@ reference whose target is `images/orders-api.svg#plantuml-local`.
 | `PlantUML Local: Export All Diagrams and Update References` | The above, then inserts or updates the image line after each block |
 | `PlantUML Local: Export Diagram as PNG` | Writes the block under the cursor, or the only block in the file, as a PNG (below) |
 | `PlantUML Local: Export All Diagrams in Folder as SVG` | Writes every **named** block of the Markdown and PlantUML files in a folder (below) |
+| `PlantUML Local: Export All Diagrams in Folder as PNG` | The same, as PNGs |
 
 The first four are also in the editor's right-click menu: the single exports appear
 with the cursor inside a block, the other two whenever the file contains a
@@ -412,7 +413,10 @@ before drawing, naming the documents, and then once for all the files it would
 replace. A diagram headed for the same file as another — two documents beside
 each other naming a block alike — is reported instead of written over it. A
 folder of more than 500 documents or 2,000 named diagrams is refused rather than
-exported in part, and cancelling while it draws writes nothing.
+exported in part, and cancelling while it draws writes nothing. *Export All
+Diagrams in Folder as PNG*, beside it in the menu, writes PNGs instead, as
+*Export Diagram as PNG* does, drawing them one after another in a single panel
+that closes once the last is drawn.
 
 `plantumlLocal.exportDirectory` (default `images`) decides where files go,
 relative to the Markdown file rather than to the workspace root, so moving a

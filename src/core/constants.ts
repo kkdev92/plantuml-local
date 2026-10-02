@@ -18,6 +18,7 @@ export const COMMANDS = {
   OPEN_PREVIEW_TO_SIDE: `${EXTENSION_ID}.openPreviewToSide`,
   EXPORT_PNG: `${EXTENSION_ID}.exportPng`,
   EXPORT_FOLDER_SVG: `${EXTENSION_ID}.exportFolderSvg`,
+  EXPORT_FOLDER_PNG: `${EXTENSION_ID}.exportFolderPng`,
   ASSIGN_DIAGRAM_NAME: `${EXTENSION_ID}.assignDiagramName`,
 } as const;
 
