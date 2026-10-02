@@ -1,5 +1,5 @@
 {
-  "extension.description": "組み込みの Markdown プレビューで ```plantuml コードブロックを図にします。Java もサーバもネットワーク接続も不要。図のソースは手元の環境で描画します。",
+  "extension.description": "組み込みの Markdown プレビューで ```plantuml コードブロックを図にし、.puml ファイルもプレビューできます。図は SVG や PNG に書き出せます。Java もサーバもネットワーク接続も不要。図のソースは手元の環境で描画します。",
   "command.clearCache.title": "描画キャッシュを捨てて描き直す",
   "command.exportSvg.title": "図を SVG に書き出す",
   "command.exportPng.title": "図を PNG に書き出す",
