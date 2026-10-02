@@ -140,6 +140,11 @@
         "category": "PlantUML Local"
       },
       {
+        "command": "plantumlLocal.exportPng",
+        "title": "%command.exportPng.title%",
+        "category": "PlantUML Local"
+      },
+      {
         "command": "plantumlLocal.exportAllSvg",
         "title": "%command.exportAllSvg.title%",
         "category": "PlantUML Local"
@@ -169,14 +174,19 @@
           "group": "2_plantuml@1"
         },
         {
+          "command": "plantumlLocal.exportPng",
+          "when": "editorLangId =~ /^(markdown|plantuml)$/ && plantumlLocal.cursorInDiagram",
+          "group": "2_plantuml@2"
+        },
+        {
           "command": "plantumlLocal.exportAllSvg",
           "when": "editorLangId =~ /^(markdown|plantuml)$/ && plantumlLocal.hasDiagrams",
-          "group": "2_plantuml@2"
+          "group": "2_plantuml@3"
         },
         {
           "command": "plantumlLocal.exportAllAndUpdateRefs",
           "when": "editorLangId == markdown && plantumlLocal.hasDiagrams",
-          "group": "2_plantuml@3"
+          "group": "2_plantuml@4"
         }
       ],
       "editor/title": [
@@ -239,6 +249,17 @@
           "default": "light",
           "scope": "resource",
           "description": "%config.exportTheme.description%"
+        },
+        "plantumlLocal.exportPngScale": {
+          "type": "integer",
+          "enum": [
+            1,
+            2,
+            4
+          ],
+          "default": 2,
+          "scope": "resource",
+          "description": "%config.exportPngScale.description%"
         },
         "plantumlLocal.hideExportedImages": {
           "type": "boolean",

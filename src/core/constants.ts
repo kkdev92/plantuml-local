@@ -16,10 +16,14 @@ export const COMMANDS = {
   EXPORT_ALL_UPDATE_REFS: `${EXTENSION_ID}.exportAllAndUpdateRefs`,
   OPEN_PREVIEW: `${EXTENSION_ID}.openPreview`,
   OPEN_PREVIEW_TO_SIDE: `${EXTENSION_ID}.openPreviewToSide`,
+  EXPORT_PNG: `${EXTENSION_ID}.exportPng`,
 } as const;
 
 /** The view type of the diagram viewer's panels. */
 export const VIEWER_TYPE = `${EXTENSION_ID}.viewer`;
+
+/** The view type of the panel a PNG is drawn in. */
+export const PNG_PANEL_TYPE = `${EXTENSION_ID}.png`;
 
 /**
  * Context keys behind the editor context-menu entries, set with the
@@ -40,6 +44,7 @@ export const CONFIG = {
   LOG_LEVEL: 'logLevel',
   EXPORT_DIRECTORY: 'exportDirectory',
   EXPORT_THEME: 'exportTheme',
+  EXPORT_PNG_SCALE: 'exportPngScale',
   HIDE_EXPORTED_IMAGES: 'hideExportedImages',
   DIAGNOSTICS_ENABLED: 'diagnostics.enabled',
 } as const;

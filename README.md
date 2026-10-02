@@ -285,8 +285,9 @@ reference whose target is `images/orders-api.svg#plantuml-local`.
 | `PlantUML Local: Export Diagram as SVG` | Writes the block under the cursor, or the only block in the file |
 | `PlantUML Local: Export All Diagrams as SVG` | Writes every **named** block in the file |
 | `PlantUML Local: Export All Diagrams and Update References` | The above, then inserts or updates the image line after each block |
+| `PlantUML Local: Export Diagram as PNG` | Writes the block under the cursor, or the only block in the file, as a PNG (below) |
 
-All three are also in the editor's right-click menu: the single export appears
+All four are also in the editor's right-click menu: the single exports appear
 with the cursor inside a block, the other two whenever the file contains a
 diagram — so the menu of an ordinary Markdown file stays untouched. Run from
 the command palette while the preview has focus, they use the only open
@@ -300,11 +301,11 @@ has none — or when its name could not be a file name, since names are limited
 to 128 letters, digits, hyphens and underscores. The bulk commands report such
 a block as failed.
 
-The first two commands also work in a `.puml` file, which writes each of its
-diagrams to a file of its own. A diagram is named by an id on its start line,
-`@startuml(id=orders-api)`; a file holding a single diagram may leave it out,
-and the diagram is named after the file. References are inserted into Markdown
-only.
+All but the reference update also work in a `.puml` file, which writes each
+of its diagrams to a file of its own. A diagram is named by an id on its start
+line, `@startuml(id=orders-api)`; a file holding a single diagram may leave it
+out, and the diagram is named after the file. References are inserted into
+Markdown only.
 
 A file already at the target is replaced only when you say so. If it holds the
 diagram already, nothing is written; if it holds something else — a file put
@@ -348,6 +349,18 @@ a drawing of the error in place of the diagram; instead of saving that as the
 block's SVG, the export commands count the block as failed and show PlantUML's
 message with the line of the document it points to. No file or reference is
 written for it.
+
+*Export Diagram as PNG* writes the diagram as a PNG instead, for where an SVG
+does not go, such as a slide or a chat. It is drawn at
+`plantumlLocal.exportPngScale` times the diagram's own size — 1, 2 or 4, 2 by
+default — on the background of its palette, into the same directory. The
+extension host has no canvas to draw it on, so a panel opens beside the editor
+for the time the drawing takes and closes itself; closing it stops the export.
+A PNG larger than 8192 pixels a side or 16 million in all is refused rather
+than shrunk, and the message names the largest scale it would fit at. Its text
+is drawn with the fonts of the machine that exports it, where an SVG's is drawn
+with those of whoever views it. The PNG export covers one diagram at a time and
+inserts no reference.
 
 `plantumlLocal.exportDirectory` (default `images`) decides where files go,
 relative to the Markdown file rather than to the workspace root, so moving a
@@ -409,8 +422,9 @@ and would show the referenced image as a second copy.
 | --- | --- | --- |
 | `plantumlLocal.theme` | `auto` | Diagram palette. `auto` follows the VS Code theme; `light` / `dark` pin it |
 | `plantumlLocal.logLevel` | `info` | Floor for the *PlantUML Local* output channel. VS Code's own channel level applies first — see [Troubleshooting](#troubleshooting) |
-| `plantumlLocal.exportDirectory` | `images` | Where exported SVGs are written, relative to the Markdown file. `.` for the same folder; absolute paths and `..` are rejected. Can be set per folder |
-| `plantumlLocal.exportTheme` | `light` | Palette for exported SVGs. `preview` follows the palette the preview currently uses. Can be set per folder |
+| `plantumlLocal.exportDirectory` | `images` | Where exported SVGs and PNGs are written, relative to the Markdown file. `.` for the same folder; absolute paths and `..` are rejected. Can be set per folder |
+| `plantumlLocal.exportTheme` | `light` | Palette for exported SVGs and PNGs. `preview` follows the palette the preview currently uses. Can be set per folder |
+| `plantumlLocal.exportPngScale` | `2` | Scale of an exported PNG: 1, 2 or 4 times the diagram's own size. Can be set per folder |
 | `plantumlLocal.hideExportedImages` | `true` | Hide images marked `#plantuml-local` in the preview, so an exported diagram is not shown next to its block's render |
 | `plantumlLocal.diagnostics.enabled` | `true` | List the problems of the diagrams in open Markdown files in the Problems panel; can be set per folder |
 
@@ -455,7 +469,7 @@ external rendering service.
 - **Render Timeout**: A render exceeding 30 s is abandoned; the worker is terminated and restarted
 - **SVG Sanitisation**: Scripts, event handlers and non-fragment links are stripped before SVG reaches the preview. The one exception is a rasterised sprite, which must reach the preview as an inline `data:image/png` — it is allowed on `<image>` only, must be base64 with no other characters, and must actually begin with the PNG signature
 - **No Embedded Source**: The copy of the diagram source that PlantUML embeds in every SVG, and the element names it records in `data-*` attributes, are removed before an SVG reaches the preview or an exported file
-- **Image-Only Panel**: The `.puml` preview shows the SVG as an image under a strict content security policy, so nothing in a diagram can run there
+- **Image-Only Panels**: The `.puml` preview, and the panel a PNG is drawn in, show the SVG as an image under a strict content security policy, so nothing in a diagram can run there
 - **Untrusted Workspaces Supported**: No workspace files are read, no processes are spawned
 
 These controls reduce the extension's attack surface, but they have limits worth

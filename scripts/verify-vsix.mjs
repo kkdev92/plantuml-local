@@ -52,6 +52,7 @@ const REQUIRED = [
   'extension/media/plantuml.css',
   'extension/media/viewer/viewer.js',
   'extension/media/viewer/viewer.css',
+  'extension/media/png/png.js',
   'extension/l10n/bundle.l10n.ja.json',
   'extension/images/icon.png',
 ];

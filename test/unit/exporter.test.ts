@@ -7,17 +7,34 @@ import {
   addBackground,
   exportAll,
   exportOne,
+  isPngOfSize,
   isValidExportDirectory,
+  PNG_LIMITS,
+  svgSize,
   type ExporterDeps,
 } from '../../src/export/exporter';
 
+/** The start of a PNG of `width`×`height` pixels: its signature and IHDR chunk. */
+function pngOf(width: number, height: number): Uint8Array {
+  const png = new Uint8Array(33);
+  const view = new DataView(png.buffer);
+  png.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  view.setUint32(8, 13);
+  png.set(new TextEncoder().encode('IHDR'), 12);
+  view.setUint32(16, width);
+  view.setUint32(20, height);
+  png.set([8, 6, 0, 0, 0], 24);
+  return png;
+}
+
 function makeDeps(
   overrides?: Partial<ExporterDeps>,
-  files?: Record<string, string>
+  files?: Record<string, string | Uint8Array>
 ): ExporterDeps & {
   writeFile: ReturnType<typeof vi.fn>;
   render: ReturnType<typeof vi.fn>;
   confirmReplace: ReturnType<typeof vi.fn>;
+  toPng: ReturnType<typeof vi.fn>;
 } {
   // The files already there, by path: read back before writing.
   const disk = new Map(Object.entries(files ?? {}));
@@ -25,13 +42,18 @@ function makeDeps(
     render: vi.fn((source: string) => Promise.resolve(`<svg>${source}</svg>`)),
     isDark: (): boolean => false,
     resolvePalette: (_source: string, dark: boolean): Promise<boolean> => Promise.resolve(dark),
-    readExisting: (path: string): Promise<string | null> => Promise.resolve(disk.get(path) ?? null),
+    readExisting: (path: string): Promise<Uint8Array | null> => {
+      const content = disk.get(path);
+      return Promise.resolve(typeof content === 'string' ? new TextEncoder().encode(content) : (content ?? null));
+    },
     // Declines, so a question no test expected writes nothing.
     confirmReplace: vi.fn((): Promise<'replace' | 'keep' | undefined> => Promise.resolve(undefined)),
-    writeFile: vi.fn((path: string, content: string) => {
+    writeFile: vi.fn((path: string, content: string | Uint8Array) => {
       disk.set(path, content);
       return Promise.resolve();
     }),
+    pngScale: (): number => 2,
+    toPng: vi.fn((_svg: string, width: number, height: number) => Promise.resolve(pngOf(width, height))),
     // Mimics joining a document URI's folder with a relative path.
     resolve: (documentPath: string, relative: string): string =>
       `${documentPath.slice(0, documentPath.lastIndexOf('/'))}/${relative}`,
@@ -42,12 +64,16 @@ function makeDeps(
     pagesMessage: 'no pages',
     engineErrorMessage: (message: string, line: number | null): string =>
       `engine: ${message} @ ${String(line)}`,
+    pngTooLargeMessage: (width: number, height: number, fits: number | null): string =>
+      `too large: ${String(width)}×${String(height)}, fits ${String(fits)}`,
+    pngFailedMessage: 'no PNG',
     ...overrides,
   };
   return deps as ExporterDeps & {
     writeFile: ReturnType<typeof vi.fn>;
     render: ReturnType<typeof vi.fn>;
     confirmReplace: ReturnType<typeof vi.fn>;
+    toPng: ReturnType<typeof vi.fn>;
   };
 }
 
@@ -316,6 +342,142 @@ describe('exportOne', () => {
 
     const result = await exportOne(deps, DOC, 'images', block!, 'orders');
     expect(result?.error).toBe('EACCES');
+  });
+});
+
+describe('svgSize', () => {
+  it('reads the width and height the engine gives, which `scale` sets', () => {
+    // A `scale 2` diagram: the viewBox keeps the size it is drawn at.
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 105 113" width="210" height="226"><g/></svg>';
+    expect(svgSize(svg)).toEqual({ width: 210, height: 226 });
+  });
+
+  it('falls back to the viewBox, and gives null without either', () => {
+    expect(svgSize('<svg viewBox="0 0 120.5 40"><g/></svg>')).toEqual({ width: 120.5, height: 40 });
+    expect(svgSize('<svg width="100%" height="100%"><g/></svg>')).toBeNull();
+    expect(svgSize('not svg')).toBeNull();
+  });
+});
+
+describe('isPngOfSize', () => {
+  it('reads the size from the IHDR chunk, wherever the bytes sit in their buffer', () => {
+    expect(isPngOfSize(pngOf(300, 200), 300, 200)).toBe(true);
+    expect(isPngOfSize(pngOf(300, 200), 200, 300)).toBe(false);
+    const pooled = new Uint8Array(40);
+    pooled.set(pngOf(3, 2), 5);
+    expect(isPngOfSize(pooled.subarray(5), 3, 2)).toBe(true);
+  });
+
+  it('refuses what is not a PNG', () => {
+    expect(isPngOfSize(new Uint8Array(33), 0, 0)).toBe(false);
+    expect(isPngOfSize(pngOf(300, 200).subarray(0, 23), 300, 200)).toBe(false);
+    const other = pngOf(300, 200);
+    other.set(new TextEncoder().encode('IDAT'), 12);
+    expect(isPngOfSize(other, 300, 200)).toBe(false);
+  });
+});
+
+describe('exportOne as a PNG', () => {
+  const [block] = findPlantUmlBlocks('```plantuml\nx\n```');
+  /** A render whose SVG gives itself this size, as the engine's does. */
+  const sized = (width: number, height: number): ExporterDeps['render'] =>
+    vi.fn(() =>
+      Promise.resolve(`<svg viewBox="0 0 10 10" width="${String(width)}" height="${String(height)}"><g/></svg>`)
+    );
+
+  it('draws the diagram at the scale set, on its backdrop, and writes the PNG beside the document', async () => {
+    const deps = makeDeps({ render: sized(100.5, 50) });
+
+    const result = await exportOne(deps, DOC, 'images', block!, 'orders', 'png');
+
+    expect(result).toEqual({ name: 'orders', path: '/repo/docs/images/orders.png', error: null });
+    // Twice the size, rounded up to whole pixels.
+    expect(deps.toPng).toHaveBeenCalledWith(expect.stringContaining('fill="#FFFFFF"'), 201, 100, '#FFFFFF');
+    expect(deps.writeFile).toHaveBeenCalledWith('/repo/docs/images/orders.png', pngOf(201, 100), false);
+  });
+
+  it('draws a diagram exported in the dark palette on the dark backdrop', async () => {
+    const deps = makeDeps({ render: sized(10, 10), resolvePalette: () => Promise.resolve(true) });
+
+    await exportOne(deps, DOC, 'images', block!, 'orders', 'png');
+
+    expect(deps.toPng).toHaveBeenCalledWith(expect.any(String), 20, 20, '#1b1b1b');
+  });
+
+  it('refuses a PNG past the limits without drawing it, naming the largest scale it fits at', async () => {
+    // 12000×8000 at 4, 24 million pixels at 2, and within both at 1.
+    const deps = makeDeps({ render: sized(3000, 2000), pngScale: () => 4 });
+    // Wider than a side can be at any scale.
+    const wide = makeDeps({ render: sized(9000, 10), pngScale: () => 1 });
+
+    expect(await exportOne(deps, DOC, 'images', block!, 'orders', 'png')).toMatchObject({
+      path: null,
+      error: 'too large: 12000×8000, fits 1',
+    });
+    expect((await exportOne(wide, DOC, 'images', block!, 'orders', 'png'))?.error).toBe(
+      'too large: 9000×10, fits null'
+    );
+    expect(deps.toPng).not.toHaveBeenCalled();
+    expect(wide.toPng).not.toHaveBeenCalled();
+    expect(deps.writeFile).not.toHaveBeenCalled();
+  });
+
+  it('allows a PNG right at the limits', async () => {
+    // 8192 a side, and 16 million pixels in all.
+    for (const [width, height] of [
+      [4096, 10],
+      [2000, 2000],
+    ] as const) {
+      const deps = makeDeps({ render: sized(width, height) });
+      expect((await exportOne(deps, DOC, 'images', block!, 'orders', 'png'))?.error).toBeNull();
+    }
+    const deps = makeDeps({ render: sized(4096.25, 10) });
+    expect((await exportOne(deps, DOC, 'images', block!, 'orders', 'png'))?.error).toBe(
+      'too large: 8193×20, fits 1'
+    );
+  });
+
+  it('refuses a PNG that is not the size asked for, or is too many bytes', async () => {
+    // A canvas past what the browser can draw comes back blank or small.
+    const small = makeDeps({ render: sized(100, 50), toPng: vi.fn(() => Promise.resolve(pngOf(100, 50))) });
+    const huge = new Uint8Array(PNG_LIMITS.bytes + 1);
+    huge.set(pngOf(200, 100));
+    const heavy = makeDeps({ render: sized(100, 50), toPng: vi.fn(() => Promise.resolve(huge)) });
+
+    for (const deps of [small, heavy]) {
+      expect(await exportOne(deps, DOC, 'images', block!, 'orders', 'png')).toMatchObject({
+        path: null,
+        error: 'no PNG',
+      });
+      expect(deps.writeFile).not.toHaveBeenCalled();
+    }
+  });
+
+  it('refuses an SVG that gives no size, and reports a drawing that failed', async () => {
+    const unsized = makeDeps({ render: vi.fn(() => Promise.resolve('<svg><g/></svg>')) });
+    const failing = makeDeps({
+      render: sized(10, 10),
+      toPng: vi.fn(() => Promise.reject(new Error('The PNG could not be drawn: x'))),
+    });
+
+    expect((await exportOne(unsized, DOC, 'images', block!, 'orders', 'png'))?.error).toBe('no PNG');
+    expect(unsized.toPng).not.toHaveBeenCalled();
+    expect((await exportOne(failing, DOC, 'images', block!, 'orders', 'png'))?.error).toBe(
+      'The PNG could not be drawn: x'
+    );
+    expect(failing.writeFile).not.toHaveBeenCalled();
+  });
+
+  it('leaves a PNG that already holds the diagram alone, and asks before replacing another', async () => {
+    const same = makeDeps({ render: sized(10, 10) }, { '/repo/docs/images/orders.png': pngOf(20, 20) });
+    const other = makeDeps({ render: sized(10, 10) }, { '/repo/docs/images/orders.png': pngOf(30, 30) });
+
+    expect((await exportOne(same, DOC, 'images', block!, 'orders', 'png'))?.error).toBeNull();
+    expect(same.confirmReplace).not.toHaveBeenCalled();
+    expect(same.writeFile).not.toHaveBeenCalled();
+    expect(await exportOne(other, DOC, 'images', block!, 'orders', 'png')).toBeNull();
+    expect(other.confirmReplace).toHaveBeenCalledWith(['/repo/docs/images/orders.png'], false);
+    expect(other.writeFile).not.toHaveBeenCalled();
   });
 });
 

@@ -61,5 +61,14 @@
   "Zoom Out": "縮小",
   "Zoom In": "拡大",
   "Fit": "全体",
-  "Actual Size": "実寸"
+  "Actual Size": "実寸",
+  "Exporting PNG…": "PNG を書き出しています…",
+  "Drawing a PNG of {0}×{1} pixels…": "{0}×{1} ピクセルの PNG を作っています…",
+  "The PNG was not drawn within 30 seconds.": "PNG が 30 秒以内に作れませんでした。",
+  "The PNG could not be drawn: {0}": "PNG を作れませんでした: {0}",
+  "The PNG was not finished: its panel was closed.": "PNG を作り終える前に、そのパネルが閉じられました。",
+  "The PNG would be {0}×{1} pixels, larger than a PNG is made (8192 a side, 16 million in all), even at a scale of 1. Export it as SVG instead.": "PNG は {0}×{1} ピクセルになり、倍率 1 でも書き出せる大きさ (1 辺 8192、全体で 1600 万ピクセル) を超えます。SVG で書き出してください。",
+  "The PNG would be {0}×{1} pixels, larger than a PNG is made (8192 a side, 16 million in all). It fits at plantumlLocal.exportPngScale {2}.": "PNG は {0}×{1} ピクセルになり、書き出せる大きさ (1 辺 8192、全体で 1600 万ピクセル) を超えます。plantumlLocal.exportPngScale を {2} にすれば書き出せます。",
+  "The PNG could not be made as asked.": "PNG を求めたとおりに作れませんでした。",
+  "File name for the exported PNG (without .png)": "書き出す PNG のファイル名 (.png は不要)"
 }

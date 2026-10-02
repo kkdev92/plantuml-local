@@ -660,15 +660,18 @@ describe('export (dist)', () => {
       makeEditor('file:///c/docs/design.md', `intro\n\n${NAMED_BLOCK}`, 3)
     );
     const before = vscodeStub._test.writtenFiles.size;
+    const panels = vscodeStub._test.webviewPanels.length;
 
     vscodeStub.workspace.isTrusted = false;
     try {
       await vscodeStub._test.registeredCommands.get('plantumlLocal.exportSvg')?.();
+      await vscodeStub._test.registeredCommands.get('plantumlLocal.exportPng')?.();
     } finally {
       vscodeStub.workspace.isTrusted = true;
     }
 
     expect(vscodeStub._test.writtenFiles.size).toBe(before);
+    expect(vscodeStub._test.webviewPanels).toHaveLength(panels);
     expect(vscodeStub._test.notifications.warn.some((m) => m.includes('trusted'))).toBe(true);
   });
 
@@ -1082,6 +1085,127 @@ describe('export (dist)', () => {
         [...vscodeStub._test.writtenFiles.keys()].filter((key) => key.startsWith('file:///c/failing/'))
       ).toEqual([]);
       expect(vscodeStub._test.notifications.error.at(-1)).toMatch(/^Could not export the diagram: /);
+    });
+  });
+
+  describe('PNG', () => {
+    /** The start of a PNG of `width`×`height` pixels: its signature and IHDR chunk. */
+    const pngOf = (width: number, height: number): Uint8Array => {
+      const png = new Uint8Array(33);
+      const view = new DataView(png.buffer);
+      png.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+      view.setUint32(8, 13);
+      png.set(new TextEncoder().encode('IHDR'), 12);
+      view.setUint32(16, width);
+      view.setUint32(20, height);
+      return png;
+    };
+    /** Starts the PNG export of the block, and waits for the panel it draws in. */
+    const start = async (path: string): Promise<{ panel: WebviewPanelStub; done: Promise<unknown> }> => {
+      vscodeStub._test.setActiveEditor(makeEditor(path, NAMED_BLOCK, 1));
+      const before = vscodeStub._test.webviewPanels.length;
+      const done = Promise.resolve(vscodeStub._test.registeredCommands.get('plantumlLocal.exportPng')?.());
+      expect(await waitFor(() => vscodeStub._test.webviewPanels.length > before, 30_000)).toBe(true);
+      return { panel: vscodeStub._test.webviewPanels[before]!, done };
+    };
+    const writtenUnder = (folder: string): string[] =>
+      [...vscodeStub._test.writtenFiles.keys()].filter((key) => key.startsWith(folder));
+
+    it('draws the diagram in a panel beside the editor and writes the PNG it sends back', async () => {
+      const { panel, done } = await start('file:///c/png/doc.md');
+
+      expect(panel).toMatchObject({ viewType: 'plantumlLocal.png', title: 'Exporting PNG…' });
+      // Beside the editor, without taking the focus from it.
+      expect(panel.column).toEqual({ viewColumn: vscodeStub.ViewColumn.Beside, preserveFocus: true });
+      // Kept while hidden behind another tab, so the PNG still comes.
+      expect(panel.options).toMatchObject({ enableScripts: true, enableForms: false, retainContextWhenHidden: true });
+      expect(panel.options.localResourceRoots?.map(String)).toEqual([
+        expect.stringMatching(/^file:\/\/\/.*\/media\/png$/),
+      ]);
+      const csp = (/Content-Security-Policy" content="([^"]*)"/.exec(panel.webview.html)?.[1] ?? '').replace(
+        /&#039;/g,
+        "'"
+      );
+      expect(csp).toMatch(/default-src 'none'/);
+      expect(csp).toMatch(/script-src 'nonce-[^' ]+'(;|$)/);
+      expect(csp).toMatch(/img-src [^;]*blob:/);
+      expect(panel.webview.html).toContain('/media/png/png.js');
+      expect(panel.webview.posted).toEqual([]);
+
+      panel.receive({ type: 'ready' });
+      const draw = panel.webview.posted[0] as { svg: string; width: number; height: number };
+      // Twice the size the SVG gives itself: the default scale.
+      const width = Number(/^<svg[^>]*\swidth="([\d.]+)"/.exec(draw.svg)?.[1]);
+      const height = Number(/^<svg[^>]*\sheight="([\d.]+)"/.exec(draw.svg)?.[1]);
+      expect(draw).toMatchObject({
+        type: 'draw',
+        width: Math.ceil(width * 2),
+        height: Math.ceil(height * 2),
+        background: '#FFFFFF',
+      });
+      expect(draw.svg).toContain('hi');
+
+      // Only bytes are taken for the PNG.
+      panel.receive({ type: 'png', data: [1, 2, 3] });
+      expect(panel.disposed).toBe(false);
+      const png = pngOf(draw.width, draw.height);
+      panel.receive({ type: 'png', data: png });
+      await done;
+
+      expect(panel.disposed).toBe(true);
+      expect(vscodeStub._test.writtenBytes.get('file:///c/png/images/orders.png')).toEqual(png);
+      expect(vscodeStub._test.notifications.info.at(-1)).toBe('Exported file:///c/png/images/orders.png');
+    });
+
+    it('writes nothing when the page cannot draw it, or sends back another size', async () => {
+      const failed = await start('file:///c/pngfail/doc.md');
+      failed.panel.receive({ type: 'ready' });
+      failed.panel.receive({ type: 'error', error: 'no PNG came out of the canvas' });
+      await failed.done;
+      expect(vscodeStub._test.notifications.error.at(-1)).toBe(
+        'Could not export the diagram: The PNG could not be drawn: no PNG came out of the canvas'
+      );
+
+      const wrong = await start('file:///c/pngfail/doc.md');
+      wrong.panel.receive({ type: 'ready' });
+      wrong.panel.receive({ type: 'png', data: pngOf(1, 1) });
+      await wrong.done;
+      expect(vscodeStub._test.notifications.error.at(-1)).toBe(
+        'Could not export the diagram: The PNG could not be made as asked.'
+      );
+
+      expect([failed.panel.disposed, wrong.panel.disposed]).toEqual([true, true]);
+      expect(writtenUnder('file:///c/pngfail/')).toEqual([]);
+    });
+
+    it('stops without writing when its panel is closed before the PNG is back', async () => {
+      const { panel, done } = await start('file:///c/pngclosed/doc.md');
+      panel.receive({ type: 'ready' });
+      panel.dispose();
+      await done;
+
+      expect(vscodeStub._test.notifications.error.at(-1)).toBe(
+        'Could not export the diagram: The PNG was not finished: its panel was closed.'
+      );
+      expect(writtenUnder('file:///c/pngclosed/')).toEqual([]);
+    });
+
+    it('refuses a PNG past the size limits before drawing it, at the scale set for the document', async () => {
+      const wide = ['```plantuml wide', '@startuml', `Alice -> Bob : ${'wide '.repeat(100)}`, '@enduml', '```'];
+      vscodeStub._test.setConfiguration('exportPngScale', 4, 'file:///c/pngwide');
+      const panels = vscodeStub._test.webviewPanels.length;
+      try {
+        vscodeStub._test.setActiveEditor(makeEditor('file:///c/pngwide/doc.md', wide.join('\n'), 1));
+        await vscodeStub._test.registeredCommands.get('plantumlLocal.exportPng')?.();
+      } finally {
+        vscodeStub._test.setConfiguration('exportPngScale', undefined, 'file:///c/pngwide');
+      }
+
+      expect(vscodeStub._test.webviewPanels).toHaveLength(panels);
+      expect(vscodeStub._test.notifications.error.at(-1)).toMatch(
+        /^Could not export the diagram: The PNG would be \d+×\d+ pixels, larger than a PNG is made \(8192 a side, 16 million in all\)\. It fits at plantumlLocal\.exportPngScale 2\.$/
+      );
+      expect(writtenUnder('file:///c/pngwide/')).toEqual([]);
     });
   });
 });
