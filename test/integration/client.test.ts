@@ -11,6 +11,7 @@ import { RendererClient } from '../../src/render/client';
  */
 
 const hangWorkerPath = join(__dirname, 'helpers/hang-worker.cjs');
+const wedgeWorkerPath = join(__dirname, 'helpers/wedge-worker.cjs');
 const realWorkerPath = join(__dirname, '../../dist/worker.js');
 
 const log = { debug: vi.fn(), warn: vi.fn(), error: vi.fn() };
@@ -32,20 +33,19 @@ describe('RendererClient', () => {
     expect(log.warn).toHaveBeenCalledWith(expect.stringContaining('timed out'));
   });
 
-  it('fails renders queued behind the hung one and restarts for the next request', async () => {
-    client = new RendererClient(hangWorkerPath, log, 250);
+  it('sends the renders queued behind a hung one to a fresh worker', async () => {
+    client = new RendererClient(wedgeWorkerPath, log, 250);
 
-    const first = client.render('@startuml\nA -> B\n@enduml', false);
-    const second = client.render('@startuml\nC -> D\n@enduml', false);
+    const hung = client.render('@startuml\nHANG\n@enduml', false);
+    const queued = client.render('@startuml\nA -> B\n@enduml', false);
 
-    await expect(first).rejects.toThrow('Rendering timed out');
-    await expect(second).rejects.toThrow('Rendering timed out');
-
-    // The next request must not be wedged behind the dead queue: it gets
-    // a fresh worker. (Still the hanging fixture, so it times out too —
-    // what matters is that it reaches the timeout instead of hanging.)
-    await expect(client.render('@startuml\nE -> F\n@enduml', false)).rejects.toThrow(
-      'Rendering timed out'
+    await expect(hung).rejects.toThrow('Rendering timed out');
+    // It never started, so it is not failed with the hung one: the new
+    // worker draws it, within a time limit of its own.
+    await expect(queued).resolves.toBe('<svg>@startuml\nA -> B\n@enduml</svg>');
+    // And so does the next request.
+    await expect(client.render('@startuml\nC -> D\n@enduml', false)).resolves.toBe(
+      '<svg>@startuml\nC -> D\n@enduml</svg>'
     );
   });
 

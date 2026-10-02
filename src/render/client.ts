@@ -24,7 +24,12 @@ export class RendererClient {
   private idleTimer: NodeJS.Timeout | null = null;
   private readonly pending = new Map<
     number,
-    { resolve: (svg: string) => void; reject: (error: Error) => void; timer: NodeJS.Timeout }
+    {
+      resolve: (svg: string) => void;
+      reject: (error: Error) => void;
+      request: RenderRequestMessage;
+      timer: NodeJS.Timeout;
+    }
   >();
 
   constructor(
@@ -37,15 +42,9 @@ export class RendererClient {
   render(source: string, dark: boolean): Promise<string> {
     return new Promise<string>((resolve, reject) => {
       const id = this.nextId++;
-      const timer = setTimeout(() => {
-        this.onRenderTimeout(id);
-      }, this.timeoutMs);
-      // Do not let a pending render keep the extension host alive.
-      timer.unref();
-
-      this.pending.set(id, { resolve, reject, timer });
-      this.stopIdleTimer();
       const request: RenderRequestMessage = { id, source, dark };
+      this.pending.set(id, { resolve, reject, request, timer: this.startTimer(id) });
+      this.stopIdleTimer();
       this.getWorker().postMessage(request);
     });
   }
@@ -55,6 +54,15 @@ export class RendererClient {
     this.failAll('Extension deactivated');
     void this.worker?.terminate();
     this.worker = null;
+  }
+
+  private startTimer(id: number): NodeJS.Timeout {
+    const timer = setTimeout(() => {
+      this.onRenderTimeout(id);
+    }, this.timeoutMs);
+    // Do not let a pending render keep the extension host alive.
+    timer.unref();
+    return timer;
   }
 
   private stopIdleTimer(): void {
@@ -111,11 +119,16 @@ export class RendererClient {
 
     // The serial queue behind the hung render is wedged — replace the
     // worker. Requests still pending were queued behind the hung one and
-    // cannot complete either.
-    this.failAll('Rendering timed out');
+    // never started: they go to the new worker, each with a time limit of
+    // its own.
     void this.worker?.terminate();
     this.worker = null;
     this.stopIdleTimer();
+    for (const [queued, entry] of this.pending) {
+      clearTimeout(entry.timer);
+      entry.timer = this.startTimer(queued);
+      this.getWorker().postMessage(entry.request);
+    }
   }
 
   private getWorker(): Worker {
@@ -140,8 +153,10 @@ export class RendererClient {
 
     created.on('error', (error: Error) => {
       this.log.error(error);
-      this.worker = null;
-      this.failAll(error.message);
+      if (this.worker === created) {
+        this.worker = null;
+        this.failAll(error.message);
+      }
     });
 
     created.on('exit', (code) => {

@@ -131,7 +131,8 @@ export const VIEWER_DEBOUNCE_MS = 300;
  * ~0.4 s of WASM initialisation). Pathological input, however, can spin
  * the engine indefinitely, and because renders are serialised a hung
  * render wedges every render queued behind it. On timeout the client
- * rejects the request and restarts the worker, which unwedges the queue.
+ * rejects the request and restarts the worker, which draws the renders
+ * that were queued behind it.
  */
 export const RENDER_TIMEOUT_MS = 30_000;
 

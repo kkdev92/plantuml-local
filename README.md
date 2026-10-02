@@ -533,7 +533,7 @@ external rendering service.
 - **Network Guard**: `fetch` / `XMLHttpRequest` / `WebSocket` / `EventSource` are replaced with throwing stubs inside the render worker — a network attempt fails the render instead of making a request
 - **Remote References Rejected**: `!include https://…` / `!theme … from https://…` render an explanatory message instead of reaching the engine
 - **Worker Isolation**: The engine's browser shims live in a worker thread, never on the extension host globals
-- **Render Timeout**: A render exceeding 30 s is abandoned; the worker is terminated and restarted
+- **Render Timeout**: A render exceeding 30 s is abandoned; the worker is terminated and restarted, and draws the renders that were waiting behind it
 - **SVG Sanitisation**: Scripts, event handlers and non-fragment links are stripped before SVG reaches the preview. The one exception is a rasterised sprite, which must reach the preview as an inline `data:image/png` — it is allowed on `<image>` only, must be base64 with no other characters, and must actually begin with the PNG signature
 - **No Embedded Source**: The copy of the diagram source that PlantUML embeds in every SVG, and the element names it records in `data-*` attributes, are removed before an SVG reaches the preview or an exported file
 - **Image-Only Panels**: The `.puml` preview, and the panel a PNG is drawn in, show the SVG as an image under a strict content security policy, so nothing in a diagram can run there
