@@ -33,7 +33,11 @@ export interface TextEditorStub {
     isUntitled: boolean;
     uri: { toString(): string; scheme: string; path: string };
     getText(): string;
-    lineAt(line: number): { text: string };
+    lineAt(line: number): {
+      text: string;
+      range: { start: PositionStub; end: PositionStub };
+      firstNonWhitespaceCharacterIndex: number;
+    };
     /** Applied by the stub's `workspace.applyEdit`. */
     setText(text: string): void;
   };
@@ -135,6 +139,22 @@ export interface FoldingRegistrationStub {
   provider: { provideFoldingRanges(document: TextEditorStub['document']): FoldingRangeStub[] | undefined };
 }
 
+/** A `vscode.DocumentSymbol` as the extension builds it. */
+export interface DocumentSymbolStub {
+  name: string;
+  detail: string;
+  kind: number;
+  range: { start: PositionStub; end: PositionStub };
+  selectionRange: { start: PositionStub; end: PositionStub };
+  children: DocumentSymbolStub[];
+}
+
+/** A document symbol provider as registered, with what it was registered for. */
+export interface SymbolRegistrationStub {
+  selector: unknown;
+  provider: { provideDocumentSymbols(document: TextEditorStub['document']): DocumentSymbolStub[] };
+}
+
 /** A `vscode.CompletionItem` as the extension builds it. */
 export interface CompletionItemStub {
   label: string | { label: string; description?: string };
@@ -230,7 +250,19 @@ export interface VscodeStub {
       selector: unknown,
       provider: FoldingRegistrationStub['provider']
     ) => { dispose(): void };
+    registerDocumentSymbolProvider: (
+      selector: unknown,
+      provider: SymbolRegistrationStub['provider']
+    ) => { dispose(): void };
   };
+  DocumentSymbol: new (
+    name: string,
+    detail: string,
+    kind: number,
+    range: DocumentSymbolStub['range'],
+    selectionRange: DocumentSymbolStub['selectionRange']
+  ) => DocumentSymbolStub;
+  SymbolKind: Record<'Module' | 'Namespace' | 'Package' | 'Class' | 'Enum' | 'Interface' | 'Object', number>;
   FoldingRange: new (start: number, end: number, kind?: number) => FoldingRangeStub;
   FoldingRangeKind: Record<'Comment' | 'Imports' | 'Region', number>;
   CompletionItem: new (label: CompletionItemStub['label'], kind?: number) => CompletionItemStub;
@@ -387,6 +419,8 @@ export interface VscodeStub {
     completionProviders: CompletionRegistrationStub[];
     /** Folding range providers registered, in order. */
     foldingProviders: FoldingRegistrationStub[];
+    /** Document symbol providers registered, in order. */
+    symbolProviders: SymbolRegistrationStub[];
     /** Webview panels created, in order. */
     webviewPanels: WebviewPanelStub[];
     /** Panel serializers registered, by view type. */
@@ -584,6 +618,18 @@ export function createVscodeStub(): VscodeStub {
   }
   const foldingProviders: FoldingRegistrationStub[] = [];
 
+  class DocumentSymbol implements DocumentSymbolStub {
+    children: DocumentSymbolStub[] = [];
+    constructor(
+      public name: string,
+      public detail: string,
+      public kind: number,
+      public range: DocumentSymbolStub['range'],
+      public selectionRange: DocumentSymbolStub['selectionRange']
+    ) {}
+  }
+  const symbolProviders: SymbolRegistrationStub[] = [];
+
   const webviewPanels: WebviewPanelStub[] = [];
   const webviewSerializers = new Map<
     string,
@@ -679,6 +725,8 @@ export function createVscodeStub(): VscodeStub {
     SnippetString,
     FoldingRange,
     FoldingRangeKind: { Comment: 1, Imports: 2, Region: 3 },
+    DocumentSymbol,
+    SymbolKind: { Module: 1, Namespace: 2, Package: 3, Class: 4, Enum: 9, Interface: 10, Object: 18 },
     languages: {
       createDiagnosticCollection: () => ({
         set: (uri, items) => {
@@ -695,6 +743,10 @@ export function createVscodeStub(): VscodeStub {
       },
       registerFoldingRangeProvider: (selector, provider) => {
         foldingProviders.push({ selector, provider });
+        return { dispose: () => undefined };
+      },
+      registerDocumentSymbolProvider: (selector, provider) => {
+        symbolProviders.push({ selector, provider });
         return { dispose: () => undefined };
       },
     },
@@ -1025,6 +1077,7 @@ export function createVscodeStub(): VscodeStub {
       fileWrites,
       completionProviders,
       foldingProviders,
+      symbolProviders,
       webviewPanels,
       webviewSerializers,
       // Restored panels come with whatever options were saved: none here.

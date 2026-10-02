@@ -171,6 +171,15 @@ blocks, `{ … }` bodies, preprocessor sections (`!if`, `!procedure`, `!foreach`
 PlantUML file that way, set `"editor.foldingStrategy": "indentation"` under
 `"[plantuml]"` in the settings.
 
+The Outline view, the breadcrumbs and *Go to Symbol in Editor* (Ctrl+Shift+O;
+Cmd+Shift+O on macOS) list the diagrams of a `.puml` file, each by its id or
+its start line, and what each declares with a keyword: `participant`, `actor`
+and the other participants of a sequence diagram, `class`, `interface`,
+`enum`, `annotation`, `component`, `node`, `package`, `namespace`, `state` and
+`usecase`. A declaration is listed by its alias, with the name the diagram
+shows beside it, and what a `{ … }` body declares sits under it. A name that
+only appears in a relation, or that a procedure creates, is not listed.
+
 ### Previewing `.puml` files
 
 *PlantUML Local: Open Diagram Preview to the Side* — the preview button in the

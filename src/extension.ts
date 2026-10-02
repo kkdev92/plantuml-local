@@ -62,6 +62,7 @@ import {
   type Suggestions,
 } from './language/completion';
 import { foldingRanges } from './language/folding';
+import { declarations, type Declaration } from './language/symbols';
 import {
   checkSource,
   renderProblems,
@@ -1618,6 +1619,47 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
                 )
             );
           },
+        }
+      );
+      context.signal.addEventListener('abort', () => {
+        registration.dispose();
+      });
+    },
+  });
+
+  module.hostedServices.add({
+    id: 'plantuml.symbols',
+    start: (context) => {
+      // The diagrams of a PlantUML file and what they declare, for the
+      // Outline, the breadcrumbs and Go to Symbol (src/language/symbols.ts).
+      // Markdown keeps its own outline of headings.
+      const kinds: Readonly<Record<string, vscode.SymbolKind>> = {
+        diagram: vscode.SymbolKind.Module,
+        package: vscode.SymbolKind.Package,
+        namespace: vscode.SymbolKind.Namespace,
+        class: vscode.SymbolKind.Class,
+        abstract: vscode.SymbolKind.Class,
+        interface: vscode.SymbolKind.Interface,
+        annotation: vscode.SymbolKind.Interface,
+        enum: vscode.SymbolKind.Enum,
+      };
+      const symbolOf = (document: vscode.TextDocument, declared: Declaration): vscode.DocumentSymbol => {
+        const line = document.lineAt(declared.start);
+        const symbol = new vscode.DocumentSymbol(
+          declared.name,
+          declared.detail,
+          kinds[declared.keyword] ?? vscode.SymbolKind.Object,
+          new vscode.Range(line.range.start, document.lineAt(declared.end).range.end),
+          new vscode.Range(declared.start, line.firstNonWhitespaceCharacterIndex, declared.start, line.range.end.character)
+        );
+        symbol.children = declared.children.map((child) => symbolOf(document, child));
+        return symbol;
+      };
+      const registration = vscode.languages.registerDocumentSymbolProvider(
+        { language: 'plantuml' },
+        {
+          provideDocumentSymbols: (document) =>
+            declarations(document.getText()).map((declared) => symbolOf(document, declared)),
         }
       );
       context.signal.addEventListener('abort', () => {
