@@ -72,5 +72,14 @@
   "The PNG could not be made as asked.": "PNG を求めたとおりに作れませんでした。",
   "File name for the exported PNG (without .png)": "書き出す PNG のファイル名 (.png は不要)",
   "Not updated: the diagram is drawn again when the file is saved.": "未更新です。ファイルを保存すると描き直します。",
-  "Not updated: run \"PlantUML Local: Clear Render Cache and Re-render\" to draw it again.": "未更新です。「PlantUML Local: 描画キャッシュを捨てて描き直す」で描き直します。"
+  "Not updated: run \"PlantUML Local: Clear Render Cache and Re-render\" to draw it again.": "未更新です。「PlantUML Local: 描画キャッシュを捨てて描き直す」で描き直します。",
+  "Another diagram is exported to the same file.": "同じファイルに別の図を書き出しています。",
+  "Export Diagrams": "図を書き出す",
+  "Choose a folder in the workspace.": "ワークスペース内のフォルダーを選んでください。",
+  "Looking for diagrams…": "図を探しています…",
+  "{0} holds more than {1} documents. Export a folder inside it.": "{0} には {1} を超える文書があります。中のフォルダーを書き出してください。",
+  "{0} holds more than {1} named diagrams. Export a folder inside it.": "{0} には {1} を超える名前付きの図があります。中のフォルダーを書き出してください。",
+  "…and {0} more": "…ほか {0} 件",
+  "Export": "書き出す",
+  "Export {0} named diagram(s) from {1} document(s) in {2}?": "{2} の {1} 個の文書から、名前付きの図を {0} 個書き出しますか?"
 }

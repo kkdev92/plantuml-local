@@ -65,6 +65,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and Re-render*, instead of as you type. Until then the Markdown preview and
   the `.puml` preview keep the diagram they show, with a note that it is not
   updated.
+- **Export a folder.** *Export All Diagrams in Folder as SVG*, also on a
+  folder's right-click menu in the Explorer, exports the named diagrams of
+  every Markdown and PlantUML file under a folder, each into its own export
+  directory, after asking with the list of documents. Version-control and
+  build folders and links are not followed, a folder of more than 500
+  documents or 2,000 named diagrams is refused rather than exported in part,
+  and cancelling writes nothing. A diagram headed for the same file as
+  another, in one document or several, is now reported instead of written
+  over it.
 - **Problems panel.** The diagrams of open Markdown files are checked, with or
   without a preview, and their problems are listed on the line they are on:
   the engine's errors and warnings, what the bundled engine cannot do

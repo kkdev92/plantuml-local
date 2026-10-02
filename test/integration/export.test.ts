@@ -60,6 +60,7 @@ const deps: ExporterDeps = {
     line === null ? `PlantUML reported an error: ${message}` : `PlantUML reported an error at line ${String(line)}: ${message}`,
   pngTooLargeMessage: (width, height) => `The PNG would be ${String(width)}×${String(height)} pixels.`,
   pngFailedMessage: 'The PNG could not be made as asked.',
+  sameFileMessage: 'Another diagram is exported to the same file.',
   pngScale: () => 2,
   // No canvas here: these tests export SVG.
   toPng: () => Promise.reject(new Error('no canvas')),
