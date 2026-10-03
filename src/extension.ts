@@ -1,6 +1,9 @@
 import {
+  Commands,
   Localization,
   Log,
+  Workspace,
+  checkRelativePath,
   createWebviewHtml,
   debounce,
   defineCommandContract,
@@ -9,6 +12,7 @@ import {
   defineSettings,
   defineStorage,
   escapeHtml,
+  filterLogger,
   generateCSP,
   generateNonce,
   serviceToken,
@@ -16,6 +20,7 @@ import {
   type OperationContext,
   type ServiceToken,
   type TypedStorage,
+  type WorkspaceService,
 } from '@kkdev92/vscode-ext-kit';
 import type MarkdownIt from 'markdown-it';
 import { randomBytes } from 'node:crypto';
@@ -50,7 +55,6 @@ import {
   drawDocument,
   exportAll,
   exportOne,
-  isValidExportDirectory,
   writeDocuments,
   type DrawnDocument,
   type ExportFormat,
@@ -83,7 +87,6 @@ import {
   type RenderOutcome,
 } from './diagnostics/problems';
 import { createPlantUmlPlugin, type PlantUmlPlugin, type UpdateMode } from './preview/plugin';
-import type { RenderLog } from './core/types';
 import { RendererClient, defaultWorkerPath } from './render/client';
 import { shareRenders, type SharedRender } from './render/memo';
 import { ThemePalettes } from './render/palette';
@@ -100,7 +103,7 @@ import { DiagramViewer, viewerBody, type ToolbarLabels, type ViewerDeps } from '
  * the declaration, so a hand-edited or stale `settings.json` falls back to the
  * documented default instead of reaching the renderer as garbage.
  */
-const Settings = defineSettings({
+export const Settings = defineSettings({
   section: EXTENSION_ID,
   values: {
     [CONFIG.THEME]: setting.enum({ values: ['auto', 'light', 'dark'], default: 'auto' }),
@@ -126,8 +129,8 @@ const Settings = defineSettings({
       default: 'onChange',
       scope: 'resource',
     }),
-    // Resource-scoped: the diagnostics read it per document instead.
-    [CONFIG.DIAGNOSTICS_ENABLED]: setting.boolean({ default: true }),
+    // Resource-scoped, so a folder can turn the checks off: read per document.
+    [CONFIG.DIAGNOSTICS_ENABLED]: setting.boolean({ default: true, scope: 'resource' }),
   },
 });
 
@@ -234,7 +237,7 @@ const Renders: ServiceToken<SharedRender> = serviceToken<SharedRender>('plantuml
  * Coalesces a burst of finished renders into one preview refresh.
  *
  * A function rather than an object, so the container cannot dispose it — the
- * hosted service below cancels it instead.
+ * preview's registration below cancels it instead.
  */
 type Refresh = (() => void) & { cancel(): void };
 const RequestRefresh: ServiceToken<Refresh> = serviceToken<Refresh>('plantuml.requestRefresh');
@@ -262,44 +265,6 @@ interface ViewerSet {
   updateAll(): void;
 }
 const Viewers: ServiceToken<ViewerSet> = serviceToken<ViewerSet>('plantuml.viewers');
-
-type Level = 'trace' | 'debug' | 'info' | 'warn' | 'error';
-const SEVERITY: Record<Level, number> = { trace: 0, debug: 1, info: 2, warn: 3, error: 4 };
-
-/**
- * Applies `plantumlLocal.logLevel` on top of the channel's own level.
- *
- * The framework logs into a `LogOutputChannel`, which VS Code filters by the
- * level chosen in the Output panel — and an extension cannot raise its own
- * channel's level. So this setting can make the log quieter but can no longer
- * turn on output VS Code is already dropping, which is what it did when the
- * extension owned a plain channel. It is kept because "warnings and worse" is
- * still a thing to ask for; `Developer: Set Log Level` is what turns `debug`
- * back on, and that choice is per channel and survives a restart.
- */
-function filtered(logger: RenderLog, level: Level): RenderLog {
-  if (level === 'trace') {
-    return logger;
-  }
-  const floor = SEVERITY[level];
-  return {
-    debug: (message): void => {
-      if (SEVERITY.debug >= floor) {
-        logger.debug(message);
-      }
-    },
-    warn: (message): void => {
-      if (SEVERITY.warn >= floor) {
-        logger.warn(message);
-      }
-    },
-    error: (message): void => {
-      if (SEVERITY.error >= floor) {
-        logger.error(message);
-      }
-    },
-  };
-}
 
 /**
  * Whether to draw with the dark palette.
@@ -397,7 +362,8 @@ function isMarkdownFile(document: vscode.TextDocument): boolean {
  * document is taken without asking.
  */
 async function chooseMarkdownDocument(
-  context: OperationContext
+  context: OperationContext,
+  workspace: WorkspaceService
 ): Promise<vscode.TextDocument | null> {
   const active = vscode.window.activeTextEditor;
   if (active?.document.languageId === 'markdown') {
@@ -420,7 +386,7 @@ async function chooseMarkdownDocument(
   const items = [
     ...open.filter((document) => visible.has(document.uri.toString())),
     ...open.filter((document) => !visible.has(document.uri.toString())),
-  ].map((document) => ({ label: vscode.workspace.asRelativePath(document.uri), document }));
+  ].map((document) => ({ label: workspace.relativePath(document.uri), document }));
   const picked = await context.ask.one(items, {
     title: context.l10n.t('Choose the Markdown document to export from'),
   });
@@ -438,6 +404,7 @@ async function chooseMarkdownDocument(
  */
 async function activeDocument(
   context: OperationContext,
+  workspace: WorkspaceService,
   plantUml: boolean,
   target: ExportTarget | null = null
 ): Promise<ActiveDocument | null> {
@@ -461,7 +428,7 @@ async function activeDocument(
         )
       : plantUml && active?.languageId === 'plantuml'
         ? active
-        : await chooseMarkdownDocument(context);
+        : await chooseMarkdownDocument(context, workspace);
   if (document === null) {
     return null;
   }
@@ -514,9 +481,13 @@ function exportDirectory(
   document: vscode.Uri
 ): string | null {
   const directory = String(settings.read({ resource: document }).values[CONFIG.EXPORT_DIRECTORY]);
-  if (!isValidExportDirectory(directory)) {
+  // A mistyped value, not hostile input -- but `../..` or an absolute path
+  // would scatter files outside the document's folder, where no Markdown link
+  // could reach them.
+  const problem = checkRelativePath(directory);
+  if (problem !== undefined) {
     void context.notify.error(
-      directory === ''
+      problem === 'empty'
         ? context.l10n.t(
             'plantumlLocal.exportDirectory is empty. Set a folder relative to the document, such as images.'
           )
@@ -727,6 +698,7 @@ function exporterDeps(
   palettes: ThemePalettes,
   settings: SettingsReader,
   exportRecords: TypedStorage<ExportRecords>,
+  workspace: WorkspaceService,
   document: vscode.Uri
 ): ExporterDeps {
   return {
@@ -802,7 +774,7 @@ function exporterDeps(
       // Renaming a file over a folder deletes the folder and all it holds.
       if ((stat.type & vscode.FileType.Directory) !== 0) {
         throw new Error(
-          context.l10n.t('{0} is a folder, not a file.', vscode.workspace.asRelativePath(uri))
+          context.l10n.t('{0} is a folder, not a file.', workspace.relativePath(uri))
         );
       }
       return vscode.workspace.fs.readFile(uri);
@@ -821,7 +793,7 @@ function exporterDeps(
       }
     },
     confirmReplace: (paths, canKeep): Promise<'replace' | 'keep' | undefined> => {
-      const files = paths.map((path) => vscode.workspace.asRelativePath(vscode.Uri.parse(path)));
+      const files = paths.map((path) => workspace.relativePath(vscode.Uri.parse(path)));
       const replace = { title: context.l10n.t('Replace'), value: 'replace' as const };
       const keep = { title: context.l10n.t('Keep Existing'), value: 'keep' as const };
       const actions = canKeep ? [replace, keep] : [replace];
@@ -871,12 +843,13 @@ function runBulkExport(
   palettes: ThemePalettes,
   settings: SettingsReader,
   exportRecords: TypedStorage<ExportRecords>,
+  workspace: WorkspaceService,
   document: ActiveDocument,
   directory: string
 ): Promise<ExportOutcome | null> {
   return context.progress.run({ title: context.l10n.t('Exporting diagrams…') }, (report) =>
     exportAll(
-      exporterDeps(context, renderer, palettes, settings, exportRecords, document.textDocument.uri),
+      exporterDeps(context, renderer, palettes, settings, exportRecords, workspace, document.textDocument.uri),
       document.path,
       directory,
       diagramsOf(document.textDocument, document.text),
@@ -966,7 +939,7 @@ async function announceExport(
     ? context.notify.warn(message, { actions: [reveal] })
     : context.notify.info(message, { actions: [reveal] }));
   if (choice === 'reveal') {
-    await vscode.commands.executeCommand('revealInExplorer', vscode.Uri.parse(written));
+    await context.commands.execute('revealInExplorer', vscode.Uri.parse(written));
   }
 }
 
@@ -992,7 +965,11 @@ function unnamedDiagrams(sources: readonly FolderSource[]): number {
  * The folder to export: the one the Explorer passes, or one picked. Null
  * after saying why there is none.
  */
-async function folderToExport(context: OperationContext, target: unknown): Promise<vscode.Uri | null> {
+async function folderToExport(
+  context: OperationContext,
+  workspace: WorkspaceService,
+  target: unknown
+): Promise<vscode.Uri | null> {
   // Anyone can run the command with anything, so only a URI is taken; one
   // that is not in the workspace is refused below.
   const passed =
@@ -1006,14 +983,14 @@ async function folderToExport(context: OperationContext, target: unknown): Promi
         canSelectFiles: false,
         canSelectFolders: true,
         canSelectMany: false,
-        defaultUri: vscode.workspace.workspaceFolders?.[0]?.uri,
+        defaultUri: workspace.folders()[0]?.uri as vscode.Uri | undefined,
         openLabel: context.l10n.t('Export Diagrams'),
       })
     )?.[0];
   if (folder === undefined) {
     return null;
   }
-  if (vscode.workspace.getWorkspaceFolder(folder) === undefined) {
+  if (workspace.folderOf(folder) === undefined) {
     void context.notify.warn(context.l10n.t('Choose a folder in the workspace.'));
     return null;
   }
@@ -1098,7 +1075,10 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
     create: ({ logger, settings }) =>
       new RendererClient(
         defaultWorkerPath(),
-        filtered(logger, settings.read().values[CONFIG.LOG_LEVEL])
+        // plantumlLocal.logLevel can only make the channel quieter: VS Code
+        // owns the channel's level, and an extension cannot raise it. Read on
+        // every entry, so a change applies without a reload.
+        filterLogger(logger, () => settings.read().values[CONFIG.LOG_LEVEL])
       ),
   });
 
@@ -1112,11 +1092,13 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
     create: ({ renderer }) => shareRenders((source, dark) => renderer.render(source, dark)),
   });
 
-  module.services.singleton(RequestRefresh, () =>
-    debounce(() => {
-      void vscode.commands.executeCommand('markdown.preview.refresh');
-    }, REFRESH_DEBOUNCE_MS)
-  );
+  module.services.singleton(RequestRefresh, {
+    inject: { commands: Commands },
+    create: ({ commands }) =>
+      debounce(() => {
+        void commands.execute('markdown.preview.refresh');
+      }, REFRESH_DEBOUNCE_MS),
+  });
 
   module.services.singleton(Plugin, {
     inject: {
@@ -1136,7 +1118,7 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         escapeHtml,
         hideExportedImages: () => settings.read().values[CONFIG.HIDE_EXPORTED_IMAGES],
         updateMode: (document) => updateModeOf(settings, vscode.Uri.parse(document)),
-        log: filtered(logger, settings.read().values[CONFIG.LOG_LEVEL]),
+        log: filterLogger(logger, () => settings.read().values[CONFIG.LOG_LEVEL]),
         labels: {
           loading: l10n.t('Rendering diagram…'),
           failedTitle: l10n.t('Failed to render diagram'),
@@ -1166,14 +1148,15 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
       palettes: Palettes,
       l10n: Localization,
       settings: Settings.token,
+      commands: Commands,
     },
-    create: ({ renders, palettes, l10n, settings }): ViewerSet => {
+    create: ({ renders, palettes, l10n, settings, commands }): ViewerSet => {
       const deps: ViewerDeps = {
         render: renders,
         resolvePalette: (source, dark) => palettes.resolve(source, dark),
         isDark: () => isDark(settings.read().values[CONFIG.THEME]),
         exportPng: async (uri, line): Promise<void> => {
-          await vscode.commands.executeCommand(COMMANDS.EXPORT_PNG, { uri, line });
+          await commands.invoke(ExportPng, { uri, line });
         },
         labels: {
           diagram: (position) => l10n.t('Diagram {0}', String(position)),
@@ -1341,65 +1324,71 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
     execute: openPreview(vscode.ViewColumn.Beside),
   });
 
-  module.hostedServices.add({
+  module.raw.register({
     id: 'plantuml.viewerUpdates',
     inject: { viewers: Viewers, settings: Settings.token, l10n: Localization },
-    start: (context, { viewers, settings, l10n }) => {
+    bind: ({ registrations }, { viewers, settings, l10n }): undefined => {
       // Draws a viewer again once its file has stopped changing, or with
       // onSave once it is saved, and every viewer when the palette may have
       // changed with the theme or setting. With onSave or manual, a change
       // only marks the diagram shown as not updated.
       const timers = new Map<string, ReturnType<typeof setTimeout>>();
-      const changed = vscode.workspace.onDidChangeTextDocument((event) => {
-        if (event.document.languageId !== 'plantuml' || event.contentChanges.length === 0) {
-          return;
-        }
-        const mode = updateModeOf(settings, event.document.uri);
-        if (mode !== 'onChange') {
-          viewers.stale(event.document, notUpdatedNote(l10n, mode));
-          return;
-        }
-        const key = event.document.uri.toString();
-        clearTimeout(timers.get(key));
-        timers.set(
-          key,
-          setTimeout(() => {
-            timers.delete(key);
-            viewers.update(event.document);
-          }, VIEWER_DEBOUNCE_MS)
-        );
-      });
-      const saved = vscode.workspace.onDidSaveTextDocument((document) => {
-        if (document.languageId === 'plantuml' && updateModeOf(settings, document.uri) === 'onSave') {
-          viewers.update(document);
-        }
-      });
-      const themed = vscode.window.onDidChangeActiveColorTheme(() => {
-        viewers.updateAll();
-      });
-      const configured = vscode.workspace.onDidChangeConfiguration((event) => {
-        if (
-          event.affectsConfiguration(`${EXTENSION_ID}.${CONFIG.THEME}`) ||
-          event.affectsConfiguration(`${EXTENSION_ID}.${CONFIG.PREVIEW_UPDATE_MODE}`)
-        ) {
+      registrations.own(
+        vscode.workspace.onDidChangeTextDocument((event) => {
+          if (event.document.languageId !== 'plantuml' || event.contentChanges.length === 0) {
+            return;
+          }
+          const mode = updateModeOf(settings, event.document.uri);
+          if (mode !== 'onChange') {
+            viewers.stale(event.document, notUpdatedNote(l10n, mode));
+            return;
+          }
+          const key = event.document.uri.toString();
+          clearTimeout(timers.get(key));
+          timers.set(
+            key,
+            setTimeout(() => {
+              timers.delete(key);
+              viewers.update(event.document);
+            }, VIEWER_DEBOUNCE_MS)
+          );
+        })
+      );
+      registrations.own(
+        vscode.workspace.onDidSaveTextDocument((document) => {
+          if (document.languageId === 'plantuml' && updateModeOf(settings, document.uri) === 'onSave') {
+            viewers.update(document);
+          }
+        })
+      );
+      registrations.own(
+        vscode.window.onDidChangeActiveColorTheme(() => {
           viewers.updateAll();
-        }
-      });
+        })
+      );
+      registrations.own(
+        vscode.workspace.onDidChangeConfiguration((event) => {
+          if (
+            event.affectsConfiguration(`${EXTENSION_ID}.${CONFIG.THEME}`) ||
+            event.affectsConfiguration(`${EXTENSION_ID}.${CONFIG.PREVIEW_UPDATE_MODE}`)
+          ) {
+            viewers.updateAll();
+          }
+        })
+      );
       // Registered during activation, as VS Code requires, so the panels open
       // when the window closed come back with it.
-      const restorer = vscode.window.registerWebviewPanelSerializer(VIEWER_TYPE, {
-        deserializeWebviewPanel: (panel, state: unknown) => viewers.restore(panel, state),
-      });
-      context.signal.addEventListener('abort', () => {
-        changed.dispose();
-        saved.dispose();
-        themed.dispose();
-        configured.dispose();
-        restorer.dispose();
+      registrations.own(
+        vscode.window.registerWebviewPanelSerializer(VIEWER_TYPE, {
+          deserializeWebviewPanel: (panel, state: unknown) => viewers.restore(panel, state),
+        })
+      );
+      registrations.defer(() => {
         for (const timer of timers.values()) {
           clearTimeout(timer);
         }
       });
+      return undefined;
     },
   });
 
@@ -1414,15 +1403,17 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         palettes,
         settings,
         exportRecords,
+        workspace,
       }: {
         renderer: RendererClient;
         palettes: ThemePalettes;
         settings: SettingsReader;
         exportRecords: TypedStorage<ExportRecords>;
+        workspace: WorkspaceService;
       }
     ): Promise<void> => {
       // The `.puml` preview names its file and the line of the diagram it shows.
-      const document = await activeDocument(context, true, exportTarget(args[0]));
+      const document = await activeDocument(context, workspace, true, exportTarget(args[0]));
       if (document === null) {
         return;
       }
@@ -1456,7 +1447,7 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         return;
       }
 
-      const deps = exporterDeps(context, renderer, palettes, settings, exportRecords, document.textDocument.uri);
+      const deps = exporterDeps(context, renderer, palettes, settings, exportRecords, workspace, document.textDocument.uri);
       const result =
         format === 'svg'
           ? await exportOne(deps, document.path, directory, block, name)
@@ -1474,28 +1465,46 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
       }
       context.logger.info(`Exported ${String(result.path)}`);
       // The file as the Explorer names it, rather than its encoded URI.
-      const written = vscode.workspace.asRelativePath(vscode.Uri.parse(String(result.path)));
+      const written = workspace.relativePath(vscode.Uri.parse(String(result.path)));
       await announceExport(context, context.l10n.t('Exported {0}', written), false, result.path ?? undefined);
     };
 
   module.commands.handle(ExportSvg, {
-    inject: { renderer: Renderer, palettes: Palettes, settings: Settings.token, exportRecords: ExportedFiles.token },
+    inject: {
+      renderer: Renderer,
+      palettes: Palettes,
+      settings: Settings.token,
+      exportRecords: ExportedFiles.token,
+      workspace: Workspace,
+    },
     execute: exportAtCursor('svg'),
   });
 
   module.commands.handle(ExportPng, {
-    inject: { renderer: Renderer, palettes: Palettes, settings: Settings.token, exportRecords: ExportedFiles.token },
+    inject: {
+      renderer: Renderer,
+      palettes: Palettes,
+      settings: Settings.token,
+      exportRecords: ExportedFiles.token,
+      workspace: Workspace,
+    },
     execute: exportAtCursor('png'),
   });
 
   module.commands.handle(ExportAllSvg, {
-    inject: { renderer: Renderer, palettes: Palettes, settings: Settings.token, exportRecords: ExportedFiles.token },
+    inject: {
+      renderer: Renderer,
+      palettes: Palettes,
+      settings: Settings.token,
+      exportRecords: ExportedFiles.token,
+      workspace: Workspace,
+    },
     execute: async (
       context: OperationContext,
       _args,
-      { renderer, palettes, settings, exportRecords }
+      { renderer, palettes, settings, exportRecords, workspace }
     ): Promise<void> => {
-      const document = await activeDocument(context, true);
+      const document = await activeDocument(context, workspace, true);
       if (document === null) {
         return;
       }
@@ -1505,7 +1514,7 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         return;
       }
 
-      const outcome = await runBulkExport(context, renderer, palettes, settings, exportRecords, document, directory);
+      const outcome = await runBulkExport(context, renderer, palettes, settings, exportRecords, workspace, document, directory);
       if (outcome === null) {
         return;
       }
@@ -1520,13 +1529,19 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
   });
 
   module.commands.handle(ExportAllAndUpdateRefs, {
-    inject: { renderer: Renderer, palettes: Palettes, settings: Settings.token, exportRecords: ExportedFiles.token },
+    inject: {
+      renderer: Renderer,
+      palettes: Palettes,
+      settings: Settings.token,
+      exportRecords: ExportedFiles.token,
+      workspace: Workspace,
+    },
     execute: async (
       context: OperationContext,
       _args,
-      { renderer, palettes, settings, exportRecords }
+      { renderer, palettes, settings, exportRecords, workspace }
     ): Promise<void> => {
-      const document = await activeDocument(context, false);
+      const document = await activeDocument(context, workspace, false);
       if (document === null) {
         return;
       }
@@ -1536,7 +1551,7 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         return;
       }
 
-      const outcome = await runBulkExport(context, renderer, palettes, settings, exportRecords, document, directory);
+      const outcome = await runBulkExport(context, renderer, palettes, settings, exportRecords, workspace, document, directory);
       if (outcome === null) {
         return;
       }
@@ -1597,11 +1612,13 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         palettes,
         settings,
         exportRecords,
+        workspace,
       }: {
         renderer: RendererClient;
         palettes: ThemePalettes;
         settings: SettingsReader;
         exportRecords: TypedStorage<ExportRecords>;
+        workspace: WorkspaceService;
       }
     ): Promise<void> => {
       // It reads files and writes them, so like the other exports it does
@@ -1612,11 +1629,11 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         );
         return;
       }
-      const folder = await folderToExport(context, args[0]);
+      const folder = await folderToExport(context, workspace, args[0]);
       if (folder === null) {
         return;
       }
-      const where = vscode.workspace.asRelativePath(folder);
+      const where = workspace.relativePath(folder);
 
       const sources = await context.progress.run(
         { title: context.l10n.t('Looking for diagrams…'), cancellable: true },
@@ -1659,23 +1676,25 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
       }
 
       // Asked before anything is drawn, with the documents it would write from.
-      const documents = planned.map((source) => vscode.workspace.asRelativePath(source.uri));
+      const documents = planned.map((source) => workspace.relativePath(source.uri));
       const listed = documents.slice(0, 20);
       if (documents.length > listed.length) {
         listed.push(context.l10n.t('…and {0} more', String(documents.length - listed.length)));
       }
-      const go: vscode.MessageItem = { title: context.l10n.t('Export') };
-      const answer = await vscode.window.showInformationMessage(
+      const answer = await context.notify.info(
         context.l10n.t(
           'Export {0} named diagram(s) from {1} document(s) in {2}?',
           String(named),
           String(planned.length),
           where
         ),
-        { modal: true, detail: listed.join('\n') },
-        go
+        {
+          modal: true,
+          detail: listed.join('\n'),
+          actions: [{ title: context.l10n.t('Export'), value: 'export' as const }],
+        }
       );
-      if (answer !== go) {
+      if (answer !== 'export') {
         return;
       }
 
@@ -1690,12 +1709,12 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
               if (signal.aborted) {
                 return undefined;
               }
-              const document = vscode.workspace.asRelativePath(source.uri);
+              const document = workspace.relativePath(source.uri);
               report.report({
                 message: `${document} (${String(index + 1)}/${String(planned.length)})`,
                 increment: 100 / planned.length,
               });
-              const deps = exporterDeps(context, renderer, palettes, settings, exportRecords, source.uri);
+              const deps = exporterDeps(context, renderer, palettes, settings, exportRecords, workspace, source.uri);
               const result = await drawDocument(
                 { ...deps, toPng: (svg, width, height, background) => pngs.draw(svg, width, height, background) },
                 source.uri.toString(),
@@ -1717,7 +1736,7 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
           if (signal.aborted) {
             return undefined;
           }
-          return writeDocuments(exporterDeps(context, renderer, palettes, settings, exportRecords, folder), drawn);
+          return writeDocuments(exporterDeps(context, renderer, palettes, settings, exportRecords, workspace, folder), drawn);
         }
       );
       if (outcome === undefined || outcome === null) {
@@ -1727,69 +1746,86 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
     };
 
   module.commands.handle(ExportFolderSvg, {
-    inject: { renderer: Renderer, palettes: Palettes, settings: Settings.token, exportRecords: ExportedFiles.token },
+    inject: {
+      renderer: Renderer,
+      palettes: Palettes,
+      settings: Settings.token,
+      exportRecords: ExportedFiles.token,
+      workspace: Workspace,
+    },
     execute: exportFolder('svg'),
   });
 
   module.commands.handle(ExportFolderPng, {
-    inject: { renderer: Renderer, palettes: Palettes, settings: Settings.token, exportRecords: ExportedFiles.token },
+    inject: {
+      renderer: Renderer,
+      palettes: Palettes,
+      settings: Settings.token,
+      exportRecords: ExportedFiles.token,
+      workspace: Workspace,
+    },
     execute: exportFolder('png'),
   });
 
-  module.hostedServices.add({
+  module.raw.register({
     id: 'plantuml.preview',
     inject: { plugin: Plugin, requestRefresh: RequestRefresh, settings: Settings.token },
-    start: (context, { plugin, requestRefresh, settings }) => {
+    bind: ({ registrations, logger }, { plugin, requestRefresh, settings }): undefined => {
       // A colour-theme flip and a `theme` change both invalidate every cached
       // SVG: the palette is baked into the rendered output rather than applied
       // by CSS afterwards.
-      const themeChanged = vscode.window.onDidChangeActiveColorTheme(() => {
-        context.logger.debug('Colour theme changed; re-rendering diagrams');
-        plugin.clearCache();
-      });
-      const settingChanged = settings.watch(CONFIG.THEME, undefined, () => {
-        plugin.clearCache();
-      });
+      registrations.own(
+        vscode.window.onDidChangeActiveColorTheme(() => {
+          logger.debug('Colour theme changed; re-rendering diagrams');
+          plugin.clearCache();
+        })
+      );
+      registrations.own(
+        settings.watch(CONFIG.THEME, undefined, () => {
+          plugin.clearCache();
+        })
+      );
       // VS Code's preview does not render again on a save, so with onSave the
       // saved blocks are taken for the ones to draw and the preview refreshed,
       // once the update the save itself scheduled there has passed.
       let afterSave: ReturnType<typeof setTimeout> | undefined;
-      const saved = vscode.workspace.onDidSaveTextDocument((document) => {
-        if (document.languageId === 'markdown' && updateModeOf(settings, document.uri) === 'onSave') {
-          const sources = findPlantUmlBlocks(document.getText()).map((block) => block.source);
-          plugin.accept(document.uri.toString(), sources);
-          clearTimeout(afterSave);
-          afterSave = setTimeout(() => {
+      registrations.own(
+        vscode.workspace.onDidSaveTextDocument((document) => {
+          if (document.languageId === 'markdown' && updateModeOf(settings, document.uri) === 'onSave') {
+            const sources = findPlantUmlBlocks(document.getText()).map((block) => block.source);
+            plugin.accept(document.uri.toString(), sources);
+            clearTimeout(afterSave);
+            afterSave = setTimeout(() => {
+              requestRefresh();
+            }, SAVE_REFRESH_DELAY_MS);
+          }
+        })
+      );
+      registrations.own(
+        vscode.workspace.onDidChangeConfiguration((event) => {
+          if (event.affectsConfiguration(`${EXTENSION_ID}.${CONFIG.PREVIEW_UPDATE_MODE}`)) {
             requestRefresh();
-          }, SAVE_REFRESH_DELAY_MS);
-        }
-      });
-      const modeChanged = vscode.workspace.onDidChangeConfiguration((event) => {
-        if (event.affectsConfiguration(`${EXTENSION_ID}.${CONFIG.PREVIEW_UPDATE_MODE}`)) {
-          requestRefresh();
-        }
-      });
+          }
+        })
+      );
 
-      context.signal.addEventListener('abort', () => {
-        themeChanged.dispose();
-        settingChanged.dispose();
-        saved.dispose();
-        modeChanged.dispose();
+      registrations.defer(() => {
         clearTimeout(afterSave);
         // A pending refresh would fire into a preview that is going away.
         requestRefresh.cancel();
       });
+      return undefined;
     },
   });
 
-  module.hostedServices.add({
+  module.raw.register({
     id: 'plantuml.diagnostics',
     inject: { renders: Renders, palettes: Palettes, settings: Settings.token, l10n: Localization },
-    start: (context, { renders, palettes, settings, l10n }) => {
+    bind: ({ registrations, logger }, { renders, palettes, settings, l10n }): undefined => {
       // Puts the problems of the diagrams in open Markdown documents in the
       // Problems panel, whether or not a preview is open. Renders are shared
       // with the preview, so a document shown in both is drawn once.
-      const collection = vscode.languages.createDiagnosticCollection(EXTENSION_ID);
+      const collection = registrations.own(vscode.languages.createDiagnosticCollection(EXTENSION_ID));
       const labels: ProblemLabels = {
         remoteReference: l10n.t('URL-based external references (!include, !theme) are not supported.'),
         severalDiagrams: l10n.t(
@@ -1814,9 +1850,7 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
       const generations = new Map<string, number>();
 
       const enabled = (document: vscode.TextDocument): boolean =>
-        vscode.workspace
-          .getConfiguration(EXTENSION_ID, document.uri)
-          .get<boolean>(CONFIG.DIAGNOSTICS_ENABLED, true) !== false;
+        settings.read({ resource: document.uri }).values[CONFIG.DIAGNOSTICS_ENABLED] !== false;
 
       const outcomeOf = async (source: string): Promise<RenderOutcome> => {
         try {
@@ -1867,7 +1901,7 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
           setTimeout(() => {
             timers.delete(key);
             diagnose(document, generation).catch((error: unknown) => {
-              context.logger.warn(`Checking ${key} failed: ${String(error)}`);
+              logger.warn(`Checking ${key} failed: ${String(error)}`);
             });
           }, delay)
         );
@@ -1881,10 +1915,12 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         collection.delete(document.uri);
       };
 
-      const subscriptions = [
+      registrations.own(
         vscode.workspace.onDidOpenTextDocument((document) => {
           schedule(document, 0);
-        }),
+        })
+      );
+      registrations.own(
         vscode.workspace.onDidChangeTextDocument((event) => {
           if (event.contentChanges.length === 0 || !isMarkdownFile(event.document)) {
             return;
@@ -1893,35 +1929,35 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
           // until the next check finishes.
           collection.delete(event.document.uri);
           schedule(event.document, DIAGNOSTICS_DEBOUNCE_MS);
-        }),
-        vscode.workspace.onDidCloseTextDocument(forget),
+        })
+      );
+      registrations.own(vscode.workspace.onDidCloseTextDocument(forget));
+      registrations.own(
         vscode.workspace.onDidChangeConfiguration((event) => {
           if (event.affectsConfiguration(`${EXTENSION_ID}.${CONFIG.DIAGNOSTICS_ENABLED}`)) {
             for (const document of vscode.workspace.textDocuments) {
               schedule(document, 0);
             }
           }
-        }),
-      ];
+        })
+      );
       for (const document of vscode.workspace.textDocuments) {
         schedule(document, 0);
       }
 
-      context.signal.addEventListener('abort', () => {
-        for (const subscription of subscriptions) {
-          subscription.dispose();
-        }
+      registrations.defer(() => {
         for (const timer of timers.values()) {
           clearTimeout(timer);
         }
-        collection.dispose();
       });
+      return undefined;
     },
   });
 
-  module.hostedServices.add({
+  module.raw.register({
     id: 'plantuml.exportMenu',
-    start: (context) => {
+    inject: { commands: Commands },
+    bind: ({ registrations }, { commands }): undefined => {
       // Keeps the context keys behind the editor context-menu entries
       // current: "Export Diagram" shows only with the cursor inside a
       // ```plantuml block or a diagram of a PlantUML file, "Export All"
@@ -1949,37 +1985,33 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         // setContext is a command round-trip; skip it when nothing moved.
         if (hasDiagrams !== state.hasDiagrams) {
           state.hasDiagrams = hasDiagrams;
-          void vscode.commands.executeCommand('setContext', CONTEXT_KEYS.HAS_DIAGRAMS, hasDiagrams);
+          void commands.execute('setContext', CONTEXT_KEYS.HAS_DIAGRAMS, hasDiagrams);
         }
         if (inDiagram !== state.inDiagram) {
           state.inDiagram = inDiagram;
-          void vscode.commands.executeCommand(
-            'setContext',
-            CONTEXT_KEYS.CURSOR_IN_DIAGRAM,
-            inDiagram
-          );
+          void commands.execute('setContext', CONTEXT_KEYS.CURSOR_IN_DIAGRAM, inDiagram);
         }
       };
 
-      const selectionChanged = vscode.window.onDidChangeTextEditorSelection((event) => {
-        update(event.textEditor);
-      });
-      const editorChanged = vscode.window.onDidChangeActiveTextEditor((editor) => {
-        update(editor);
-      });
+      registrations.own(
+        vscode.window.onDidChangeTextEditorSelection((event) => {
+          update(event.textEditor);
+        })
+      );
+      registrations.own(
+        vscode.window.onDidChangeActiveTextEditor((editor) => {
+          update(editor);
+        })
+      );
       update(vscode.window.activeTextEditor);
-
-      context.signal.addEventListener('abort', () => {
-        selectionChanged.dispose();
-        editorChanged.dispose();
-      });
+      return undefined;
     },
   });
 
-  module.hostedServices.add({
+  module.raw.register({
     id: 'plantuml.completion',
     inject: { l10n: Localization },
-    start: (context, { l10n }) => {
+    bind: ({ registrations }, { l10n }): undefined => {
       // Suggestions in the diagrams of Markdown documents and PlantUML files
       // (src/language/completion.ts). Markdown turns quick suggestions off,
       // so there they open on the characters a suggestion starts after.
@@ -2088,54 +2120,54 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         });
       };
 
-      const registration = vscode.languages.registerCompletionItemProvider(
-        [{ language: 'markdown' }, { language: 'plantuml' }],
-        { provideCompletionItems: provide },
-        '@',
-        '!',
-        '&',
-        ' '
+      registrations.own(
+        vscode.languages.registerCompletionItemProvider(
+          [{ language: 'markdown' }, { language: 'plantuml' }],
+          { provideCompletionItems: provide },
+          '@',
+          '!',
+          '&',
+          ' '
+        )
       );
-      context.signal.addEventListener('abort', () => {
-        registration.dispose();
-      });
+      return undefined;
     },
   });
 
-  module.hostedServices.add({
+  module.raw.register({
     id: 'plantuml.folding',
-    start: (context) => {
+    bind: ({ registrations }): undefined => {
       // Folding by syntax in PlantUML files (src/language/folding.ts). A
       // file in which none is found gets no list, which leaves it folding
       // by indentation. Markdown keeps its own folding.
-      const registration = vscode.languages.registerFoldingRangeProvider(
-        { language: 'plantuml' },
-        {
-          provideFoldingRanges: (document) => {
-            const folds = foldingRanges(document.getText());
-            if (folds.length === 0) {
-              return undefined;
-            }
-            return folds.map(
-              (fold) =>
-                new vscode.FoldingRange(
-                  fold.start,
-                  fold.end,
-                  fold.comment ? vscode.FoldingRangeKind.Comment : undefined
-                )
-            );
-          },
-        }
+      registrations.own(
+        vscode.languages.registerFoldingRangeProvider(
+          { language: 'plantuml' },
+          {
+            provideFoldingRanges: (document) => {
+              const folds = foldingRanges(document.getText());
+              if (folds.length === 0) {
+                return undefined;
+              }
+              return folds.map(
+                (fold) =>
+                  new vscode.FoldingRange(
+                    fold.start,
+                    fold.end,
+                    fold.comment ? vscode.FoldingRangeKind.Comment : undefined
+                  )
+              );
+            },
+          }
+        )
       );
-      context.signal.addEventListener('abort', () => {
-        registration.dispose();
-      });
+      return undefined;
     },
   });
 
-  module.hostedServices.add({
+  module.raw.register({
     id: 'plantuml.symbols',
-    start: (context) => {
+    bind: ({ registrations }): undefined => {
       // The diagrams of a PlantUML file and what they declare, for the
       // Outline, the breadcrumbs and Go to Symbol (src/language/symbols.ts).
       // Markdown keeps its own outline of headings.
@@ -2161,16 +2193,16 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         symbol.children = declared.children.map((child) => symbolOf(document, child));
         return symbol;
       };
-      const registration = vscode.languages.registerDocumentSymbolProvider(
-        { language: 'plantuml' },
-        {
-          provideDocumentSymbols: (document) =>
-            declarations(document.getText()).map((declared) => symbolOf(document, declared)),
-        }
+      registrations.own(
+        vscode.languages.registerDocumentSymbolProvider(
+          { language: 'plantuml' },
+          {
+            provideDocumentSymbols: (document) =>
+              declarations(document.getText()).map((declared) => symbolOf(document, declared)),
+          }
+        )
       );
-      context.signal.addEventListener('abort', () => {
-        registration.dispose();
-      });
+      return undefined;
     },
   });
 
@@ -2276,39 +2308,39 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
     await vscode.workspace.applyEdit(edit);
   });
 
-  module.hostedServices.add({
+  module.raw.register({
     id: 'plantuml.codeActions',
     inject: { l10n: Localization },
-    start: (context, { l10n }) => {
+    bind: ({ registrations }, { l10n }): undefined => {
       // Offers a name to a diagram without a usable one
       // (src/language/code-actions.ts), on the line the name goes on only:
       // anywhere in the block, every unnamed diagram would show a light bulb.
-      const registration = vscode.languages.registerCodeActionsProvider(
-        [{ language: 'markdown' }, { language: 'plantuml' }],
-        {
-          provideCodeActions: (document, range) => {
-            const line = range.start.line;
-            const plantUml = document.languageId === 'plantuml';
-            if (
-              !namesDiagram(document.lineAt(line).text, plantUml) ||
-              unnamedAt(document.getText(), line, plantUml, withoutExtension(fileNameOf(document))) === undefined
-            ) {
-              return undefined;
-            }
-            const action = new vscode.CodeAction(l10n.t('Name this diagram for export…'), vscode.CodeActionKind.QuickFix);
-            action.command = {
-              title: action.title,
-              command: COMMANDS.ASSIGN_DIAGRAM_NAME,
-              arguments: [document.uri.toString(), line, document.version],
-            };
-            return [action];
+      registrations.own(
+        vscode.languages.registerCodeActionsProvider(
+          [{ language: 'markdown' }, { language: 'plantuml' }],
+          {
+            provideCodeActions: (document, range) => {
+              const line = range.start.line;
+              const plantUml = document.languageId === 'plantuml';
+              if (
+                !namesDiagram(document.lineAt(line).text, plantUml) ||
+                unnamedAt(document.getText(), line, plantUml, withoutExtension(fileNameOf(document))) === undefined
+              ) {
+                return undefined;
+              }
+              const action = new vscode.CodeAction(l10n.t('Name this diagram for export…'), vscode.CodeActionKind.QuickFix);
+              action.command = {
+                title: action.title,
+                command: COMMANDS.ASSIGN_DIAGRAM_NAME,
+                arguments: [document.uri.toString(), line, document.version],
+              };
+              return [action];
+            },
           },
-        },
-        { providedCodeActionKinds: [vscode.CodeActionKind.QuickFix] }
+          { providedCodeActionKinds: [vscode.CodeActionKind.QuickFix] }
+        )
       );
-      context.signal.addEventListener('abort', () => {
-        registration.dispose();
-      });
+      return undefined;
     },
   });
 
@@ -2317,9 +2349,9 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
 
 /**
  * VS Code reads `extendMarkdownIt` off whatever `activate` resolves to, so it
- * is declared rather than assembled by hand: the framework builds it after the
- * hosted services have started — the earliest point the plugin exists — from
- * the same instance the clear-cache command and the theme watcher got.
+ * is declared rather than assembled by hand: the framework builds it last in
+ * activation, from the same instance the clear-cache command and the theme
+ * watcher got.
  */
 const app = defineExtension({
   name: EXTENSION_NAME,

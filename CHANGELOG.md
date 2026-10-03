@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- A new `plantumlLocal.logLevel` applies to the next entry the renderer or the
+  Markdown preview writes. It used to wait for a reload.
+- `plantumlLocal.exportDirectory` starting with a backslash is refused, as one
+  starting with `/` is. It used to be read as the folder of that name next to
+  the document.
+- `@kkdev92/vscode-ext-kit` `^7.0.0` → `^7.1.0`. Its log filter and its check
+  for relative paths take over from this extension's own.
+
+### Fixed
+
+- `plantumlLocal.exportDirectory` set to only spaces is refused, as an empty
+  one is. It used to create a folder named with those spaces next to the
+  document and write the files there.
+
 ## [0.12.0] - 2026-10-03
 
 ### Added

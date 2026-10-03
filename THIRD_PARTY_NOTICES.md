@@ -18,7 +18,7 @@ in [`third-party/`](third-party).
 | [whatwg-mimetype](https://github.com/jsdom/whatwg-mimetype) | 3.0.0 | MIT | [whatwg-mimetype-LICENSE.txt](third-party/whatwg-mimetype-LICENSE.txt) |
 | [ws](https://github.com/websockets/ws) | 8.21.3 | MIT | [ws-LICENSE.txt](third-party/ws-LICENSE.txt) |
 | [buffer-image-size](https://github.com/netroy/buffer-image-size) | 0.6.4 | MIT | [buffer-image-size-LICENSE.txt](third-party/buffer-image-size-LICENSE.txt) |
-| [`@kkdev92/vscode-ext-kit`](https://github.com/kkdev92/vscode-ext-kit) | 7.0.0 | MIT | [vscode-ext-kit-LICENSE.txt](third-party/vscode-ext-kit-LICENSE.txt) |
+| [`@kkdev92/vscode-ext-kit`](https://github.com/kkdev92/vscode-ext-kit) | 7.1.0 | MIT | [vscode-ext-kit-LICENSE.txt](third-party/vscode-ext-kit-LICENSE.txt) |
 | [markdown-it](https://github.com/markdown-it/markdown-it) | 14.3.2 | MIT | [markdown-it-LICENSE.txt](third-party/markdown-it-LICENSE.txt) |
 | [linkify-it](https://github.com/markdown-it/linkify-it) | 5.0.2 | MIT | [linkify-it-LICENSE.txt](third-party/linkify-it-LICENSE.txt) |
 | [mdurl](https://github.com/markdown-it/mdurl) | 2.1.0 | MIT | [mdurl-LICENSE.txt](third-party/mdurl-LICENSE.txt) |
