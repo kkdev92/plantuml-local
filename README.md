@@ -95,7 +95,7 @@ npm run install-local
 3. Open the preview: the preview button at the top right of the editor, or **Markdown: Open Preview** (`Ctrl+Shift+V` by default)
 4. The block renders as a diagram — edit and save, and it follows
 
-See [sample.md](sample.md) for a tour of diagram types, including error handling.
+See [sample.md](sample.md) for a tour of diagram types, including error handling, and [sample.puml](sample.puml) for a PlantUML file of its own.
 
 ---
 

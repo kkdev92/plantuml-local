@@ -1,0 +1,50 @@
+' A PlantUML file of its own. The preview button in the editor's title bar
+' opens a panel showing the diagram under the cursor; this file holds three,
+' so the panel also lists them by id to pick from. The Outline view lists
+' them too, with what each declares, and each diagram folds from its start
+' line.
+' Export All Diagrams as SVG writes one file per diagram, named by its id:
+' images/checkout.svg and so on, beside this file. Export Diagram as PNG
+' writes the one under the cursor.
+
+@startuml(id=checkout)
+actor Customer
+participant "Web shop" as Shop
+participant "Payment service" as Payments
+
+Customer -> Shop : Place order
+Shop -> Payments : Charge card
+alt card accepted
+  Payments --> Shop : Paid
+  Shop --> Customer : Order confirmed
+else card declined
+  Payments --> Shop : Declined
+  Shop --> Customer : Try another card
+end
+@enduml
+
+@startuml(id=orders-model)
+class Order {
+  +id: string
+  +placedAt: Date
+  +total(): number
+}
+class LineItem {
+  +quantity: number
+}
+class Product {
+  +name: string
+}
+Order "1" *-- "*" LineItem
+LineItem "*" --> "1" Product
+@enduml
+
+@startmindmap(id=release-plan)
+* Release
+** Preview
+*** Markdown blocks
+*** PlantUML files
+** Export
+*** SVG
+*** PNG
+@endmindmap

@@ -63,6 +63,7 @@ const FORBIDDEN = [
   'extension/scripts',
   'extension/node_modules',
   'extension/sample.md',
+  'extension/sample.puml',
   // dist/stdlib/ is the shipped copy; assets/ is its source.
   'extension/assets',
   'extension/.claude',

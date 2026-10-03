@@ -35,6 +35,7 @@ CONTRIBUTING.md
 SECURITY.md
 CODE_OF_CONDUCT.md
 sample.md
+sample.puml
 docs/**
 
 # Build noise
