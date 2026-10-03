@@ -6,7 +6,7 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-6.0-blue.svg)](https://www.typescriptlang.org/)
 [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/14052/badge)](https://www.bestpractices.dev/projects/14052)
 
-Render ```` ```plantuml ```` code blocks in the built-in Markdown preview — no Java, no server, no network connection.
+Render ```` ```plantuml ```` code blocks in the built-in Markdown preview, and `.puml` files in a preview of their own — no Java, no server, no network connection.
 Your diagram source is processed locally and is not sent to a rendering service.
 *Built for design docs you can't send anywhere — write, preview, done.*
 
@@ -39,10 +39,13 @@ Your diagram source is processed locally and is not sent to a rendering service.
 ## Features
 
 - **Built-in Preview**: Diagrams appear in the same Markdown preview you already use
+- **`.puml` Files**: PlantUML files open as their own language, with folding, an outline and a preview beside the editor that zooms and exports PNG
 - **Syntax Highlighting**: ```` ```plantuml ```` blocks and `.puml` files are coloured in the editor, following the syntax the bundled engine accepts
 - **Offline Rendering**: No Java, no PlantUML server, no network connection required — nothing to install besides the extension
 - **Fault-Tolerant**: A syntax error shows up inline at the broken diagram; the rest of the page stays intact
 - **Problems Panel**: Errors, warnings and unsupported syntax in the diagrams of open Markdown files are listed with their line, preview or not
+- **Writing Help**: Completion for start lines, directives, themes and icons, templates for six kinds of diagram, and a quick fix that names a diagram for export
+- **Export**: Diagrams can be written to SVG or PNG files — one, a whole document or a whole folder — and referenced from the Markdown, for hosts such as GitHub that do not draw PlantUML
 - **Multi-Diagram Pages**: Any number of diagrams per page; renders are serialised so results never mix
 - **Dark-Mode Aware**: Diagrams re-render to match your colour theme, or pin the palette via settings
 - **Full-Width Text Support**: Japanese and other full-width characters are measured and laid out correctly
@@ -111,7 +114,7 @@ preview.
 
 - No Java runtime
 - No PlantUML server
-- No separate preview panel
+- No separate preview panel for Markdown
 - No network connection required to render
 
 The extension bundles the official
@@ -169,7 +172,7 @@ theme applies, and `editor.tokenColorCustomizations` can adjust them.
 Files ending in `.puml`, `.plantuml`, `.pu`, `.iuml` or `.wsd` open as the
 language PlantUML, with the same colouring. *Toggle Line Comment* uses `'` and
 *Toggle Block Comment* uses `/' … '/`. A `.puml` file has a preview of its own
-(below), and its diagrams can be exported to SVG.
+(below), and its diagrams can be exported to SVG or PNG.
 
 In a `.puml` file, each diagram folds from its `@start…` line, and so do block
 comments, multi-line notes, legends, headers, footers, titles and `ref over`
