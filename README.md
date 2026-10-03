@@ -12,7 +12,7 @@ Your diagram source is processed locally and is not sent to a rendering service.
 
 > **Status:** Active (best-effort maintenance)
 
-![Rendered use-case and sequence diagrams](images/demo.png)
+![A plantuml block in a Markdown file, and the same diagram drawn in VS Code's built-in preview beside it](images/demo.png)
 
 ---
 
@@ -203,6 +203,8 @@ editor's own group (or hold Alt on the button). A panel left open comes back
 when VS Code restarts, on the same diagram when that diagram has a name, and
 otherwise asking which one to show.
 
+![A .puml file beside its diagram preview, with the Outline view listing its diagrams](images/puml-preview.png)
+
 The diagram is first fitted to the panel, never past 100% — the size the
 diagram gives itself, which PlantUML's `scale` sets. The buttons above it zoom
 out and in, fit it, and show it at 100%; so do the keys `-`, `+`, `0` and `1`.
@@ -242,6 +244,8 @@ Markdown turns quick suggestions off, so in a Markdown file the list opens on
 those characters, or with *Trigger Suggest* (`Ctrl+Space`) — type `puml` and
 press it for the templates.
 
+![Typing puml and Ctrl+Space in a Markdown file inserts a sequence diagram template; Tab moves through its names while the preview draws it](images/insert-template.gif)
+
 ### Problems
 
 The diagrams of open Markdown files are checked, whether or not a preview is
@@ -254,6 +258,8 @@ it is on:
 - what it would drop without a word: a second diagram in a block, the pages
   after `newpage`, an `!includesub`;
 - a diagram with no `@enduml` line, which is drawn anyway.
+
+![Three diagrams with problems: the lines marked in the editor, the engine's messages in the preview, and the list in the Problems panel](images/problems-panel.png)
 
 The engine stops at the first error, so a diagram shows at most one, and it
 names a line but no column, so the whole line is marked. Its warnings name no
@@ -315,6 +321,8 @@ Alice -> Bob : Hello
 *Export All Diagrams and Update References* then writes
 `images/orders-api.svg` and, directly below the block, a Markdown image
 reference whose target is `images/orders-api.svg#plantuml-local`.
+
+![Export All Diagrams and Update References writes images/checkout-flow.svg and inserts a reference to it below the block](images/export-references.gif)
 
 | Command | What it does |
 | --- | --- |
