@@ -128,6 +128,31 @@ Ingredient ..> Inventory : allocates
 @enduml
 ```
 
+## Full-width text
+
+Japanese and other full-width characters are measured and laid out like any other text, including labels that mix them with half-width ones.
+
+```plantuml
+@startuml
+actor 利用者 as U
+participant "買い物リスト画面" as UI
+participant "API サーバー" as A
+database "データベース" as DB
+
+U -> UI : 品目を追加する
+UI -> A : add()
+A -> DB : 保存する
+DB --> A : 更新したリスト
+A --> UI : リストを返す
+UI --> U : 「追加しました」
+
+note right of DB
+  全角と半角（ABC）が
+  混ざった文字も測ります
+end note
+@enduml
+```
+
 ## Mind map, Gantt chart and JSON
 
 ```plantuml
