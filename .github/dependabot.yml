@@ -17,8 +17,8 @@ updates:
           - "@plantuml/core"
 
     ignore:
-      # Both of these were opened, checked and closed rather than merged, so the
-      # reasons live here instead of being rediscovered every week.
+      # Each of these is turned down on purpose, so the reasons live here
+      # instead of being rediscovered every week.
 
       # typescript 7.x: `typescript-eslint` declares `typescript >=4.8.4 <6.1.0`,
       # and type-aware linting is what `lint` runs — so 7.x fails the lane
@@ -26,6 +26,14 @@ updates:
       - dependency-name: typescript
         update-types:
           - version-update:semver-major
+
+      # @types/vscode moves by hand, in the same change as engines.vscode:
+      # `vsce package` refuses types newer than the floor, so a bump on its own
+      # turns the package lane red. The floor follows @kkdev92/vscode-ext-kit's,
+      # which rises when the kit starts using an API older VS Code lacks, not
+      # whenever new types are published. Raise both when a kit release raises
+      # its floor, or when this extension needs a newer API itself.
+      - dependency-name: "@types/vscode"
 
       # @types/node majors: these types decide what Node API the code may compile
       # against, so they must not exceed the Node of the oldest VS Code this
