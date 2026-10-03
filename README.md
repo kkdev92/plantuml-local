@@ -498,7 +498,7 @@ and would show the referenced image as a second copy.
 | Setting | Default | Description |
 | --- | --- | --- |
 | `plantumlLocal.theme` | `auto` | Diagram palette. `auto` follows the VS Code theme; `light` / `dark` pin it |
-| `plantumlLocal.logLevel` | `info` | Floor for the *PlantUML Local* output channel. VS Code's own channel level applies first — see [Troubleshooting](#troubleshooting) |
+| `plantumlLocal.logLevel` | `info` | Floor for the rendering entries in the *PlantUML Local* output channel: the render worker and the diagrams of the Markdown preview. Commands such as export log regardless. VS Code's own channel level applies first — see [Troubleshooting](#troubleshooting) |
 | `plantumlLocal.exportDirectory` | `images` | Where exported SVGs and PNGs are written, relative to the Markdown file. `.` for the same folder; absolute paths and `..` are rejected. Can be set per folder |
 | `plantumlLocal.exportTheme` | `light` | Palette for exported SVGs and PNGs. `preview` follows the palette the preview currently uses. Can be set per folder |
 | `plantumlLocal.exportPngScale` | `2` | Scale of an exported PNG: 1, 2 or 4 times the diagram's own size. Can be set per folder |
@@ -595,7 +595,7 @@ fonts. No rendering service is involved either way.
 - **A red syntax-error box appears**: The message comes from the PlantUML engine — only that diagram is affected, and the rest of the page still renders
 - **Colours look wrong after switching themes**: Backgrounds follow the palette the diagram was *rendered* with. If you pinned `plantumlLocal.theme`, that palette wins by design
 - **Layout differs from plantuml.com**: Text is measured with approximate metrics in the Node renderer, so box widths, line wrapping and element placement can differ slightly
-- **Setting `logLevel: debug` shows nothing new**: The channel is a `LogOutputChannel` now, and VS Code decides what one of those shows — an extension cannot raise its own channel's level. Run **Developer: Set Log Level** and pick *PlantUML Local*; that choice is per channel and survives a restart. `plantumlLocal.logLevel` is a floor on top of it, so it can only make the log quieter
+- **Setting `logLevel: debug` shows nothing new**: The channel is a `LogOutputChannel` now, and VS Code decides what one of those shows — an extension cannot raise its own channel's level. Run **Developer: Set Log Level** and pick *PlantUML Local*; that choice is per channel and survives a restart. `plantumlLocal.logLevel` is a floor on top of it for the rendering entries, so it can only make those quieter
 
 ---
 
