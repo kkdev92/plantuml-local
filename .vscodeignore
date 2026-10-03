@@ -1,43 +1,34 @@
-# Sources are bundled into dist/; ship only the bundles and runtime assets.
-src/**
-test/**
-scripts/**
-node_modules/**
-coverage/**
-work/**
-.vsix-verify-temp/**
-.stdlib-temp/**
+# The package holds only what the extension needs to run, what its listing
+# shows, and the licences. Everything is left out first, and the lines
+# starting with `!` bring back what ships. vsce applies a `!` line over
+# every other line, whatever their order, and ignores .gitignore whenever
+# this file exists, so a file that is not named below never ships —
+# sources, tests, docs, images for the README, or anything a tool drops
+# into the repository root.
+**
 
-# The standard-library source; the build copies it to dist/stdlib/, which is
-# what the worker reads. Shipping both would duplicate half a megabyte.
-assets/**
+# The manifest, its translations, and the Marketplace listing. README
+# images are not needed: vsce points them at the repository on GitHub.
+!package.json
+!package.nls.json
+!package.nls.ja.json
+!README.md
+!CHANGELOG.md
+!images/icon.png
 
-# Agent/editor configuration and local tooling output. vsce ignores
-# .gitignore entirely whenever this file exists, so anything a tool drops
-# into the repo root ships unless it is listed here.
-.claude/**
-.clipshot/**
-.mcp.json
+# The licence, and those of the code bundled into dist/: their notices
+# must travel with that code.
+!LICENSE
+!THIRD_PARTY_NOTICES.md
+!third-party/*.txt
 
-# Development configuration
-.vscode/**
-.github/**
-.gitignore
-tsconfig.json
-eslint.config.mjs
-vitest.config.ts
-package-lock.json
-
-# Docs that live on GitHub, not in the package (README/LICENSE/CHANGELOG ship automatically)
-# THIRD_PARTY_NOTICES.md and third-party/ must NOT be added here: the licences of
-# the code we bundle require their notices to travel with the VSIX.
-CONTRIBUTING.md
-SECURITY.md
-CODE_OF_CONDUCT.md
-sample.md
-sample.puml
-docs/**
-
-# Build noise
-**/*.map
-*.vsix
+# What runs: the two bundles (not their source maps), the engine, the
+# bundled library, the grammars, the language configuration, the
+# translations and the pages of the previews.
+!dist/*.js
+!dist/engine/**
+!dist/stdlib/**
+!dist/syntaxes/**
+!language-configuration.json
+!l10n/**
+!media/**

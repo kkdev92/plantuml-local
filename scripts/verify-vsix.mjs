@@ -5,8 +5,9 @@
  *
  * 1. Everything the extension needs at runtime is present
  *    (bundles, engine files, stylesheet, l10n, manifest assets).
- * 2. Nothing that must not ship is present
- *    (sources, tests, node_modules, source maps, private keys).
+ * 2. Nothing else is present: every file is one of those, a licence text
+ *    of 3, or one of the two files vsce writes itself — no source, test,
+ *    source map, README image or anything else from the repository.
  * 3. Third-party licence notices ship with the bundled code — the MIT and
  *    EPL licences of what we bundle require it.
  * 4. The packaged worker actually renders — a Japanese sequence diagram
@@ -20,7 +21,7 @@
 
 import { execFileSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Worker } from 'node:worker_threads';
 
@@ -57,20 +58,13 @@ const REQUIRED = [
   'extension/images/icon.png',
 ];
 
-const FORBIDDEN = [
-  'extension/src',
-  'extension/test',
-  'extension/scripts',
-  'extension/node_modules',
-  'extension/sample.md',
-  'extension/sample.puml',
-  // dist/stdlib/ is the shipped copy; assets/ is its source.
-  'extension/assets',
-  'extension/.claude',
-  'extension/.clipshot',
-  'extension/dist/extension.js.map',
-  'extension/dist/worker.js.map',
-];
+/** What vsce writes beside extension/, whatever the package holds. */
+const PACKAGING = ['extension.vsixmanifest', '[Content_Types].xml'];
+
+/** The licence texts in third-party/, each of which ships (check 3). */
+function licenceTexts() {
+  return readdirSync(join(projectRoot, 'third-party')).filter((f) => f.endsWith('.txt'));
+}
 
 function fail(message) {
   console.error(`❌ ${message}`);
@@ -126,12 +120,20 @@ function checkFiles() {
       fail(`missing: ${file}`);
     }
   }
-  for (const file of FORBIDDEN) {
-    if (existsSync(join(extractDir, file))) {
-      fail(`must not ship: ${file}`);
-    } else {
-      ok(`absent:  ${file}`);
-    }
+  const expected = new Set([
+    ...REQUIRED,
+    ...PACKAGING,
+    ...licenceTexts().map((f) => `extension/third-party/${f}`),
+  ]);
+  const shipped = readdirSync(extractDir, { recursive: true, withFileTypes: true })
+    .filter((entry) => entry.isFile())
+    .map((entry) => relative(extractDir, join(entry.parentPath, entry.name)).split(sep).join('/'));
+  const extra = shipped.filter((file) => !expected.has(file));
+  for (const file of extra) {
+    fail(`must not ship: ${file}`);
+  }
+  if (extra.length === 0) {
+    ok(`nothing else: ${shipped.length} files, all listed`);
   }
 }
 
@@ -141,8 +143,7 @@ function checkFiles() {
  * without its notice fails the build here rather than after publishing.
  */
 function checkThirdPartyNotices() {
-  const sourceDir = join(projectRoot, 'third-party');
-  const licences = readdirSync(sourceDir).filter((f) => f.endsWith('.txt'));
+  const licences = licenceTexts();
 
   if (licences.length === 0) {
     fail('third-party/ contains no licence texts');
