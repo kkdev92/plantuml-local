@@ -193,25 +193,6 @@ function holds(existing: Uint8Array, content: string | Uint8Array): boolean {
 }
 
 /**
- * Rejects a directory that would escape the document's own folder.
- *
- * The value comes from settings, so it is not hostile input so much as
- * mistyped input — but `../../..` or an absolute path would scatter files
- * outside the workspace, and a Markdown link could not reference them.
- */
-export function isValidExportDirectory(directory: string): boolean {
-  if (directory === '') {
-    return false;
-  }
-  if (/^([A-Za-z]:|\\\\|\/)/.test(directory)) {
-    return false;
-  }
-  return !directory
-    .split(/[/\\]/)
-    .some((segment) => segment === '..');
-}
-
-/**
  * Bakes an opaque background into an exported SVG.
  *
  * The engine leaves most diagram types transparent, and in the preview

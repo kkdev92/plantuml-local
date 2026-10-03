@@ -504,6 +504,12 @@ export interface VscodeStub {
     closeDocument(document: TextEditorStub['document']): void;
     /** Fires the save listeners for `document`, as a save would. */
     saveDocument(document: TextEditorStub['document']): void;
+    /**
+     * Registrations not yet disposed, counted by API: event listeners,
+     * providers, diagnostic collections, panel serializers and commands.
+     * Counts of zero are left out, so `{}` means all of them were released.
+     */
+    live(): Record<string, number>;
   };
 }
 
@@ -566,6 +572,27 @@ export function createVscodeStub(): VscodeStub {
     return {
       dispose: () => {
         listeners.splice(listeners.indexOf(listener), 1);
+      },
+    };
+  };
+
+  /** Registrations not yet disposed, by API. */
+  const live = new Map<string, number>();
+  /** Counts `kind` as live until the registration returned is disposed, once. */
+  const track = (
+    kind: string,
+    registration: { dispose(): unknown } = { dispose: () => undefined }
+  ): { dispose(): void } => {
+    live.set(kind, (live.get(kind) ?? 0) + 1);
+    let disposed = false;
+    return {
+      dispose: () => {
+        if (disposed) {
+          return;
+        }
+        disposed = true;
+        live.set(kind, (live.get(kind) ?? 0) - 1);
+        registration.dispose();
       },
     };
   };
@@ -792,30 +819,35 @@ export function createVscodeStub(): VscodeStub {
     CodeActionKind: { QuickFix: 'quickfix' },
     SymbolKind: { Module: 1, Namespace: 2, Package: 3, Class: 4, Enum: 9, Interface: 10, Object: 18 },
     languages: {
-      createDiagnosticCollection: () => ({
-        set: (uri, items) => {
-          diagnostics.set(uri.toString(), items ?? []);
-        },
-        delete: (uri) => {
-          diagnostics.delete(uri.toString());
-        },
-        dispose: () => undefined,
-      }),
+      createDiagnosticCollection: () => {
+        const registration = track('languages.createDiagnosticCollection');
+        return {
+          set: (uri, items) => {
+            diagnostics.set(uri.toString(), items ?? []);
+          },
+          delete: (uri) => {
+            diagnostics.delete(uri.toString());
+          },
+          dispose: () => {
+            registration.dispose();
+          },
+        };
+      },
       registerCompletionItemProvider: (selector, provider, ...triggers) => {
         completionProviders.push({ selector, provider, triggers });
-        return { dispose: () => undefined };
+        return track('languages.registerCompletionItemProvider');
       },
       registerFoldingRangeProvider: (selector, provider) => {
         foldingProviders.push({ selector, provider });
-        return { dispose: () => undefined };
+        return track('languages.registerFoldingRangeProvider');
       },
       registerDocumentSymbolProvider: (selector, provider) => {
         symbolProviders.push({ selector, provider });
-        return { dispose: () => undefined };
+        return track('languages.registerDocumentSymbolProvider');
       },
       registerCodeActionsProvider: (selector, provider, metadata) => {
         actionProviders.push({ selector, provider, metadata });
-        return { dispose: () => undefined };
+        return track('languages.registerCodeActionsProvider');
       },
     },
     EndOfLine: { LF: 1, CRLF: 2 },
@@ -862,7 +894,7 @@ export function createVscodeStub(): VscodeStub {
       createWebviewPanel,
       registerWebviewPanelSerializer: (viewType, serializer) => {
         webviewSerializers.set(viewType, serializer);
-        return { dispose: () => webviewSerializers.delete(viewType) };
+        return track('window.registerWebviewPanelSerializer', { dispose: () => webviewSerializers.delete(viewType) });
       },
       showInformationMessage: async (...args) => {
         notifications.info.push(String(args[0]));
@@ -879,15 +911,15 @@ export function createVscodeStub(): VscodeStub {
       showOpenDialog: async () => undefined,
       onDidChangeActiveColorTheme: (listener) => {
         themeListeners.push(listener);
-        return { dispose: () => undefined };
+        return track('window.onDidChangeActiveColorTheme');
       },
       onDidChangeActiveTextEditor: (listener) => {
         editorListeners.push(listener);
-        return { dispose: () => undefined };
+        return track('window.onDidChangeActiveTextEditor');
       },
       onDidChangeTextEditorSelection: (listener) => {
         selectionListeners.push(listener);
-        return { dispose: () => undefined };
+        return track('window.onDidChangeTextEditorSelection');
       },
       withProgress: async (_options, task) =>
         task(
@@ -1006,12 +1038,13 @@ export function createVscodeStub(): VscodeStub {
       }),
       onDidChangeConfiguration: (listener) => {
         configurationListeners.push(listener);
-        return { dispose: () => undefined };
+        return track('workspace.onDidChangeConfiguration');
       },
-      onDidOpenTextDocument: (listener) => subscribe(openListeners, listener),
-      onDidChangeTextDocument: (listener) => subscribe(changeListeners, listener),
-      onDidCloseTextDocument: (listener) => subscribe(closeListeners, listener),
-      onDidSaveTextDocument: (listener) => subscribe(saveListeners, listener),
+      onDidOpenTextDocument: (listener) => track('workspace.onDidOpenTextDocument', subscribe(openListeners, listener)),
+      onDidChangeTextDocument: (listener) =>
+        track('workspace.onDidChangeTextDocument', subscribe(changeListeners, listener)),
+      onDidCloseTextDocument: (listener) => track('workspace.onDidCloseTextDocument', subscribe(closeListeners, listener)),
+      onDidSaveTextDocument: (listener) => track('workspace.onDidSaveTextDocument', subscribe(saveListeners, listener)),
       isTrusted: true,
       workspaceFolders: undefined,
       get textDocuments() {
@@ -1097,7 +1130,7 @@ export function createVscodeStub(): VscodeStub {
     commands: {
       registerCommand: (id, handler) => {
         registeredCommands.set(id, handler);
-        return { dispose: () => undefined };
+        return track('commands.registerCommand');
       },
       executeCommand: async (id, ...args) => {
         executedCommands.push(id);
@@ -1225,6 +1258,7 @@ export function createVscodeStub(): VscodeStub {
           listener(document);
         }
       },
+      live: () => Object.fromEntries([...live].filter(([, count]) => count !== 0)),
     },
   };
 }

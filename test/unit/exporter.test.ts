@@ -9,7 +9,6 @@ import {
   exportAll,
   exportOne,
   isPngOfSize,
-  isValidExportDirectory,
   PNG_LIMITS,
   svgSize,
   writeDocuments,
@@ -107,22 +106,6 @@ function exportMarkdown(
 function engineOutput(name: string): string {
   return readFileSync(join(__dirname, 'fixtures/engine-output', `${name}.svg`), 'utf8');
 }
-
-describe('isValidExportDirectory', () => {
-  it('accepts a relative directory', () => {
-    for (const value of ['images', '.', 'assets/diagrams', 'a/b/c']) {
-      expect(isValidExportDirectory(value), value).toBe(true);
-    }
-  });
-
-  it('rejects absolute paths and traversal', () => {
-    // The value comes from settings; a mistyped one must not scatter
-    // files outside the document's folder.
-    for (const value of ['', '/etc', 'C:/temp', '\\\\server\\share', '../images', 'a/../../b']) {
-      expect(isValidExportDirectory(value), value).toBe(false);
-    }
-  });
-});
 
 describe('addBackground', () => {
   it('spans the viewBox with an opaque rect, first in paint order', () => {

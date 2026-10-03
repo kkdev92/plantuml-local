@@ -346,7 +346,7 @@
     "clean": "rimraf dist coverage .vsix-verify-temp .stdlib-temp"
   },
   "dependencies": {
-    "@kkdev92/vscode-ext-kit": "^7.0.0",
+    "@kkdev92/vscode-ext-kit": "^7.1.0",
     "@plantuml/core": "1.2026.8",
     "happy-dom": "^20.14.5",
     "markdown-it": "^14.3.2"

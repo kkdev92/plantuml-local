@@ -4,6 +4,7 @@ import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import { createContextStub, type ContextStub } from './helpers/context-stub';
 import {
   createVscodeStub,
   type CodeActionStub,
@@ -25,8 +26,8 @@ const extensionPath = join(__dirname, '../../dist/extension.js');
 const require = createRequire(import.meta.url);
 
 /**
- * `activate` is asynchronous: the framework starts hosted services inside it,
- * and the plugin does not exist until they have run. VS Code awaits it before
+ * `activate` is asynchronous: the framework builds what it resolves to last,
+ * once everything else is registered. VS Code awaits it before
  * reading `extendMarkdownIt` off the resolved value — `getContributedMarkdownItPlugins`
  * in markdown-language-features stores the thenable and awaits it — so this
  * mirrors what the editor does.
@@ -40,45 +41,6 @@ interface ExtensionModule {
 
 let vscodeStub: VscodeStub;
 let extension: ExtensionModule;
-/**
- * Enough of an ExtensionContext for the framework to build every capability
- * adapter. It wires storage, secrets and webviews at activation regardless of
- * whether the extension declares any, so these have to exist even though this
- * extension uses only the workspace state, where the export records are kept.
- */
-interface ContextStub {
-  subscriptions: { dispose(): void }[];
-  globalState: { get(): undefined; update(): Promise<void>; keys(): string[]; setKeysForSync(): void };
-  workspaceState: { get(key: string): unknown; update(key: string, value: unknown): Promise<void>; keys(): string[] };
-  secrets: { get(): Promise<undefined>; store(): Promise<void>; delete(): Promise<void> };
-  extensionUri: unknown;
-}
-
-function createContextStub(): ContextStub {
-  const workspace = new Map<string, unknown>();
-  return {
-    subscriptions: [],
-    globalState: {
-      get: () => undefined,
-      update: async () => undefined,
-      keys: () => [],
-      setKeysForSync: () => undefined,
-    },
-    workspaceState: {
-      get: (key) => workspace.get(key),
-      update: async (key, value) => {
-        if (value === undefined) {
-          workspace.delete(key);
-        } else {
-          workspace.set(key, value);
-        }
-      },
-      keys: () => [...workspace.keys()],
-    },
-    secrets: { get: async () => undefined, store: async () => undefined, delete: async () => undefined },
-    extensionUri: { scheme: 'file', fsPath: '/ext', toString: () => 'file:///ext' },
-  };
-}
 
 let context: ContextStub;
 let api: Awaited<ReturnType<ExtensionModule['activate']>>;
@@ -204,6 +166,27 @@ describe('extension (dist)', () => {
       vscodeStub._test.executedCommands.includes('markdown.preview.refresh')
     );
     expect(fired).toBe(true);
+  });
+
+  it('applies a new plantumlLocal.logLevel to the next entry, without a reload', async () => {
+    const md = makeMd();
+    api.extendMarkdownIt(md);
+    const rendered = (from: number): string[] =>
+      vscodeStub._test.logs.slice(from).filter((line) => line.startsWith('debug: Rendered diagram'));
+
+    const loud = vscodeStub._test.logs.length;
+    vscodeStub._test.setConfiguration('logLevel', 'debug');
+    try {
+      await waitForRender(md, 'plantuml', '@startuml\nAlice -> Bob : loud\n@enduml');
+      expect(rendered(loud)).toHaveLength(1);
+
+      const quiet = vscodeStub._test.logs.length;
+      vscodeStub._test.setConfiguration('logLevel', 'warn');
+      await waitForRender(md, 'plantuml', '@startuml\nAlice -> Bob : quiet\n@enduml');
+      expect(rendered(quiet)).toEqual([]);
+    } finally {
+      vscodeStub._test.setConfiguration('logLevel', undefined);
+    }
   });
 
   it('with onSave, draws an edited diagram again only once its document is saved', async () => {
@@ -978,6 +961,27 @@ describe('export (dist)', () => {
     );
   });
 
+  it('refuses an export directory that would leave the document folder', async () => {
+    // A rooted path, a drive with or without a separator, a network share and
+    // a parent segment, whichever separator reaches it.
+    const outside = ['../images', 'a\\..\\..\\b', '/etc', '\\images', 'C:images', 'C:/temp', '\\\\server\\share'];
+    const said: string[] = [];
+    for (const value of outside) {
+      const before = vscodeStub._test.notifications.error.length;
+      vscodeStub._test.setConfiguration('exportDirectory', value, 'file:///c/outside');
+      try {
+        vscodeStub._test.setActiveEditor(makeEditor('file:///c/outside/doc.md', NAMED_BLOCK, 1));
+        await vscodeStub._test.registeredCommands.get('plantumlLocal.exportSvg')?.();
+      } finally {
+        vscodeStub._test.setConfiguration('exportDirectory', undefined, 'file:///c/outside');
+      }
+      said.push(vscodeStub._test.notifications.error.slice(before).join(' | '));
+    }
+    expect(said).toEqual(
+      outside.map((value) => `plantumlLocal.exportDirectory must be a relative path without "..": ${value}`)
+    );
+  });
+
   it('says why an empty export directory or a reserved name is refused', async () => {
     vscodeStub._test.setConfiguration('exportDirectory', '', 'file:///c/empty');
     try {
@@ -989,6 +993,19 @@ describe('export (dist)', () => {
     expect(vscodeStub._test.notifications.error.at(-1)).toBe(
       'plantumlLocal.exportDirectory is empty. Set a folder relative to the document, such as images.'
     );
+
+    // Only whitespace is empty too.
+    const errorsBefore = vscodeStub._test.notifications.error.length;
+    vscodeStub._test.setConfiguration('exportDirectory', '   ', 'file:///c/blank');
+    try {
+      vscodeStub._test.setActiveEditor(makeEditor('file:///c/blank/doc.md', NAMED_BLOCK, 1));
+      await vscodeStub._test.registeredCommands.get('plantumlLocal.exportSvg')?.();
+    } finally {
+      vscodeStub._test.setConfiguration('exportDirectory', undefined, 'file:///c/blank');
+    }
+    expect(vscodeStub._test.notifications.error.slice(errorsBefore)).toEqual([
+      'plantumlLocal.exportDirectory is empty. Set a folder relative to the document, such as images.',
+    ]);
 
     const reserved = ['```plantuml CON', '@startuml', 'A -> B', '@enduml', '```'].join('\n');
     vscodeStub._test.setActiveEditor(makeEditor('file:///c/reserved/doc.md', reserved, 1));
