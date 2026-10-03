@@ -12,7 +12,7 @@
   "command.openPreview.title": "図のプレビューを開く",
   "command.openPreviewToSide.title": "図のプレビューを横に開く",
   "config.theme.description": "図の配色。\"auto\" は VS Code のテーマに追随します。!theme で選んだテーマの文字がその配色で読みにくい図は、もう一方の配色で描きます。",
-  "config.logLevel.description": "出力パネル (PlantUML Local) に出すログの水準。出力パネル側のレベル選択も併せて効きます。",
+  "config.logLevel.description": "出力パネル (PlantUML Local) のうち、描画のログ（描画ワーカーと Markdown プレビューの図）に掛ける下限。書き出しなどのコマンドのログには効きません。出力パネル側のレベル選択も併せて効きます。",
   "config.exportDirectory.description": "SVG と PNG の書き出し先。Markdown ファイルからの相対パスで指定します。同じ場所なら \".\"。絶対パスと \"..\" は拒否します。",
   "config.exportTheme.description": "書き出す SVG と PNG の配色。書き出した図は GitHub など背景を制御できない場所で見られるため、既定は \"light\" です。\"preview\" にするとプレビューの現在の配色に従います。!theme で選んだテーマの文字がその配色で読みにくい図は、もう一方の配色で書き出します。",
   "config.exportPngScale.description": "書き出す PNG の倍率。図そのものの大きさの 1・2・4 倍です。1 辺 8192 ピクセル、全体で 1600 万ピクセルを超える PNG は、縮めずに書き出しを止めます。",

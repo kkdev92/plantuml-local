@@ -12,7 +12,7 @@
   "command.openPreview.title": "Open Diagram Preview",
   "command.openPreviewToSide.title": "Open Diagram Preview to the Side",
   "config.theme.description": "Diagram colour palette. \"auto\" follows the VS Code colour theme. A diagram whose !theme would be hard to read in the palette is drawn in the other one.",
-  "config.logLevel.description": "Log level for the PlantUML Local output channel. The Output panel's own level selector applies on top of this.",
+  "config.logLevel.description": "Floor for the rendering entries in the PlantUML Local output channel (the render worker and the diagrams of the Markdown preview). Commands such as export log regardless. The Output panel's own level selector applies on top of this.",
   "config.exportDirectory.description": "Where exported SVGs and PNGs are written, relative to the Markdown file. Use \".\" for the same folder. Absolute paths and \"..\" are rejected.",
   "config.exportTheme.description": "Palette for exported SVGs and PNGs. Exports face hosts like GitHub whose background this extension does not control, so \"light\" is the default; \"preview\" follows the palette the preview currently uses. A diagram whose !theme would be hard to read in the palette is exported in the other one.",
   "config.exportPngScale.description": "Scale of an exported PNG: 1, 2 or 4 times the size the diagram gives itself. A PNG larger than 8192 pixels a side or 16 million in all is refused rather than shrunk.",
