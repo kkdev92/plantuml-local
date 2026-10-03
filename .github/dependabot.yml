@@ -35,16 +35,21 @@ updates:
       # its floor, or when this extension needs a newer API itself.
       - dependency-name: "@types/vscode"
 
-      # @types/node majors: these types decide what Node API the code may compile
+      # @types/node: these types decide what Node API the code may compile
       # against, so they must not exceed the Node of the oldest VS Code this
       # extension accepts. `engines.vscode: ^1.138.0` makes that VS Code 1.138,
       # whose extension host is Electron 42.10.0 with Node 24.18.1 (`target` in
       # microsoft/vscode's .npmrc at the 1.138.0 tag, then Electron's release
       # list). A bump past that passes CI — nothing reaches for a newer API *yet*
       # — which is precisely why CI cannot be what catches it. Same rule as
-      # @types/vscode, where the types floor is also the ceiling. Revisit when
-      # the floor moves, and look up the new floor's Node the same way.
+      # @types/vscode, where the types floor is also the ceiling. Majors are held
+      # outright, and the range holds back minors past that Node: @types/node
+      # 24.x went from 24.13 straight to 24.19, which is already past it.
+      # Revisit when the floor moves: look up the new floor's Node the same way
+      # and move the range to just past it.
       - dependency-name: "@types/node"
+        versions:
+          - ">=24.19.0"
         update-types:
           - version-update:semver-major
 

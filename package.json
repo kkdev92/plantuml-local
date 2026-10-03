@@ -354,7 +354,7 @@
   "devDependencies": {
     "@eslint/js": "^10.0.0",
     "@types/markdown-it": "^14.2.0",
-    "@types/node": "^24.19.0",
+    "@types/node": "^24.13.6",
     "@types/vscode": "~1.138.0",
     "@vitest/coverage-v8": "^5.0.2",
     "@vscode/vsce": "^4.0.0",
