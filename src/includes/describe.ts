@@ -19,6 +19,12 @@ export function hasLocalInclude(source: string): boolean {
   return LOCAL_INCLUDE.test(source);
 }
 
+/** The line (from 0) of the first line of `source` that may include a local file, or -1. */
+export function firstLocalIncludeLine(source: string): number {
+  const line = /^[ \t]*!include(?:_once|_many)?\b(?![ \t]*(?:<|https?:\/\/))/i;
+  return source.split(/\r?\n/).findIndex((text) => line.test(text));
+}
+
 export interface IncludeLabels {
   untrusted: string;
   untitled: string;

@@ -802,7 +802,7 @@ function exporterDeps(
   const draw = drawWith(renderer, settings, context.l10n);
   return {
     render: (source, dark) => draw(source, dark, document.toString()),
-    resolvePalette: (source, dark) => palettes.resolve(source, dark),
+    resolvePalette: (source, dark, included) => palettes.resolve(source, dark, included),
     remoteReferenceMessage: context.l10n.t(
       'URL-based external references (!include, !theme) are not supported.'
     ),
@@ -1214,7 +1214,7 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
       createPlantUmlPlugin({
         isDark: () => isDark(settings.read().values[CONFIG.THEME]),
         render: renders,
-        resolvePalette: (source, dark) => palettes.resolve(source, dark),
+        resolvePalette: (source, dark, included) => palettes.resolve(source, dark, included),
         requestRefresh,
         escapeHtml,
         hideExportedImages: () => settings.read().values[CONFIG.HIDE_EXPORTED_IMAGES],
@@ -1255,7 +1255,7 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
     create: ({ renders, palettes, l10n, settings, commands }): ViewerSet => {
       const deps: ViewerDeps = {
         render: renders,
-        resolvePalette: (source, dark) => palettes.resolve(source, dark),
+        resolvePalette: (source, dark, included) => palettes.resolve(source, dark, included),
         isDark: () => isDark(settings.read().values[CONFIG.THEME]),
         exportPng: async (uri, line): Promise<void> => {
           await commands.invoke(ExportPng, { uri, line });
@@ -1280,6 +1280,10 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
             line === null
               ? l10n.t('PlantUML reported an error: {0}', message)
               : l10n.t('PlantUML reported an error at line {0}: {1}', String(line), message),
+          otherPalette: (dark) =>
+            dark
+              ? l10n.t('Drawn in the dark palette: its theme is hard to read in the light one.')
+              : l10n.t('Drawn in the light palette: its theme is hard to read in the dark one.'),
         },
       };
       const open = new Map<string, { viewer: DiagramViewer; document: vscode.TextDocument; reveal(): void }>();

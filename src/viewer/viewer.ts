@@ -16,10 +16,11 @@
 
 import { DIAGRAM_BACKDROP, EMOJI_UNAVAILABLE, hasRemoteReference } from '../core/constants';
 import { diagramShape } from '../core/shape';
-import type { DiagramRender } from '../core/types';
+import type { DiagramRender, IncludedStyle } from '../core/types';
 import { blockAtLine, findFileDiagrams, type PlantUmlBlock } from '../export/blocks';
 import { withIncludeReason } from '../includes/describe';
 import { changeTo } from '../includes/tracking';
+import { drawReadable } from '../render/palette';
 import { recognizeEngineError } from '../render/engine-error';
 
 /** What the viewer needs of its panel. */
@@ -44,12 +45,14 @@ export interface ViewerLabels {
   emojiUnavailable: string;
   pages: string;
   engineError(message: string, line: number | null): string;
+  /** The diagram is drawn in the palette `dark` names, as its theme is hard to read in the one asked for. */
+  otherPalette(dark: boolean): string;
 }
 
 export interface ViewerDeps {
   /** Renders a diagram of the file at `document`, a URI, next to which its local includes are looked for. */
   render(source: string, dark: boolean, document: string): Promise<DiagramRender>;
-  resolvePalette(source: string, dark: boolean): Promise<boolean>;
+  resolvePalette(source: string, dark: boolean, included?: IncludedStyle): Promise<boolean>;
   isDark(): boolean;
   /**
    * Exports the diagram that starts on `line` of the file at `uri` as a
@@ -232,8 +235,14 @@ export class DiagramViewer {
 
     await this.status(labels.rendering, false, false);
     try {
-      const dark = await this.deps.resolvePalette(shape.source, this.deps.isDark());
-      const { svg, failedIncludes, dependencies } = await this.deps.render(shape.source, dark, this.uri);
+      const asked = this.deps.isDark();
+      const { result, palette: dark } = await drawReadable(
+        shape.source,
+        asked,
+        (source, palette, included) => this.deps.resolvePalette(source, palette, included),
+        (palette) => this.deps.render(shape.source, palette, this.uri)
+      );
+      const { svg, failedIncludes, dependencies } = result;
       if (generation !== this.generation) {
         return;
       }
@@ -250,7 +259,9 @@ export class DiagramViewer {
       // from 0 and the engine's line from 1.
       const failure = recognizeEngineError(svg);
       if (failure === null) {
-        await this.status(this.note, false, false);
+        // Not drawn as asked: say why, unless the drawing is not up to date.
+        const why = this.note === '' && dark !== asked ? labels.otherPalette(dark) : this.note;
+        await this.status(why, false, false);
       } else {
         const line = failure.line === null ? null : diagram.sourceLine + failure.line;
         await this.status(labels.engineError(withIncludeReason(failure.message, failedIncludes), line), true, false);
