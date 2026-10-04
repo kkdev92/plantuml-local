@@ -18,5 +18,6 @@
   "config.exportPngScale.description": "書き出す PNG の倍率。図そのものの大きさの 1・2・4 倍です。1 辺 8192 ピクセル、全体で 1600 万ピクセルを超える PNG は、縮めずに書き出しを止めます。",
   "config.hideExportedImages.description": "#plantuml-local が付いた画像を Markdown プレビューで隠し、ブロックの描画と書き出した SVG が二重に表示されないようにします。書き出した SVG 自体の見た目を確認したいときはオフにしてください。",
   "config.preview.updateMode.description": "Markdown プレビューと .puml のプレビューで、変更した図を描き直す時機。\"onChange\" は入力に合わせて、\"onSave\" はファイルを保存したとき、\"manual\" は「PlantUML Local: 描画キャッシュを捨てて描き直す」を実行したときだけ描き直します。それまでは表示中の図を、未更新と示して残します。初めて表示する図は常に描き、書き出しは常にその時点の内容を使います。",
-  "config.diagnostics.enabled.description": "開いている Markdown ファイルの図の問題を、プレビューを開いていなくても「問題」パネルに表示します。エンジンのエラーと警告、同梱エンジンが対応していない構文や黙って捨てる内容が対象です。"
+  "config.diagnostics.enabled.description": "開いている Markdown ファイルの図の問題を、プレビューを開いていなくても「問題」パネルに表示します。エンジンのエラーと警告、同梱エンジンが対応していない構文や黙って捨てる内容が対象です。",
+  "config.includePaths.description": "ローカルの !include で名前だけを書いたとき（common.puml、styles/common.puml）に、書いたファイルのフォルダーの次に探すフォルダー。ワークスペースのフォルダーからの相対パスで、16 個まで指定できます。./ や ../ で始まるパスは、書いたファイルの隣だけを探します。ファイルを読むのは信頼済みのワークスペースだけで、読むのは文書が属するワークスペースのフォルダーの中だけです。"
 }

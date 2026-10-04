@@ -1,8 +1,9 @@
 import { join } from 'node:path';
 import { parentPort } from 'node:worker_threads';
 
-import type { RenderRequestMessage, RenderResponseMessage } from '../core/types';
+import type { IncludeResponseMessage, RenderRequestMessage, RenderResponseMessage } from '../core/types';
 import { loadEngine } from './engine';
+import { installFileLoader } from './file-loader';
 import { disableNetworkAccess } from './network-guard';
 import { createSerialQueue } from './queue';
 
@@ -34,6 +35,11 @@ const stdlibDir = join(__dirname, 'stdlib');
 
 const queue = createSerialQueue();
 
+// Local includes are answered by the host (see file-loader.ts).
+const files = installFileLoader((message) => {
+  parentPort?.postMessage(message);
+});
+
 /**
  * A diagram that makes the engine forget the previous render.
  *
@@ -49,22 +55,27 @@ const queue = createSerialQueue();
  */
 const RESET_SOURCE = ['@startcreole', 'x', '@endcreole'];
 
-function renderOnce(source: string, dark: boolean): Promise<string> {
+function renderOnce(request: RenderRequestMessage): Promise<string> {
   const result = queue.enqueue(async () => {
     const { engine, sanitize } = await loadEngine(engineDir, stdlibDir);
-    const svg = await new Promise<string>((resolve, reject) => {
-      engine.renderToString(
-        source.split(/\r\n|\r|\n/),
-        (result) => {
-          resolve(result);
-        },
-        (message) => {
-          reject(new Error(message !== '' ? String(message) : 'PlantUML rendering failed'));
-        },
-        { dark }
-      );
-    });
-    return sanitize(svg);
+    files.begin(request.id, request.includes);
+    try {
+      const svg = await new Promise<string>((resolve, reject) => {
+        engine.renderToString(
+          request.source.split(/\r\n|\r|\n/),
+          (result) => {
+            resolve(result);
+          },
+          (message) => {
+            reject(new Error(message !== '' ? String(message) : 'PlantUML rendering failed'));
+          },
+          { dark: request.dark }
+        );
+      });
+      return sanitize(svg);
+    } finally {
+      files.end();
+    }
   });
   // Queued behind this render and ahead of the next one, so the next
   // render always starts clean, while this result is not held up.
@@ -79,8 +90,12 @@ async function forgetPreviousRender(): Promise<void> {
   });
 }
 
-parentPort?.on('message', (request: RenderRequestMessage) => {
-  renderOnce(request.source, request.dark).then(
+parentPort?.on('message', (request: RenderRequestMessage | IncludeResponseMessage) => {
+  if ('type' in request) {
+    files.answer(request);
+    return;
+  }
+  renderOnce(request).then(
     (svg) => {
       const response: RenderResponseMessage = { id: request.id, svg };
       parentPort?.postMessage(response);

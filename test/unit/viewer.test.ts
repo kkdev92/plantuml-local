@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 
+import type { DiagramRender } from '../../src/core/types';
 import { DiagramViewer, parseRequest, viewerBody, type ViewerDeps } from '../../src/viewer/viewer';
 
 /** A panel that keeps what it is sent. */
@@ -17,10 +18,18 @@ function makePanel(): { post: ReturnType<typeof vi.fn>; sent: unknown[] } {
 }
 
 function makeDeps(
-  overrides?: Partial<ViewerDeps>
+  overrides?: Partial<Omit<ViewerDeps, 'render'>> & {
+    /** The SVG, or the SVG with the includes that failed. */
+    render?: (source: string, dark: boolean, document: string) => Promise<string | DiagramRender>;
+  }
 ): ViewerDeps & { render: ReturnType<typeof vi.fn>; exportPng: ReturnType<typeof vi.fn> } {
+  const inner = overrides?.render ?? ((source: string) => Promise.resolve(`<svg>${source}</svg>`));
+  const render = vi.fn((source: string, dark: boolean, document: string) =>
+    inner(source, dark, document).then((value): DiagramRender =>
+      typeof value === 'string' ? { svg: value, failedIncludes: new Map() } : value
+    )
+  );
   return {
-    render: vi.fn((source: string) => Promise.resolve(`<svg>${source}</svg>`)),
     resolvePalette: (_source: string, dark: boolean) => Promise.resolve(dark),
     isDark: () => false,
     exportPng: vi.fn(() => Promise.resolve()),
@@ -37,6 +46,7 @@ function makeDeps(
       engineError: (message, line) => `engine: ${message} @ ${String(line)}`,
     },
     ...overrides,
+    render,
   } as ViewerDeps & { render: ReturnType<typeof vi.fn>; exportPng: ReturnType<typeof vi.fn> };
 }
 
@@ -122,7 +132,7 @@ describe('DiagramViewer', () => {
     viewer.select(FLOWS, null);
 
     await viewer.receive({ type: 'select', index: 1 }, FLOWS);
-    expect(deps.render).toHaveBeenLastCalledWith('@startuml\nC -> D : unnamed\n@enduml', false);
+    expect(deps.render).toHaveBeenLastCalledWith('@startuml\nC -> D : unnamed\n@enduml', false, 'file:///flows.puml');
 
     panel.sent.length = 0;
     await viewer.receive({ type: 'select', index: 7 }, FLOWS);
@@ -154,7 +164,7 @@ describe('DiagramViewer', () => {
     // A diagram inserted above: the one shown is still `orders`.
     await viewer.update(`@startuml(id=first)\nX -> Y\n@enduml\n${FLOWS}`);
 
-    expect(deps.render).toHaveBeenLastCalledWith('@startuml(id=orders)\nA -> B : orders\n@enduml', false);
+    expect(deps.render).toHaveBeenLastCalledWith('@startuml(id=orders)\nA -> B : orders\n@enduml', false, 'file:///flows.puml');
     expect(of(panel.sent, 'diagrams').at(-1)).toMatchObject({ selected: 1 });
   });
 
@@ -173,7 +183,7 @@ describe('DiagramViewer', () => {
     viewer.restore('orders');
     await viewer.receive({ type: 'ready' }, `@startuml\nfirst\n@enduml\n${FLOWS}`);
 
-    expect(deps.render).toHaveBeenCalledWith('@startuml(id=orders)\nA -> B : orders\n@enduml', false);
+    expect(deps.render).toHaveBeenCalledWith('@startuml(id=orders)\nA -> B : orders\n@enduml', false, 'file:///flows.puml');
   });
 
   it('asks for a choice after a restart when the diagram had no name', async () => {
@@ -190,7 +200,7 @@ describe('DiagramViewer', () => {
 
     // Picking one from the list draws it.
     await viewer.receive({ type: 'select', index: 1 }, FLOWS);
-    expect(deps.render).toHaveBeenCalledWith('@startuml\nC -> D : unnamed\n@enduml', false);
+    expect(deps.render).toHaveBeenCalledWith('@startuml\nC -> D : unnamed\n@enduml', false, 'file:///flows.puml');
   });
 
   it('says so when the diagram shown has gone, rather than showing another', async () => {

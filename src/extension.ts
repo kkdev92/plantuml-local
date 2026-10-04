@@ -86,6 +86,8 @@ import {
   type ProblemLabels,
   type RenderOutcome,
 } from './diagnostics/problems';
+import type { IncludeLabels } from './includes/describe';
+import { drawInDocuments, type DrawDiagram } from './includes/host';
 import { createPlantUmlPlugin, type PlantUmlPlugin, type UpdateMode } from './preview/plugin';
 import { RendererClient, defaultWorkerPath } from './render/client';
 import { shareRenders, type SharedRender } from './render/memo';
@@ -131,6 +133,9 @@ export const Settings = defineSettings({
     }),
     // Resource-scoped, so a folder can turn the checks off: read per document.
     [CONFIG.DIAGNOSTICS_ENABLED]: setting.boolean({ default: true, scope: 'resource' }),
+    // Read as written for the document (includePathsOf), so that a value of
+    // the wrong type is reported rather than taken as no folders.
+    [CONFIG.INCLUDE_PATHS]: setting.stringArray({ default: [], scope: 'resource' }),
   },
 });
 
@@ -469,7 +474,76 @@ function exportTarget(value: unknown): ExportTarget | null {
 /** How the settings accessor is seen by the helpers below. */
 type SettingsReader = {
   read(scope?: { resource: vscode.Uri }): { values: Record<string, unknown> };
+  inspect(
+    key: typeof CONFIG.INCLUDE_PATHS,
+    scope?: { resource: vscode.Uri }
+  ): { globalValue?: unknown; workspaceValue?: unknown; workspaceFolderValue?: unknown } | undefined;
 };
+
+/** How the localisation service is seen by the helpers below. */
+type L10n = { t(message: string, ...args: string[]): string };
+
+/**
+ * `plantumlLocal.includePaths` for `document` as written, the folder's value
+ * first: a value of the wrong type is reported as such, where the validated
+ * read would take it as no folders.
+ */
+function includePathsOf(settings: SettingsReader, document: vscode.Uri): unknown {
+  const tiers = settings.inspect(CONFIG.INCLUDE_PATHS, { resource: document });
+  return tiers?.workspaceFolderValue ?? tiers?.workspaceValue ?? tiers?.globalValue ?? [];
+}
+
+/** Why a local include failed, in the user's language. */
+function includeLabels(l10n: L10n): IncludeLabels {
+  return {
+    untrusted: l10n.t('Restricted Mode reads no files. Trust the workspace to include them.'),
+    untitled: l10n.t('An untitled document has no folder to look in. Save it first.'),
+    notOnDisk: l10n.t('Only files on disk are read.'),
+    outsideWorkspace: l10n.t(
+      "Only files in the document's workspace folder are read. Open the folder that holds it."
+    ),
+    settingNotAList: l10n.t('plantumlLocal.includePaths must be a list of folders.'),
+    settingTooMany: (count, most) =>
+      l10n.t('plantumlLocal.includePaths lists {0} folders, more than {1}.', String(count), String(most)),
+    settingRefused: (folder) =>
+      l10n.t('plantumlLocal.includePaths: {0} is not a folder inside the workspace folder.', folder),
+    notRelative: l10n.t(
+      'Write the path relative to the including file: absolute paths, drives, shares, URLs and ~ are not read.'
+    ),
+    badName: l10n.t(
+      'This file name is not read: it names a device, ends in a dot or a space, or holds a colon or a control character.'
+    ),
+    versionControl: l10n.t('Files in .git, .hg and .svn folders are not read.'),
+    extension: (extensions) => l10n.t('Only these kinds of file are read: {0}.', extensions),
+    outside: l10n.t('The path leads out of the workspace folder.'),
+    missing: l10n.t('Not found next to the including file.'),
+    missingAnywhere: l10n.t(
+      'Not found next to the including file, nor in the folders of plantumlLocal.includePaths.'
+    ),
+    link: l10n.t('Files reached through a symbolic link or a junction are not read.'),
+    notAFile: l10n.t('It is not a file.'),
+    encoding: l10n.t('It is not UTF-8 text.'),
+    nul: l10n.t('It holds a NUL character.'),
+    unreadable: l10n.t('It could not be read.'),
+    severalDiagrams: (line) =>
+      l10n.t(
+        'It holds more than one diagram, the second at line {0}. Only a file with one diagram can be included.',
+        String(line)
+      ),
+    outsideDiagram: (line) => l10n.t('Line {0} is outside its diagram and would be dropped.', String(line)),
+    tooDeep: (most) => l10n.t('Includes nest more than {0} deep.', String(most)),
+    tooMany: (most) => l10n.t('More than {0} files are included.', String(most)),
+    tooLarge: (mebibytes) => l10n.t('The included files are larger than {0} MiB in all.', String(mebibytes)),
+  };
+}
+
+/** Draws diagrams with their local includes, the setting and the words for failures read through `settings` and `l10n`. */
+function drawWith(renderer: RendererClient, settings: SettingsReader, l10n: L10n): DrawDiagram {
+  return drawInDocuments(renderer, {
+    includePaths: (document) => includePathsOf(settings, document),
+    labels: includeLabels(l10n),
+  });
+}
 
 /**
  * The export directory configured for `document`, or null after rejecting
@@ -701,8 +775,9 @@ function exporterDeps(
   workspace: WorkspaceService,
   document: vscode.Uri
 ): ExporterDeps {
+  const draw = drawWith(renderer, settings, context.l10n);
   return {
-    render: (source, dark) => renderer.render(source, dark),
+    render: (source, dark) => draw(source, dark, document.toString()),
     resolvePalette: (source, dark) => palettes.resolve(source, dark),
     remoteReferenceMessage: context.l10n.t(
       'URL-based external references (!include, !theme) are not supported.'
@@ -1088,8 +1163,8 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
   });
 
   module.services.singleton(Renders, {
-    inject: { renderer: Renderer },
-    create: ({ renderer }) => shareRenders((source, dark) => renderer.render(source, dark)),
+    inject: { renderer: Renderer, settings: Settings.token, l10n: Localization },
+    create: ({ renderer, settings, l10n }) => shareRenders(drawWith(renderer, settings, l10n)),
   });
 
   module.services.singleton(RequestRefresh, {
@@ -1138,6 +1213,7 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
           missingEnd: (end) =>
             l10n.t('This diagram has no {0} line; it is drawn as if the block ended with one.', end),
           notUpdated: (mode) => notUpdatedNote(l10n, mode),
+          includeFailed: (path, reason) => l10n.t('Cannot include {0}: {1}', path, reason),
         },
       }),
   });
@@ -1301,6 +1377,29 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
       viewers.updateAll();
       context.logger.info('Render cache cleared');
       await context.notify.info(context.l10n.t('PlantUML render cache cleared.'));
+    },
+  });
+
+  module.raw.register({
+    id: 'plantuml.includeAccess',
+    inject: { plugin: Plugin, renders: Renders, viewers: Viewers },
+    bind: ({ registrations }, { plugin, renders, viewers }): undefined => {
+      // A diagram with a local include reads other files, or some at last,
+      // once the search folders change or the workspace is trusted.
+      const redraw = (): void => {
+        renders.clear();
+        plugin.clearCache();
+        viewers.updateAll();
+      };
+      registrations.own(
+        vscode.workspace.onDidChangeConfiguration((event) => {
+          if (event.affectsConfiguration(`${EXTENSION_ID}.${CONFIG.INCLUDE_PATHS}`)) {
+            redraw();
+          }
+        })
+      );
+      registrations.own(vscode.workspace.onDidGrantWorkspaceTrust(redraw));
+      return undefined;
     },
   });
 
@@ -1852,10 +1951,11 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
       const enabled = (document: vscode.TextDocument): boolean =>
         settings.read({ resource: document.uri }).values[CONFIG.DIAGNOSTICS_ENABLED] !== false;
 
-      const outcomeOf = async (source: string): Promise<RenderOutcome> => {
+      const outcomeOf = async (source: string, document: vscode.Uri): Promise<RenderOutcome> => {
         try {
           const dark = await palettes.resolve(source, isDark(settings.read().values[CONFIG.THEME]));
-          return { svg: await renders(source, dark) };
+          const { svg, failedIncludes } = await renders(source, dark, document.toString());
+          return { svg, failedIncludes };
         } catch (error: unknown) {
           return { error: error instanceof Error ? error.message : String(error) };
         }
@@ -1870,7 +1970,7 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
           const check = checkSource(block, labels);
           const problems = [...check.problems];
           if (check.render !== null) {
-            const outcome = await outcomeOf(check.render);
+            const outcome = await outcomeOf(check.render, document.uri);
             if (generations.get(key) !== generation) {
               return;
             }
@@ -1932,18 +2032,25 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         })
       );
       registrations.own(vscode.workspace.onDidCloseTextDocument(forget));
+      const checkAll = (): void => {
+        for (const document of vscode.workspace.textDocuments) {
+          schedule(document, 0);
+        }
+      };
       registrations.own(
         vscode.workspace.onDidChangeConfiguration((event) => {
-          if (event.affectsConfiguration(`${EXTENSION_ID}.${CONFIG.DIAGNOSTICS_ENABLED}`)) {
-            for (const document of vscode.workspace.textDocuments) {
-              schedule(document, 0);
-            }
+          // The search folders decide which files local includes read.
+          if (
+            event.affectsConfiguration(`${EXTENSION_ID}.${CONFIG.DIAGNOSTICS_ENABLED}`) ||
+            event.affectsConfiguration(`${EXTENSION_ID}.${CONFIG.INCLUDE_PATHS}`)
+          ) {
+            checkAll();
           }
         })
       );
-      for (const document of vscode.workspace.textDocuments) {
-        schedule(document, 0);
-      }
+      // Local includes are read from now on.
+      registrations.own(vscode.workspace.onDidGrantWorkspaceTrust(checkAll));
+      checkAll();
 
       registrations.defer(() => {
         for (const timer of timers.values()) {

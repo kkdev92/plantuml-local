@@ -48,7 +48,7 @@ function render(source: string): Promise<string> {
 
 /** Writes to real files, resolving relative paths against the document. */
 const deps: ExporterDeps = {
-  render,
+  render: async (source) => ({ svg: await render(source), failedIncludes: new Map() }),
   isDark: () => false,
   resolvePalette: (_source, dark) => Promise.resolve(dark),
   remoteReferenceMessage: 'URL-based external references are not supported.',

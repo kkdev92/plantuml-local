@@ -2,6 +2,7 @@ import type MarkdownIt from 'markdown-it';
 import { describe, expect, it, vi } from 'vitest';
 
 import { MAX_CACHE_ENTRIES, MAX_DOCUMENTS_IN_VIEW } from '../../src/core/constants';
+import type { DiagramRender } from '../../src/core/types';
 import { createPlantUmlPlugin, type PluginDeps, type UpdateMode } from '../../src/preview/plugin';
 
 /**
@@ -20,6 +21,7 @@ const LABELS = {
   pages: 'no pages',
   missingEnd: (end: string): string => `no ${end}`,
   notUpdated: (mode: string): string => `not updated (${mode})`,
+  includeFailed: (path: string, reason: string): string => `cannot include ${path} (${reason})`,
 };
 
 interface Harness {
@@ -40,18 +42,20 @@ interface Harness {
 function makeHarness(options?: {
   dark?: boolean;
   hideExportedImages?: boolean;
-  render?: (source: string, dark: boolean) => Promise<string>;
+  /** The SVG, or the SVG with the includes that failed. */
+  render?: (source: string, dark: boolean, document?: string) => Promise<string | DiagramRender>;
   resolvePalette?: (source: string, dark: boolean) => Promise<boolean>;
   updateMode?: UpdateMode;
 }): Harness {
   let refreshCount = 0;
   let pending: Promise<unknown> = Promise.resolve();
 
-  const render = vi.fn((source: string, dark: boolean) => {
+  const render = vi.fn((source: string, dark: boolean, document?: string) => {
     const result = (options?.render ?? ((s: string) => Promise.resolve(`<svg>${s}</svg>`)))(
       source,
-      dark
-    );
+      dark,
+      document
+    ).then((value): DiagramRender => (typeof value === 'string' ? { svg: value, failedIncludes: new Map() } : value));
     pending = pending.then(
       () => result.catch(() => undefined),
       () => undefined
@@ -141,7 +145,7 @@ describe('createPlantUmlPlugin', () => {
     const h = makeHarness();
     h.fence('plantuml', '@startuml\nA -> B');
     await h.settle();
-    expect(h.deps.render).toHaveBeenCalledWith('@startuml\nA -> B\n@enduml', false);
+    expect(h.deps.render).toHaveBeenCalledWith('@startuml\nA -> B\n@enduml', false, undefined);
     const html = h.fence('plantuml', '@startuml\nA -> B');
     expect(html).toContain('plantuml-notice');
     expect(html).toContain('no @enduml');
@@ -313,7 +317,7 @@ describe('createPlantUmlPlugin', () => {
     h.fence('plantuml', SOURCE);
     await h.settle();
 
-    expect(h.deps.render).toHaveBeenCalledWith(SOURCE, true);
+    expect(h.deps.render).toHaveBeenCalledWith(SOURCE, true, undefined);
     expect(h.fence('plantuml', SOURCE)).toContain('plantuml-diagram--dark');
   });
 
@@ -323,7 +327,7 @@ describe('createPlantUmlPlugin', () => {
     h.fence('plantuml', SOURCE);
     await h.settle();
 
-    expect(h.deps.render).toHaveBeenCalledWith(SOURCE, false);
+    expect(h.deps.render).toHaveBeenCalledWith(SOURCE, false, undefined);
     const html = h.fence('plantuml', SOURCE);
     expect(html).toContain('plantuml-diagram--light');
     expect(html).not.toContain('plantuml-diagram--dark');
@@ -632,5 +636,45 @@ describe('exported-image hiding (image rule)', () => {
     const marked = token({ src: 'images/orders.svg#plantuml-local' });
 
     expect(rule([marked], 0, {}, {}, self)).toBe('<img data-fallback="original">');
+  });
+});
+
+describe('a diagram with a local include', () => {
+  const SOURCE = '@startuml\n!include common.puml\nAlice -> Bob\n@enduml';
+  const A = { currentDocument: 'file:///a/doc.md' };
+  const B = { currentDocument: 'file:///b/doc.md' };
+
+  it('is drawn for its document, and again for another document, whose includes are other files', async () => {
+    const h = makeHarness();
+    h.fence('plantuml', SOURCE, A);
+    await h.settle();
+    expect(h.deps.render).toHaveBeenLastCalledWith(SOURCE, false, 'file:///a/doc.md');
+    expect(h.fence('plantuml', SOURCE, A)).toContain(`<svg>${SOURCE}</svg>`);
+
+    expect(h.fence('plantuml', SOURCE, B)).toContain('plantuml-loading');
+    await h.settle();
+    expect(h.deps.render).toHaveBeenCalledTimes(2);
+    expect(h.deps.render).toHaveBeenLastCalledWith(SOURCE, false, 'file:///b/doc.md');
+  });
+
+  it('says above the drawing why each include failed', async () => {
+    const h = makeHarness({
+      render: () =>
+        Promise.resolve({ svg: '<svg>cannot include</svg>', failedIncludes: new Map([['common.puml', 'not found']]) }),
+    });
+    h.fence('plantuml', SOURCE, A);
+    await h.settle();
+    const html = h.fence('plantuml', SOURCE, A);
+    expect(html).toContain('<div class="plantuml-notice">cannot include common.puml (not found)</div>');
+    expect(html.indexOf('plantuml-notice')).toBeLessThan(html.indexOf('<svg>'));
+  });
+
+  it('leaves a diagram without one shared between documents, as before', async () => {
+    const PLAIN = '@startuml\nAlice -> Bob\n@enduml';
+    const h = makeHarness();
+    h.fence('plantuml', PLAIN, A);
+    await h.settle();
+    expect(h.fence('plantuml', PLAIN, B)).toContain(`<svg>${PLAIN}</svg>`);
+    expect(h.deps.render).toHaveBeenCalledTimes(1);
   });
 });

@@ -40,6 +40,7 @@ Your diagram source is processed locally and is not sent to a rendering service.
 
 - **Built-in Preview**: Diagrams appear in the same Markdown preview you already use
 - **`.puml` Files**: PlantUML files open as their own language, with folding, an outline and a preview beside the editor that zooms and exports PNG
+- **Local Includes**: `!include` reads shared definitions and styles from the files of your workspace folder, in a trusted workspace
 - **Syntax Highlighting**: ```` ```plantuml ```` blocks and `.puml` files are coloured in the editor, following the syntax the bundled engine accepts
 - **Offline Rendering**: No Java, no PlantUML server, no network connection required — nothing to install besides the extension
 - **Fault-Tolerant**: A syntax error shows up inline at the broken diagram; the rest of the page stays intact
@@ -253,8 +254,10 @@ open, and what is wrong with them is listed in the Problems panel on the line
 it is on:
 
 - the engine's errors and warnings;
-- what the bundled engine cannot do: including a file, a library other than
-  `azure`, a theme from a folder, a URL, emoji;
+- an included file that is not read, and why (see
+  [Including files](#including-files));
+- what the bundled engine cannot do: a library other than `azure`, a theme
+  from a folder, a URL, emoji;
 - what it would drop without a word: a second diagram in a block, the pages
   after `newpage`, an `!includesub`;
 - a diagram with no `@enduml` line, which is drawn anyway.
@@ -266,6 +269,40 @@ names a line but no column, so the whole line is marked. Its warnings name no
 line at all and are put on the diagram's `@startuml` line. A document is checked
 again half a second after it last changed, and its problems disappear as soon as
 it changes. `plantumlLocal.diagnostics.enabled` turns the checks off.
+
+### Including files
+
+`!include`, `!include_once` and `!include_many` read files of the workspace,
+as in PlantUML:
+
+````markdown
+```plantuml
+@startuml
+!include styles/common.puml
+!include ../shared/actors.iuml
+Alice -> Bob
+@enduml
+```
+````
+
+A path is looked for next to the file it is written in — for a Markdown block,
+the Markdown file. One starting with `./` or `../` is looked for there only; a
+bare name such as `common.puml` or `styles/common.puml` is then looked for in
+the folders of `plantumlLocal.includePaths`, in order. Includes may nest and
+take their path from a variable, and a file on a branch the diagram does not
+take is never read. As the engine does, a repeated `!include` of a file is
+skipped (PlantUML's migration notes say otherwise), `!include_many` includes
+it again and `!include_once` reports the second one as an error. A file holding a whole `@startuml` … `@enduml` diagram
+contributes the inside of it.
+
+Files are read only in a trusted workspace, and only from the workspace folder
+of the document: text in UTF-8, ending in `.puml`, `.plantuml`, `.pu`, `.iuml`,
+`.wsd`, `.inc` or `.txt`. An absolute path or a URL, a path that leaves the
+workspace folder or passes through a symbolic link or a junction, a `.git`,
+`.hg` or `.svn` folder, and a file holding a second diagram or a command
+outside its diagram are refused, and the preview, the Problems panel and the
+export say why. A document open in the editor is read with its unsaved
+changes.
 
 ### Icons and sprites
 
@@ -456,9 +493,9 @@ and would show the referenced image as a second copy.
 
 - Only the `azure` standard-library entry is bundled; other `!include <…>`
   libraries are unavailable
-- `!include` of a URL or of a file is not supported: URL-based directives are
-  rejected with an inline message, and file includes are not available in the
-  bundled browser build of the engine
+- `!include` of a URL is not supported: URL-based directives are rejected with
+  an inline message. Files are included only from the document's workspace
+  folder, in a trusted workspace (see [Including files](#including-files))
 - Remote themes and other network resources are not supported
 - Images (`<img:…>`) are not loaded, local or remote: the engine draws an
   `[img TBD…]` placeholder in their place
@@ -505,6 +542,7 @@ and would show the referenced image as a second copy.
 | `plantumlLocal.hideExportedImages` | `true` | Hide images marked `#plantuml-local` in the preview, so an exported diagram is not shown next to its block's render |
 | `plantumlLocal.preview.updateMode` | `onChange` | When a changed diagram is drawn again in the previews: `onChange`, `onSave`, or `manual` (with *Clear Render Cache and Re-render*). Can be set per folder |
 | `plantumlLocal.diagnostics.enabled` | `true` | List the problems of the diagrams in open Markdown files in the Problems panel; can be set per folder |
+| `plantumlLocal.includePaths` | `[]` | Folders a bare `!include` name is also looked for in, after the folder of the including file: relative to the workspace folder, up to 16. Can be set per folder; not used until the workspace is trusted |
 
 A diagram that picks a `!theme` is drawn in that theme's colours, and most
 themes paint no background of their own, leaving the diagram on the backdrop
@@ -549,7 +587,8 @@ external rendering service.
 - **SVG Sanitisation**: Scripts, event handlers and non-fragment links are stripped before SVG reaches the preview. The one exception is a rasterised sprite, which must reach the preview as an inline `data:image/png` — it is allowed on `<image>` only, must be base64 with no other characters, and must actually begin with the PNG signature
 - **No Embedded Source**: The copy of the diagram source that PlantUML embeds in every SVG, and the element names it records in `data-*` attributes, are removed before an SVG reaches the preview or an exported file
 - **Image-Only Panels**: The `.puml` preview, and the panel a PNG is drawn in, show the SVG as an image under a strict content security policy, so nothing in a diagram can run there
-- **Untrusted Workspaces Supported**: No workspace files are read, no processes are spawned
+- **Included Files Checked**: The engine reads no file itself; the extension hands it the file of a local `!include` only from the document's workspace folder, through no symbolic link or junction, and only as UTF-8 text with one of the extensions listed under [Including files](#including-files)
+- **Untrusted Workspaces**: No file is read for an `!include` until the workspace is trusted, and no processes are spawned
 
 These controls reduce the extension's attack surface, but they have limits worth
 being explicit about: a worker thread is an isolation boundary for globals, not a

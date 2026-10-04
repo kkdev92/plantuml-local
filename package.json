@@ -50,10 +50,16 @@
   ],
   "capabilities": {
     "untrustedWorkspaces": {
-      "supported": true,
-      "description": "Diagrams are rendered locally in a worker thread; the extension reads no workspace files and makes no network requests. The export commands, the only actions that write files, are disabled here; naming a diagram and inserting a template edit the document only when asked."
+      "supported": "limited",
+      "description": "Diagrams are rendered locally in a worker thread, and the extension makes no network requests. Here a local !include reads no files, and the export commands, the only actions that write files, are disabled; naming a diagram and inserting a template edit the document only when asked.",
+      "restrictedConfigurations": [
+        "plantumlLocal.includePaths"
+      ]
     },
-    "virtualWorkspaces": true
+    "virtualWorkspaces": {
+      "supported": "limited",
+      "description": "A local !include reads files on disk only, so in a virtual workspace a diagram that includes one reports that it cannot."
+    }
   },
   "contributes": {
     "markdown.markdownItPlugins": true,
@@ -322,6 +328,16 @@
           "default": true,
           "scope": "resource",
           "description": "%config.diagnostics.enabled.description%"
+        },
+        "plantumlLocal.includePaths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 16,
+          "default": [],
+          "scope": "resource",
+          "description": "%config.includePaths.description%"
         }
       }
     }

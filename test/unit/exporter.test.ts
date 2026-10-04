@@ -15,6 +15,10 @@ import {
   type ExporterDeps,
 } from '../../src/export/exporter';
 import { isLastExport, withExport, type ExportRecords } from '../../src/export/ownership';
+import type { DiagramRender } from '../../src/core/types';
+
+/** What the renderer hands the exporter for `svg`: no local include failed. */
+const rendered = (svg: string): DiagramRender => ({ svg, failedIncludes: new Map() });
 
 /** The start of a PNG of `width`×`height` pixels: its signature and IHDR chunk. */
 function pngOf(width: number, height: number): Uint8Array {
@@ -43,7 +47,7 @@ function makeDeps(
   // What the export wrote, kept as the extension keeps it.
   let records: ExportRecords = {};
   const deps = {
-    render: vi.fn((source: string) => Promise.resolve(`<svg>${source}</svg>`)),
+    render: vi.fn((source: string) => Promise.resolve(rendered(`<svg>${source}</svg>`))),
     isDark: (): boolean => false,
     resolvePalette: (_source: string, dark: boolean): Promise<boolean> => Promise.resolve(dark),
     readExisting: (path: string): Promise<Uint8Array | null> => {
@@ -328,7 +332,7 @@ describe('exportOne', () => {
   it('refuses the error diagram the engine draws for a broken source, naming the document line', async () => {
     // The engine reports syntax errors through its success path, as a
     // drawing; writing that out would replace the diagram with it.
-    const deps = makeDeps({ render: vi.fn(() => Promise.resolve(engineOutput('syntax-error'))) });
+    const deps = makeDeps({ render: vi.fn(() => Promise.resolve(rendered(engineOutput('syntax-error')))) });
     const document = [
       '# Design',
       '',
@@ -357,7 +361,7 @@ describe('exportOne', () => {
   });
 
   it('refuses a lone error message, which names no line', async () => {
-    const deps = makeDeps({ render: vi.fn(() => Promise.resolve(engineOutput('ebnf-error'))) });
+    const deps = makeDeps({ render: vi.fn(() => Promise.resolve(rendered(engineOutput('ebnf-error')))) });
     const [block] = findPlantUmlBlocks('```plantuml grammar\n@startebnf\nrule = "a" | ;;;\n@endebnf\n```');
 
     const result = await exportOne(deps, DOC, 'images', block!, 'grammar');
@@ -368,7 +372,7 @@ describe('exportOne', () => {
   });
 
   it('still writes a diagram the engine drew with a warning', async () => {
-    const deps = makeDeps({ render: vi.fn(() => Promise.resolve(engineOutput('warning'))) });
+    const deps = makeDeps({ render: vi.fn(() => Promise.resolve(rendered(engineOutput('warning')))) });
     const [block] = findPlantUmlBlocks('```plantuml flow\nx\n```');
 
     const result = await exportOne(deps, DOC, 'images', block!, 'flow');
@@ -459,7 +463,7 @@ describe('exportOne as a PNG', () => {
   /** A render whose SVG gives itself this size, as the engine's does. */
   const sized = (width: number, height: number): ExporterDeps['render'] =>
     vi.fn(() =>
-      Promise.resolve(`<svg viewBox="0 0 10 10" width="${String(width)}" height="${String(height)}"><g/></svg>`)
+      Promise.resolve(rendered(`<svg viewBox="0 0 10 10" width="${String(width)}" height="${String(height)}"><g/></svg>`))
     );
 
   it('draws the diagram at the scale set, on its backdrop, and writes the PNG beside the document', async () => {
@@ -531,7 +535,7 @@ describe('exportOne as a PNG', () => {
   });
 
   it('refuses an SVG that gives no size, and reports a drawing that failed', async () => {
-    const unsized = makeDeps({ render: vi.fn(() => Promise.resolve('<svg><g/></svg>')) });
+    const unsized = makeDeps({ render: vi.fn(() => Promise.resolve(rendered('<svg><g/></svg>'))) });
     const failing = makeDeps({
       render: sized(10, 10),
       toPng: vi.fn(() => Promise.reject(new Error('The PNG could not be drawn: x'))),
@@ -595,7 +599,7 @@ describe('writeDocuments', () => {
 
   it('draws and writes PNGs when asked to', async () => {
     const deps = makeDeps({
-      render: vi.fn(() => Promise.resolve('<svg viewBox="0 0 10 10" width="30" height="20"><g/></svg>')),
+      render: vi.fn(() => Promise.resolve(rendered('<svg viewBox="0 0 10 10" width="30" height="20"><g/></svg>'))),
     });
     const drawn = [
       await drawDocument(deps, '/repo/a/doc.md', 'images', blocks('```plantuml one\na\n```\n\n```plantuml\nx\n```'), undefined, 'png'),
@@ -642,7 +646,7 @@ describe('exportAll', () => {
   it('keeps going after one diagram fails', async () => {
     const deps = makeDeps({
       render: vi.fn((source: string) =>
-        source === 'a' ? Promise.reject(new Error('boom')) : Promise.resolve('<svg/>')
+        source === 'a' ? Promise.reject(new Error('boom')) : Promise.resolve(rendered('<svg/>'))
       ),
     });
 
@@ -655,7 +659,7 @@ describe('exportAll', () => {
   it('counts an error diagram as a failure and writes the rest', async () => {
     const deps = makeDeps({
       render: vi.fn((source: string) =>
-        Promise.resolve(source === 'a' ? engineOutput('include-failure') : engineOutput('sequence'))
+        Promise.resolve(rendered(source === 'a' ? engineOutput('include-failure') : engineOutput('sequence')))
       ),
     });
 
@@ -913,7 +917,7 @@ describe('exportAll', () => {
     ].join('\n');
     const deps = makeDeps({
       render: vi.fn((source: string) =>
-        Promise.resolve(source.includes('broken') ? engineOutput('syntax-error') : '<svg/>')
+        Promise.resolve(rendered(source.includes('broken') ? engineOutput('syntax-error') : '<svg/>'))
       ),
     });
 
