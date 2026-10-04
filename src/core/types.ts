@@ -63,6 +63,19 @@ export interface DiagramRender {
    * a change to one of them can change the drawing.
    */
   dependencies: readonly string[];
+  /**
+   * What the files it included set for its palette (src/render/palette.ts),
+   * when they set anything.
+   */
+  includedStyle?: IncludedStyle;
+}
+
+/** What the files a diagram included set for its palette. */
+export interface IncludedStyle {
+  /** Their `!theme` lines, trimmed, in the order they were included. */
+  themes: readonly string[];
+  /** Whether one of them includes the bundled Azure library. */
+  azure: boolean;
 }
 
 /**

@@ -1,8 +1,9 @@
 import { DIAGRAM_BACKDROP, EMOJI_UNAVAILABLE, hasRemoteReference } from '../core/constants';
 import { diagramShape } from '../core/shape';
-import type { DiagramRender } from '../core/types';
+import type { DiagramRender, IncludedStyle } from '../core/types';
 import { withIncludeReason } from '../includes/describe';
 import { recognizeEngineError } from '../render/engine-error';
+import { drawReadable } from '../render/palette';
 import { isValidBlockName, type PlantUmlBlock } from './blocks';
 
 /**
@@ -32,7 +33,7 @@ export interface ExporterDeps {
    * The palette to draw `source` in when `dark` is asked for: the other one
    * for a diagram whose `!theme` cannot be read in it (src/render/palette.ts).
    */
-  resolvePalette(source: string, dark: boolean): Promise<boolean>;
+  resolvePalette(source: string, dark: boolean, included?: IncludedStyle): Promise<boolean>;
   /**
    * The bytes of the file at `path`, or null when there is none. Rejects
    * for a folder, which a diagram is never written in place of.
@@ -266,8 +267,14 @@ async function drawBlock(
   }
 
   try {
-    const dark = await deps.resolvePalette(shape.source, deps.isDark());
-    const { svg: rendered, failedIncludes } = await deps.render(shape.source, dark);
+    const drawn = await drawReadable(
+      shape.source,
+      deps.isDark(),
+      (source, palette, included) => deps.resolvePalette(source, palette, included),
+      (palette) => deps.render(shape.source, palette)
+    );
+    const dark = drawn.palette;
+    const { svg: rendered, failedIncludes } = drawn.result;
 
     // The engine reports a syntax error, a failed include or an empty
     // diagram by drawing it, through the same success path as a diagram.

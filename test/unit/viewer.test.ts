@@ -44,6 +44,7 @@ function makeDeps(
       emojiUnavailable: 'emoji',
       pages: 'pages',
       engineError: (message, line) => `engine: ${message} @ ${String(line)}`,
+      otherPalette: (dark) => `other palette ${String(dark)}`,
     },
     ...overrides,
     render,
@@ -364,5 +365,21 @@ describe('DiagramViewer and the files its diagram includes', () => {
     expect(viewer.dependsOn(new Map([['/ws/docs/common.puml', false]]))).toBe('edited');
     expect(viewer.dependsOn(new Map([['/ws/docs/common.puml', true]]))).toBe('saved');
     expect(viewer.dependsOn(new Map([['/ws/docs/other.puml', true]]))).toBe('none');
+  });
+});
+
+describe('DiagramViewer and the palette', () => {
+  it('says so when the diagram is drawn in the palette other than the one asked for', async () => {
+    const panel = makePanel();
+    const deps = makeDeps({ isDark: () => true, resolvePalette: () => Promise.resolve(false) });
+    await new DiagramViewer(panel, deps, 'one', 'file:///one.puml').show('@startuml\n!theme plain\nA -> B\n@enduml', 0);
+    expect(panel.sent.at(-1)).toEqual({ type: 'status', text: 'other palette false', error: false, clear: false });
+  });
+
+  it('says nothing when it is drawn as asked', async () => {
+    const panel = makePanel();
+    const deps = makeDeps({ isDark: () => true });
+    await new DiagramViewer(panel, deps, 'one', 'file:///one.puml').show('@startuml\nA -> B\n@enduml', 0);
+    expect(panel.sent.at(-1)).toEqual({ type: 'status', text: '', error: false, clear: false });
   });
 });

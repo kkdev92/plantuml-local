@@ -6,6 +6,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { RendererClient } from '../../src/render/client';
 import { recognizeEngineError } from '../../src/render/engine-error';
+import { drawReadable, ThemePalettes } from '../../src/render/palette';
 import { IncludeSession, type IncludeAccess } from '../../src/includes/session';
 
 /**
@@ -132,5 +133,50 @@ describe.runIf(hasFileLoader)('local includes through the built worker', () => {
   it('fails a local include of a render given no loader, as before', async () => {
     const svg = await client.render('@startuml\n!include common.puml\n@enduml', false);
     expect(recognizeEngineError(svg)?.message).toBe('cannot include common.puml');
+  });
+});
+
+describe.runIf(hasFileLoader)('the palette of a diagram whose included file picks a theme', () => {
+  let client: RendererClient;
+  let temp: string;
+  let root: string;
+
+  beforeAll(async () => {
+    client = new RendererClient(workerPath, log);
+    temp = await realpath(await mkdtemp(join(tmpdir(), 'plantuml-local-include-palette-')));
+    root = join(temp, 'ws');
+    await mkdir(root, { recursive: true });
+    await writeFile(join(root, 'white-page.iuml'), '!theme cerulean\n');
+  });
+
+  afterAll(async () => {
+    client.dispose();
+    await rm(temp, { recursive: true, force: true });
+  });
+
+  it('is drawn again, in the light palette, when the dark one is asked for', async () => {
+    const access: IncludeAccess = { available: true, scope: { root, documentFolder: root, searchFolders: [] } };
+    const palettes = new ThemePalettes((source, dark) => client.render(source, dark));
+    const source = '@startuml\n!include white-page.iuml\nAlice -> Bob : hello\n@enduml';
+    const asked: boolean[] = [];
+    const { palette, result } = await drawReadable(
+      source,
+      true,
+      (themed, dark, included) => palettes.resolve(themed, dark, included),
+      async (dark) => {
+        asked.push(dark);
+        const session = new IncludeSession(access, () => undefined);
+        const svg = await client.render(source, dark, session.load);
+        return {
+          svg,
+          failedIncludes: new Map(),
+          dependencies: [],
+          includedStyle: { themes: session.themes, azure: session.azure },
+        };
+      }
+    );
+    expect(asked).toEqual([true, false]);
+    expect(palette).toBe(false);
+    expect(recognizeEngineError(result.svg)).toBeNull();
   });
 });

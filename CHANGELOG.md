@@ -27,6 +27,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   problems are checked again at once. A change made outside VS Code to a file
   in a folder that `files.watcherExclude` leaves out with a pattern ending in
   `/**` is not noticed: *Clear Render Cache and Re-render* draws it.
+- **Included themes count for the palette.** A `!theme`, or the Azure icons,
+  that a diagram gets from a file it includes now decides the palette as one
+  written in the diagram does: when it turns the choice, the diagram is drawn
+  once more in the other palette. The `.puml` preview says when it shows a
+  diagram in the palette other than the one asked for, and why.
 
 ### Changed
 
