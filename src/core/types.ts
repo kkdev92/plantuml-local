@@ -57,6 +57,12 @@ export interface DiagramRender {
    * order the engine asked. The engine itself only says "cannot include".
    */
   failedIncludes: ReadonlyMap<string, string>;
+  /**
+   * The paths its local includes looked at — the files read, and the places
+   * found empty first — as compared with file events (src/includes/tracking.ts):
+   * a change to one of them can change the drawing.
+   */
+  dependencies: readonly string[];
 }
 
 /**

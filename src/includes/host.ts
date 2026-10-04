@@ -1,4 +1,5 @@
 import { realpath } from 'node:fs/promises';
+import { join, relative } from 'node:path';
 import * as vscode from 'vscode';
 
 import { INCLUDE_LIMITS } from '../core/constants';
@@ -7,6 +8,7 @@ import { includeAccess } from './access';
 import { describeIncludeFailure, describeIncludeFailures, hasLocalInclude, type IncludeLabels } from './describe';
 import { INCLUDE_EXTENSIONS } from './path-policy';
 import { IncludeSession, type IncludeAccess, type IncludeFailureReason } from './session';
+import { pathKey } from './tracking';
 
 /**
  * Draws the diagrams of documents with their local includes: the editor's
@@ -21,6 +23,8 @@ export interface IncludeHost {
   /** `plantumlLocal.includePaths` for `document`, as written. */
   includePaths(document: vscode.Uri): unknown;
   labels: IncludeLabels;
+  /** Takes what the render `key` of a diagram with a local include depended on (path keys). */
+  remember?(key: string, paths: readonly string[]): void;
 }
 
 /** The renderer, as far as drawing goes. */
@@ -35,40 +39,46 @@ export function drawInDocuments(renderer: Renderer, host: IncludeHost): DrawDiag
   return async (source, dark, document) => {
     // Without a local include the engine never asks for a file.
     if (document === undefined || !hasLocalInclude(source)) {
-      return { svg: await renderer.render(source, dark), failedIncludes: new Map() };
+      return { svg: await renderer.render(source, dark), failedIncludes: new Map(), dependencies: [] };
     }
-    const session = new IncludeSession(await accessFor(vscode.Uri.parse(document), host), openText);
+    const { access, folder } = await accessFor(vscode.Uri.parse(document), host);
+    // The files are found by real path, from the real path of the workspace
+    // folder; VS Code knows them under the folder as it was opened, which a
+    // link in its path can make another path.
+    const asOpened = (path: string): string =>
+      access.available && folder !== undefined ? join(folder, relative(access.scope.root, path)) : path;
+    const session = new IncludeSession(access, (path) => openText(asOpened(path)) ?? openText(path));
     const svg = await renderer.render(source, dark, session.load);
-    return { svg, failedIncludes: describeIncludeFailures(session.failures, describe) };
+    const dependencies = [...session.dependencies].map((path) => pathKey(asOpened(path)));
+    host.remember?.(`${document}\n${source}`, dependencies);
+    return { svg, failedIncludes: describeIncludeFailures(session.failures, describe), dependencies };
   };
 }
 
-function accessFor(document: vscode.Uri, host: IncludeHost): Promise<IncludeAccess> {
-  const folder = vscode.workspace.getWorkspaceFolder(document);
-  return includeAccess(
+async function accessFor(
+  document: vscode.Uri,
+  host: IncludeHost
+): Promise<{ access: IncludeAccess; folder: string | undefined }> {
+  const workspaceFolder = vscode.workspace.getWorkspaceFolder(document);
+  const folder = workspaceFolder?.uri.scheme === 'file' ? workspaceFolder.uri.fsPath : undefined;
+  const access = await includeAccess(
     {
       trusted: vscode.workspace.isTrusted,
       untitled: document.scheme === 'untitled',
       scheme: document.scheme,
       path: document.scheme === 'file' ? document.fsPath : '',
-      folder: folder?.uri.scheme === 'file' ? folder.uri.fsPath : undefined,
+      folder,
       includePaths: host.includePaths(document),
     },
     (path) => realpath(path)
   );
+  return { access, folder };
 }
 
-/**
- * The text of the document open at `path`, a real path, unsaved changes and
- * all. The real path has the drive letter and the names as they are on
- * disk, where a document's path may not, so Windows compares without case.
- */
+/** The text of the document open at `path`, unsaved changes and all, its path compared as file events are. */
 function openText(path: string): string | undefined {
-  const same =
-    process.platform === 'win32'
-      ? (a: string): boolean => a.toLowerCase() === path.toLowerCase()
-      : (a: string): boolean => a === path;
+  const key = pathKey(path);
   return vscode.workspace.textDocuments
-    .find((document) => document.uri.scheme === 'file' && same(document.uri.fsPath))
+    .find((document) => document.uri.scheme === 'file' && pathKey(document.uri.fsPath) === key)
     ?.getText();
 }

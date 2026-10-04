@@ -4,7 +4,7 @@ import type { DiagramRender } from '../../src/core/types';
 import { shareRenders } from '../../src/render/memo';
 
 /** What the renderer gives for `svg`, with no include failed. */
-const rendered = (svg: string): DiagramRender => ({ svg, failedIncludes: new Map() });
+const rendered = (svg: string): DiagramRender => ({ svg, failedIncludes: new Map(), dependencies: [] });
 
 describe('shareRenders', () => {
   it('joins a render already running instead of starting it again', async () => {

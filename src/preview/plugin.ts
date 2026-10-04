@@ -12,6 +12,7 @@ import {
 import { diagramShape } from '../core/shape';
 import type { DiagramRender, RenderLog } from '../core/types';
 import { hasLocalInclude } from '../includes/describe';
+import { changeTo } from '../includes/tracking';
 
 /**
  * The markdown-it side of the extension.
@@ -105,6 +106,13 @@ export interface PlantUmlPlugin {
    * preview.
    */
   accept(document: string, sources: readonly string[]): void;
+  /**
+   * Files changed (path key → saved or changed on disk): the diagrams whose
+   * local includes depend on one of them are drawn again under their update
+   * mode — at once with `onChange`, once saved with `onSave` — or else marked
+   * as not updated. The rest are left alone.
+   */
+  filesChanged(changes: ReadonlyMap<string, boolean>): void;
 }
 
 interface BoundedStore {
@@ -227,6 +235,43 @@ export function createPlantUmlPlugin(deps: PluginDeps): PlantUmlPlugin {
   const shown = createBoundedStore(MAX_CACHE_ENTRIES, MAX_CACHE_BYTES);
   /** Document → the sources of its blocks when last accepted, as on a save. */
   const accepted = new Map<string, ReadonlySet<string>>();
+  /**
+   * Key → the document and the paths that a cached diagram with a local
+   * include depends on: a change to one of them makes the drawing stale.
+   */
+  const dependents = new Map<string, { document: string | undefined; paths: readonly string[] }>();
+  /** Keys shown although a file they include changed, as their update mode has them wait. */
+  const stale = new Set<string>();
+  /** Keys to draw whatever their document's update mode, as a file they include was saved. */
+  const forced = new Set<string>();
+  /** Key → the files that changed while it was rendering, weighed once it lands. */
+  const changedWhileRendering = new Map<string, Map<string, boolean>>();
+
+  /**
+   * Takes a change to the files `key` depends on: drawn again when the update
+   * mode allows, otherwise marked as not updated. False when none is touched.
+   */
+  function react(
+    key: string,
+    entry: { document: string | undefined; paths: readonly string[] },
+    changes: ReadonlyMap<string, boolean>
+  ): boolean {
+    const change = changeTo(entry.paths, changes);
+    if (change === 'none') {
+      return false;
+    }
+    const mode = entry.document === undefined ? 'onChange' : deps.updateMode(entry.document);
+    if (mode === 'onChange' || (mode === 'onSave' && change === 'saved')) {
+      rendered.delete(key);
+      failed.delete(key);
+      dependents.delete(key);
+      stale.delete(key);
+      forced.add(key);
+    } else {
+      stale.add(key);
+    }
+    return true;
+  }
 
   /**
    * A diagram with a local include draws the files next to its document,
@@ -272,6 +317,8 @@ export function createPlantUmlPlugin(deps: PluginDeps): PlantUmlPlugin {
       return;
     }
     inFlight.add(key);
+    forced.delete(key);
+    changedWhileRendering.set(key, new Map());
 
     deps
       .resolvePalette(source, dark)
@@ -280,6 +327,18 @@ export function createPlantUmlPlugin(deps: PluginDeps): PlantUmlPlugin {
         ({ result, palette }) => {
           rendered.set(key, includeNotes(result.failedIncludes) + diagramHtml(result.svg, palette));
           failed.delete(key);
+          stale.delete(key);
+          if (result.dependencies.length > 0) {
+            const entry = { document, paths: result.dependencies };
+            dependents.set(key, entry);
+            // A file it read may have changed after it was read.
+            const during = changedWhileRendering.get(key);
+            if (during !== undefined) {
+              react(key, entry, during);
+            }
+          } else {
+            dependents.delete(key);
+          }
           deps.log.debug(`Rendered diagram (${String(result.svg.length)} bytes)`);
         },
         (error: unknown) => {
@@ -290,6 +349,7 @@ export function createPlantUmlPlugin(deps: PluginDeps): PlantUmlPlugin {
       )
       .finally(() => {
         inFlight.delete(key);
+        changedWhileRendering.delete(key);
         deps.requestRefresh();
       });
   }
@@ -329,11 +389,44 @@ export function createPlantUmlPlugin(deps: PluginDeps): PlantUmlPlugin {
       rendered.clear();
       failed.clear();
       shown.clear();
+      dependents.clear();
+      stale.clear();
+      forced.clear();
       deps.requestRefresh();
     },
 
     accept(document: string, sources: readonly string[]): void {
       accepted.set(document, new Set(sources));
+      // Saved: what it includes is drawn as it is now, as its own text is.
+      for (const key of [...stale]) {
+        if (dependents.get(key)?.document === document) {
+          rendered.delete(key);
+          dependents.delete(key);
+          stale.delete(key);
+          forced.add(key);
+        }
+      }
+    },
+
+    filesChanged(changes: ReadonlyMap<string, boolean>): void {
+      for (const seen of changedWhileRendering.values()) {
+        for (const [path, saved] of changes) {
+          seen.set(path, seen.get(path) === true || saved);
+        }
+      }
+      let touched = false;
+      for (const [key, entry] of [...dependents]) {
+        // Gone from the cache meanwhile: drawn afresh when it is next shown.
+        if (rendered.get(key) === undefined) {
+          dependents.delete(key);
+          stale.delete(key);
+          continue;
+        }
+        touched = react(key, entry, changes) || touched;
+      }
+      if (touched) {
+        deps.requestRefresh();
+      }
     },
 
     extendMarkdownIt(md: MarkdownIt): MarkdownIt {
@@ -404,12 +497,22 @@ export function createPlantUmlPlugin(deps: PluginDeps): PlantUmlPlugin {
           showing(document, env, key);
         }
 
+        const mode = document === undefined ? 'onChange' : deps.updateMode(document);
         const html = rendered.get(key);
-        if (html !== undefined) {
+        if (html !== undefined && stale.has(key) && mode === 'onChange') {
+          // The update mode has changed since: draw it again now.
+          rendered.delete(key);
+          stale.delete(key);
+          forced.add(key);
+        } else if (html !== undefined) {
           if (position !== undefined) {
             shown.set(position, html);
           }
-          return notice + html;
+          const waiting =
+            stale.has(key) && mode !== 'onChange'
+              ? `<div class="plantuml-notice">${deps.escapeHtml(deps.labels.notUpdated(mode))}</div>`
+              : '';
+          return notice + waiting + html;
         }
 
         const message = failed.get(key);
@@ -418,11 +521,11 @@ export function createPlantUmlPlugin(deps: PluginDeps): PlantUmlPlugin {
         }
 
         const previous = position !== undefined ? shown.get(position) : undefined;
-        const mode = document === undefined ? 'onChange' : deps.updateMode(document);
         if (
           previous !== undefined &&
           document !== undefined &&
           mode !== 'onChange' &&
+          !forced.has(key) &&
           accepted.get(document)?.has(source) !== true
         ) {
           return (

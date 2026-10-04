@@ -19,6 +19,7 @@ import { diagramShape } from '../core/shape';
 import type { DiagramRender } from '../core/types';
 import { blockAtLine, findFileDiagrams, type PlantUmlBlock } from '../export/blocks';
 import { withIncludeReason } from '../includes/describe';
+import { changeTo } from '../includes/tracking';
 import { recognizeEngineError } from '../render/engine-error';
 
 /** What the viewer needs of its panel. */
@@ -117,6 +118,8 @@ export class DiagramViewer {
   private generation = 0;
   /** Says the diagram is not drawn again since the file changed, or ''. */
   private note = '';
+  /** What the local includes of the diagram drawn last looked at (path keys). */
+  private dependencies: readonly string[] = [];
 
   constructor(
     private readonly panel: ViewerPanel,
@@ -182,6 +185,14 @@ export class DiagramViewer {
     await this.status(note, false, false);
   }
 
+  /**
+   * How `changes` (path key → saved or changed on disk) touch the files the
+   * diagram shown includes: 'none' when they do not.
+   */
+  dependsOn(changes: ReadonlyMap<string, boolean>): 'none' | 'edited' | 'saved' {
+    return changeTo(this.dependencies, changes);
+  }
+
   /** Lists the diagrams of `text` and draws the one shown, again. */
   async update(text: string): Promise<void> {
     const generation = ++this.generation;
@@ -222,10 +233,11 @@ export class DiagramViewer {
     await this.status(labels.rendering, false, false);
     try {
       const dark = await this.deps.resolvePalette(shape.source, this.deps.isDark());
-      const { svg, failedIncludes } = await this.deps.render(shape.source, dark, this.uri);
+      const { svg, failedIncludes, dependencies } = await this.deps.render(shape.source, dark, this.uri);
       if (generation !== this.generation) {
         return;
       }
+      this.dependencies = dependencies;
       await this.panel.post({
         type: 'render',
         svg,
