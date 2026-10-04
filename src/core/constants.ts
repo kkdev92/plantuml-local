@@ -52,6 +52,7 @@ export const CONFIG = {
   HIDE_EXPORTED_IMAGES: 'hideExportedImages',
   PREVIEW_UPDATE_MODE: 'preview.updateMode',
   DIAGNOSTICS_ENABLED: 'diagnostics.enabled',
+  INCLUDE_PATHS: 'includePaths',
 } as const;
 
 /**

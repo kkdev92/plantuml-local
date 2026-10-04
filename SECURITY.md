@@ -78,7 +78,20 @@ The preview of a `.puml` file is a webview of this extension's own, and runs one
 
 ### Remote references are rejected up front
 
-`!include https://…` and `!theme … from https://…` never reach the engine; the block renders an explanatory message instead. Includes of a file are not supported by the browser build of the engine and fail harmlessly.
+`!include https://…` and `!theme … from https://…` never reach the engine; the block renders an explanatory message instead.
+
+### Included files are chosen by the extension
+
+The engine reads no file itself. For each local `!include`, `!include_once` and `!include_many` it runs, it asks the host through `PLANTUML_FILE_LOADER`, and the worker passes the request to the extension host, which decides (`src/includes/`). A file is delivered only when all of these hold:
+
+- the workspace is trusted, and the document is a saved file on disk in a workspace folder;
+- the path, as the engine hands it over, is relative: an absolute path, a drive, a share, a URI or `~` is refused, as are a device name, a name ending in a dot or a space, a `:` in a name, a control character and a `.git`, `.hg` or `.svn` folder, and nothing in the path is decoded or expanded;
+- the path is looked for next to the including file, then in the folders of `plantumlLocal.includePaths`, and every place looked at lies inside the document's workspace folder, taken by its real path; one that leaves it stops the include rather than letting a file elsewhere stand in;
+- no name between the workspace folder and the file is a symbolic link or a junction, checked with `lstat` name by name, and the file's real path lies inside the workspace folder too;
+- it is a regular file ending in `.puml`, `.plantuml`, `.pu`, `.iuml`, `.wsd`, `.inc` or `.txt`, holding valid UTF-8 without a NUL, and it holds no second diagram and no command outside its diagram, which the engine would otherwise drop without a word;
+- one diagram's includes stay within 32 levels, 2048 files and 16 MiB in all.
+
+`plantumlLocal.includePaths` is declared a restricted setting, so a workspace's own value is not used in Restricted Mode. A document open in the editor is delivered with its unsaved changes. The checks bound which files are read; they do not judge what is in them, and anything in a readable file of the workspace folder can end up in a diagram.
 
 ### The standard library is served from the package
 
@@ -86,7 +99,7 @@ The preview of a `.puml` file is a webview of this extension's own, and runs one
 
 ### Untrusted and virtual workspaces
 
-The extension declares support for untrusted and virtual workspaces: it reads no workspace files, spawns no processes, and executes nothing from the workspace. The only input it processes is the text of ` ```plantuml ` fences, inside a worker, with the output sanitised as above.
+The extension declares limited support for untrusted and virtual workspaces: it spawns no processes and executes nothing from the workspace. In an untrusted workspace it reads no workspace files, and a local `!include` fails with a message saying so; in a virtual workspace it reads none either, as only files on disk are included. The only input it processes then is the text of ` ```plantuml ` fences and PlantUML files, inside a worker, with the output sanitised as above.
 
 Exporting is the one path that writes files: the export commands write SVG and PNG files, and *Export All Diagrams and Update References* also edits the Markdown buffer. Naming a diagram from the light bulb and *Insert Diagram Template* edit the document only when asked, as typing would, and work in any workspace. Exporting a folder also reads the Markdown and PlantUML files under it, following no symbolic link or junction. All of them refuse to run in an untrusted workspace, enforced by a runtime `workspace.isTrusted` check rather than by hiding the commands — a hidden command can still be invoked programmatically. Rendering and the preview are unaffected. The destination comes from `plantumlLocal.exportDirectory`, which must be a relative path without `..`, and file names come from the block's own name, restricted to letters, digits, hyphens and underscores; neither can be made to point outside the document's folder. To replace their own files without asking while still asking about any other, the export commands keep a record in the workspace's state on this machine: for each file they wrote, its URI, the document's URI and a SHA-256 of the bytes written — no diagram source and no image.
 
