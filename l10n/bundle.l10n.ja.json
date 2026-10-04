@@ -8,6 +8,7 @@
   "Pages after newpage cannot be drawn, so only the first page would be. Give each page a block of its own.": "newpage 以降のページは描けないため、最初のページしか描かれません。ページごとにブロックを分けてください。",
   "This diagram has no {0} line; it is drawn as if the block ended with one.": "この図には {0} の行がありません。ブロックの終わりにあるものとして描いています。",
   "!includesub is not supported: the engine ignores it, so nothing is included.": "!includesub には対応していません。エンジンが無視するため、何も取り込まれません。",
+  "A selector after ! is not supported: the engine ignores it and includes the file as if it had none.": "! の後のセレクタには対応していません。エンジンはこれを無視し、セレクタが無いときと同じようにファイルを取り込みます。",
   "the bundled engine reads no files.": "同梱のエンジンはファイルを読みません。",
   "only the bundled themes can be loaded.": "読み込めるのは同梱のテーマだけです。",
   "The {0} standard library is not bundled; only azure is.": "標準ライブラリ {0} は同梱していません。同梱しているのは azure だけです。",

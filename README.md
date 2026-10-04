@@ -261,7 +261,8 @@ it is on:
 - what the bundled engine cannot do: a library other than `azure`, a theme
   from a folder, a URL, emoji;
 - what it would drop without a word: a second diagram in a block, the pages
-  after `newpage`, an `!includesub`;
+  after `newpage`, an `!includesub`, a selector after the path of an
+  `!include` (`!1`, `!ID`);
 - a diagram with no `@enduml` line, which is drawn anyway.
 
 ![Three diagrams with problems: the lines marked in the editor, the engine's messages in the preview, and the list in the Problems panel](images/problems-panel.png)
@@ -527,7 +528,9 @@ and would show the referenced image as a second copy.
 - A block draws one diagram, on one page: a block holding a second
   `@startuml` … `@enduml`, or a diagram using `newpage`, shows a message
   instead, since the engine would draw only the first diagram or page
-- `!includesub` is ignored without an error
+- `!includesub` is ignored without an error, and so is a selector after the
+  path of an `!include` (`!1`, `!ID`): the file is included as if it had none.
+  The Problems panel lists both
 - Functions that read the machine return nothing: `%getenv()`, `%filename()`
   and `%dirpath()` are empty and `%file_exists()` is `0`
 - Hyperlinks (`[[https://…]]`) are drawn as text, not as links

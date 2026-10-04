@@ -11,6 +11,7 @@ const LABELS: ProblemLabels = {
   pages: 'pages',
   missingEnd: (end) => `no ${end}`,
   includesub: 'includesub',
+  selector: 'selector',
   localFile: 'no files',
   themeFrom: 'bundled themes only',
   libraryNotBundled: (library) => `${library} not bundled`,
@@ -68,6 +69,25 @@ describe('checkSource', () => {
   it('ignores !includesub in a comment', () => {
     const check = checkSource(blockOf('@startuml', "' !includesub x.puml!PART", 'Alice -> Bob', '@enduml'), LABELS);
     expect(check.problems).toEqual([]);
+  });
+
+  it('warns about a selector after the path of a local include, which the engine ignores', () => {
+    const check = checkSource(
+      blockOf(
+        '@startuml',
+        '!include parts.puml!1',
+        '!include_once parts.puml!SECOND',
+        "!include parts.puml /' a!b '/",
+        '!include <azure/AzureCommon>',
+        "' !include parts.puml!1",
+        '@enduml'
+      ),
+      LABELS
+    );
+    expect(check.problems).toEqual([
+      { line: 4, severity: 'warning', code: PROBLEM_CODES.CAP001, message: 'selector' },
+      { line: 5, severity: 'warning', code: PROBLEM_CODES.CAP001, message: 'selector' },
+    ]);
   });
 });
 

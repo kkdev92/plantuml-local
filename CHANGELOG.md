@@ -39,6 +39,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a defined name is not followed. After `!include ` the path completes with
   the folders and the files it can lead to, a search folder's names marked
   with the folder. Neither is offered in Restricted Mode.
+- **A selector is reported.** The engine ignores a selector after the path of
+  an `!include` (`!1`, `!ID`) and includes the file as if it had none, so the
+  Problems panel lists one as not supported (`PLLOCAL-CAP001`).
 
 ### Changed
 

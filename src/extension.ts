@@ -1996,6 +1996,9 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         missingEnd: (end) =>
           l10n.t('This diagram has no {0} line; it is drawn as if the block ended with one.', end),
         includesub: l10n.t('!includesub is not supported: the engine ignores it, so nothing is included.'),
+        selector: l10n.t(
+          'A selector after ! is not supported: the engine ignores it and includes the file as if it had none.'
+        ),
         localFile: l10n.t('the bundled engine reads no files.'),
         themeFrom: l10n.t('only the bundled themes can be loaded.'),
         libraryNotBundled: (library) =>
