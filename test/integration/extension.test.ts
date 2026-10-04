@@ -1665,12 +1665,30 @@ describe('completion (dist)', () => {
     );
 
   it('is registered for Markdown and PlantUML files, opening on the characters suggestions follow', () => {
-    expect(vscodeStub._test.completionProviders).toHaveLength(1);
+    expect(vscodeStub._test.completionProviders).toHaveLength(2);
     expect(vscodeStub._test.completionProviders[0]?.selector).toEqual([
       { language: 'markdown' },
       { language: 'plantuml' },
     ]);
     expect(vscodeStub._test.completionProviders[0]?.triggers).toEqual(['@', '!', '&', ' ']);
+  });
+
+  it('completes the path of a local include, and goes to its file, in files on disk', async () => {
+    const onDisk = [
+      { language: 'markdown', scheme: 'file' },
+      { language: 'plantuml', scheme: 'file' },
+    ];
+    expect(vscodeStub._test.completionProviders[1]?.selector).toEqual(onDisk);
+    expect(vscodeStub._test.completionProviders[1]?.triggers).toEqual([' ', '/', '\\']);
+    expect(vscodeStub._test.definitionProviders.map((registered) => registered.selector)).toEqual([onDisk]);
+    // The stub's workspace folder is no folder on disk: nothing is looked for in it.
+    const document = makeEditor('file:///c/inc/a.puml', '!include common.puml', 0, { languageId: 'plantuml' }).document;
+    await expect(
+      vscodeStub._test.definitionProviders[0]?.provider.provideDefinition(document, new vscodeStub.Position(0, 12))
+    ).resolves.toBeUndefined();
+    await expect(
+      vscodeStub._test.completionProviders[1]?.provider.provideCompletionItems(document, new vscodeStub.Position(0, 9))
+    ).resolves.toBeUndefined();
   });
 
   it('suggests in the diagram blocks of a Markdown document only', () => {
