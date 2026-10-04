@@ -40,7 +40,7 @@ Your diagram source is processed locally and is not sent to a rendering service.
 
 - **Built-in Preview**: Diagrams appear in the same Markdown preview you already use
 - **`.puml` Files**: PlantUML files open as their own language, with folding, an outline and a preview beside the editor that zooms and exports PNG
-- **Local Includes**: `!include` reads shared definitions and styles from the files of your workspace folder, in a trusted workspace
+- **Local Includes**: `!include` reads shared definitions and styles from the files of your workspace folder, in a trusted workspace; its path completes, and Ctrl+Click opens the file
 - **Syntax Highlighting**: ```` ```plantuml ```` blocks and `.puml` files are coloured in the editor, following the syntax the bundled engine accepts
 - **Offline Rendering**: No Java, no PlantUML server, no network connection required — nothing to install besides the extension
 - **Fault-Tolerant**: A syntax error shows up inline at the broken diagram; the rest of the page stays intact
@@ -229,6 +229,8 @@ In a diagram — a ` ```plantuml ` block or a `.puml` file — suggestions open 
   the engine does not act on, such as `!includesub`
 - `!theme `: the themes that ship with the extension
 - `<&`: the names of the OpenIconic icons
+- `!include ` and a `/` in its path: the folders and the files it can include
+  (see [Including files](#including-files))
 
 Where a diagram can start, `puml-` offers a template of a sequence, class,
 activity, state, component or use case diagram, with its names to tab through:
@@ -313,6 +315,17 @@ at once. One exception: a change made outside VS Code to a file in a folder
 that `files.watcherExclude` leaves out with a pattern ending in `/**` (such as
 `**/generated/**`) is not noticed, as VS Code reports no change there; run
 *Clear Render Cache and Re-render* after one.
+
+Ctrl+Click on the path of an `!include`, or *Go to Definition* (`F12`), opens
+the file the diagram reads there: the one the preview draws, next to the
+including file or in a search folder. A path the engine works out — from a
+variable, a function, or a name the diagram defines with `!define` or
+`!name =` — is not followed, nor one written in a procedure, which is looked
+for next to the file that calls it: a drawing tells which files it read, not
+which line asked for each. After `!include ` the path completes with the
+folders it can go into and the files of the kinds read, each from the first
+place that has it; a name from a search folder shows the folder. In Restricted
+Mode, and in a document outside the workspace folders, neither is offered.
 
 ### Icons and sprites
 

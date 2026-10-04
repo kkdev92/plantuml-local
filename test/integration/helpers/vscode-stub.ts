@@ -177,6 +177,14 @@ export interface ActionRegistrationStub {
   metadata: unknown;
 }
 
+/** A definition provider as registered, with what it was registered for. */
+export interface DefinitionRegistrationStub {
+  selector: unknown;
+  provider: {
+    provideDefinition(document: TextEditorStub['document'], position: PositionStub): Promise<unknown>;
+  };
+}
+
 /** A `vscode.CompletionItem` as the extension builds it. */
 export interface CompletionItemStub {
   label: string | { label: string; description?: string };
@@ -298,6 +306,10 @@ export interface VscodeStub {
       provider: ActionRegistrationStub['provider'],
       metadata?: unknown
     ) => { dispose(): void };
+    registerDefinitionProvider: (
+      selector: unknown,
+      provider: DefinitionRegistrationStub['provider']
+    ) => { dispose(): void };
   };
   CodeAction: new (title: string, kind: string) => CodeActionStub;
   CodeActionKind: Record<'QuickFix', string>;
@@ -312,7 +324,7 @@ export interface VscodeStub {
   FoldingRange: new (start: number, end: number, kind?: number) => FoldingRangeStub;
   FoldingRangeKind: Record<'Comment' | 'Imports' | 'Region', number>;
   CompletionItem: new (label: CompletionItemStub['label'], kind?: number) => CompletionItemStub;
-  CompletionItemKind: Record<'Keyword' | 'Value' | 'Snippet', number>;
+  CompletionItemKind: Record<'Keyword' | 'Value' | 'Snippet' | 'File' | 'Folder', number>;
   SnippetString: new (value: string) => { value: string };
   UIKind: Record<'Desktop' | 'Web', number>;
   ProgressLocation: Record<'SourceControl' | 'Window' | 'Notification', number>;
@@ -490,6 +502,8 @@ export interface VscodeStub {
     symbolProviders: SymbolRegistrationStub[];
     /** Code action providers registered, in order. */
     actionProviders: ActionRegistrationStub[];
+    /** Definition providers registered, in order. */
+    definitionProviders: DefinitionRegistrationStub[];
     /** Webview panels created, in order. */
     webviewPanels: WebviewPanelStub[];
     /** Panel serializers registered, by view type. */
@@ -768,6 +782,7 @@ export function createVscodeStub(): VscodeStub {
     ) {}
   }
   const actionProviders: ActionRegistrationStub[] = [];
+  const definitionProviders: DefinitionRegistrationStub[] = [];
 
   const webviewPanels: WebviewPanelStub[] = [];
   const webviewSerializers = new Map<
@@ -862,7 +877,7 @@ export function createVscodeStub(): VscodeStub {
     RelativePattern,
     Diagnostic,
     CompletionItem,
-    CompletionItemKind: { Keyword: 13, Value: 11, Snippet: 14 },
+    CompletionItemKind: { Keyword: 13, Value: 11, Snippet: 14, File: 16, Folder: 18 },
     SnippetString,
     FoldingRange,
     FoldingRangeKind: { Comment: 1, Imports: 2, Region: 3 },
@@ -901,6 +916,10 @@ export function createVscodeStub(): VscodeStub {
       registerCodeActionsProvider: (selector, provider, metadata) => {
         actionProviders.push({ selector, provider, metadata });
         return track('languages.registerCodeActionsProvider');
+      },
+      registerDefinitionProvider: (selector, provider) => {
+        definitionProviders.push({ selector, provider });
+        return track('languages.registerDefinitionProvider');
       },
     },
     EndOfLine: { LF: 1, CRLF: 2 },
@@ -1295,6 +1314,7 @@ export function createVscodeStub(): VscodeStub {
       foldingProviders,
       symbolProviders,
       actionProviders,
+      definitionProviders,
       webviewPanels,
       webviewSerializers,
       // Restored panels come with whatever options were saved: none here.

@@ -87,6 +87,7 @@ import {
   type RenderOutcome,
 } from './diagnostics/problems';
 import type { IncludeLabels } from './includes/describe';
+import { includeCompletions, includeDefinitions } from './includes/editor';
 import { drawInDocuments, type DrawDiagram } from './includes/host';
 import { changeTo } from './includes/tracking';
 import { IncludeWatcher } from './includes/watch';
@@ -2324,6 +2325,25 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
           '&',
           ' '
         )
+      );
+      return undefined;
+    },
+  });
+
+  module.raw.register({
+    id: 'plantuml.includePaths',
+    inject: { settings: Settings.token },
+    bind: ({ registrations }, { settings }): undefined => {
+      // Going to the file a local include reads, and the names its path can
+      // go on with (src/includes/editor.ts), for files on disk.
+      const host = { includePaths: (document: vscode.Uri): unknown => includePathsOf(settings, document) };
+      const selector = [
+        { language: 'markdown', scheme: 'file' },
+        { language: 'plantuml', scheme: 'file' },
+      ];
+      registrations.own(vscode.languages.registerDefinitionProvider(selector, includeDefinitions(host)));
+      registrations.own(
+        vscode.languages.registerCompletionItemProvider(selector, includeCompletions(host), ' ', '/', '\\')
       );
       return undefined;
     },
