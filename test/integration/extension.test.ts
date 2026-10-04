@@ -372,6 +372,7 @@ function makeEditor(
         toString: () => path,
         scheme: path.slice(0, path.indexOf(':')),
         path: path.replace(/^[a-z][\w+.-]*:(\/\/[^/]*)?/i, ''),
+        fsPath: path.replace(/^[a-z][\w+.-]*:\/\//i, ''),
       },
       getText: () => current,
       lineAt: (at: number) => {

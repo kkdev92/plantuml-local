@@ -20,6 +20,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   engine does, although PlantUML's migration notes say it may be included
   again; `!include_many` includes it again. An include that is refused says
   why in the preview and in the Problems panel (`PLLOCAL-INC001`).
+- **Included files are followed.** A diagram is drawn again when a file it
+  includes is edited, saved, or changed, created or deleted on disk — at once
+  with the update mode `onChange`, once the file is saved with `onSave` and
+  only on request with `manual`, marked as not updated until then. Its
+  problems are checked again at once. A change made outside VS Code to a file
+  in a folder that `files.watcherExclude` leaves out with a pattern ending in
+  `/**` is not noticed: *Clear Render Cache and Re-render* draws it.
 
 ### Changed
 

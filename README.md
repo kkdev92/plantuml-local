@@ -304,6 +304,16 @@ outside its diagram are refused, and the preview, the Problems panel and the
 export say why. A document open in the editor is read with its unsaved
 changes.
 
+A diagram is drawn again when a file it includes changes — edited, saved, or
+changed, created or deleted on disk — under `plantumlLocal.preview.updateMode`,
+as when its own text changes: at once with `onChange`; once the file is saved
+with `onSave`, until when it is marked as not updated; with `manual`, marked
+until *Clear Render Cache and Re-render*. The Problems panel checks it again
+at once. One exception: a change made outside VS Code to a file in a folder
+that `files.watcherExclude` leaves out with a pattern ending in `/**` (such as
+`**/generated/**`) is not noticed, as VS Code reports no change there; run
+*Clear Render Cache and Re-render* after one.
+
 ### Icons and sprites
 
 Sprites render, including the Azure icon set, which ships inside the extension:

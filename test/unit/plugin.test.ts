@@ -55,7 +55,7 @@ function makeHarness(options?: {
       source,
       dark,
       document
-    ).then((value): DiagramRender => (typeof value === 'string' ? { svg: value, failedIncludes: new Map() } : value));
+    ).then((value): DiagramRender => (typeof value === 'string' ? { svg: value, failedIncludes: new Map(), dependencies: [] } : value));
     pending = pending.then(
       () => result.catch(() => undefined),
       () => undefined
@@ -660,7 +660,7 @@ describe('a diagram with a local include', () => {
   it('says above the drawing why each include failed', async () => {
     const h = makeHarness({
       render: () =>
-        Promise.resolve({ svg: '<svg>cannot include</svg>', failedIncludes: new Map([['common.puml', 'not found']]) }),
+        Promise.resolve({ svg: '<svg>cannot include</svg>', failedIncludes: new Map([['common.puml', 'not found']]), dependencies: [] }),
     });
     h.fence('plantuml', SOURCE, A);
     await h.settle();
@@ -676,5 +676,111 @@ describe('a diagram with a local include', () => {
     await h.settle();
     expect(h.fence('plantuml', PLAIN, B)).toContain(`<svg>${PLAIN}</svg>`);
     expect(h.deps.render).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('a diagram whose included files change', () => {
+  const COMMON = '/ws/docs/common.puml';
+  const SOURCE = '@startuml\n!include common.puml\nAlice -> Bob\n@enduml';
+  const OTHER = '@startuml\n!include other.puml\nCarol -> Dave\n@enduml';
+  const DOC = { currentDocument: 'file:///docs/a.md' };
+  const drawn = (source: string): DiagramRender => ({
+    svg: `<svg>${source}</svg>`,
+    failedIncludes: new Map(),
+    dependencies: source.includes('common') ? [COMMON] : ['/ws/docs/other.puml'],
+  });
+  const draw = (source: string): Promise<DiagramRender> => Promise.resolve(drawn(source));
+
+  it('is drawn again, and only the diagrams that include the changed file are', async () => {
+    const h = makeHarness({ render: draw });
+    h.fence('plantuml', SOURCE, DOC);
+    h.fence('plantuml', OTHER, DOC, [SOURCE]);
+    await h.settle();
+    // The refresh that follows shows both.
+    h.fence('plantuml', SOURCE, DOC);
+    h.fence('plantuml', OTHER, DOC, [SOURCE]);
+    expect(h.deps.render).toHaveBeenCalledTimes(2);
+
+    const before = h.refreshes();
+    h.plugin.filesChanged(new Map([[COMMON, false]]));
+    expect(h.refreshes()).toBe(before + 1);
+    // What was there stays while it is drawn again.
+    expect(h.fence('plantuml', SOURCE, DOC)).toContain(`<svg>${SOURCE}</svg>`);
+    h.fence('plantuml', OTHER, DOC, [SOURCE]);
+    await h.settle();
+    expect(h.deps.render).toHaveBeenCalledTimes(3);
+    expect(h.deps.render).toHaveBeenLastCalledWith(SOURCE, false, 'file:///docs/a.md');
+  });
+
+  it('is left alone, without a refresh, by a change to a file it does not include', async () => {
+    const h = makeHarness({ render: draw });
+    h.fence('plantuml', SOURCE, DOC);
+    await h.settle();
+    const before = h.refreshes();
+    h.plugin.filesChanged(new Map([['/ws/docs/unrelated.puml', true]]));
+    expect(h.refreshes()).toBe(before);
+    h.fence('plantuml', SOURCE, DOC);
+    await h.settle();
+    expect(h.deps.render).toHaveBeenCalledTimes(1);
+  });
+
+  it('with onSave, says it is not updated after an edit, and is drawn again once the file is saved', async () => {
+    const h = makeHarness({ render: draw, updateMode: 'onSave' });
+    h.fence('plantuml', SOURCE, DOC);
+    await h.settle();
+
+    h.plugin.filesChanged(new Map([[COMMON, false]]));
+    expect(h.fence('plantuml', SOURCE, DOC)).toContain('not updated (onSave)');
+    await h.settle();
+    expect(h.deps.render).toHaveBeenCalledTimes(1);
+
+    h.plugin.filesChanged(new Map([[COMMON, true]]));
+    expect(h.fence('plantuml', SOURCE, DOC)).not.toContain('not updated');
+    await h.settle();
+    expect(h.deps.render).toHaveBeenCalledTimes(2);
+    expect(h.fence('plantuml', SOURCE, DOC)).not.toContain('not updated');
+  });
+
+  it('with onSave, is drawn again when its own document is saved', async () => {
+    const h = makeHarness({ render: draw, updateMode: 'onSave' });
+    h.fence('plantuml', SOURCE, DOC);
+    await h.settle();
+    h.plugin.filesChanged(new Map([[COMMON, false]]));
+    h.plugin.accept('file:///docs/a.md', [SOURCE]);
+    h.fence('plantuml', SOURCE, DOC);
+    await h.settle();
+    expect(h.deps.render).toHaveBeenCalledTimes(2);
+  });
+
+  it('with manual, only says it is not updated, until everything is drawn again', async () => {
+    const h = makeHarness({ render: draw, updateMode: 'manual' });
+    h.fence('plantuml', SOURCE, DOC);
+    await h.settle();
+    h.plugin.filesChanged(new Map([[COMMON, true]]));
+    expect(h.fence('plantuml', SOURCE, DOC)).toContain('not updated (manual)');
+    await h.settle();
+    expect(h.deps.render).toHaveBeenCalledTimes(1);
+
+    h.plugin.clearCache();
+    h.fence('plantuml', SOURCE, DOC);
+    await h.settle();
+    expect(h.deps.render).toHaveBeenCalledTimes(2);
+  });
+
+  it('is drawn again when a file it read changed while it was drawing', async () => {
+    let finish: (value: DiagramRender) => void = () => undefined;
+    let calls = 0;
+    const h = makeHarness({
+      render: (source) => (calls++ === 0 ? new Promise<DiagramRender>((resolve) => (finish = resolve)) : draw(source)),
+    });
+    h.fence('plantuml', SOURCE, DOC);
+    await h.started();
+    h.plugin.filesChanged(new Map([[COMMON, false]]));
+    finish(drawn(SOURCE));
+    await h.settle();
+
+    h.fence('plantuml', SOURCE, DOC);
+    await h.settle();
+    expect(h.deps.render).toHaveBeenCalledTimes(2);
   });
 });

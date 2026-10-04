@@ -18,7 +18,7 @@ import { isLastExport, withExport, type ExportRecords } from '../../src/export/o
 import type { DiagramRender } from '../../src/core/types';
 
 /** What the renderer hands the exporter for `svg`: no local include failed. */
-const rendered = (svg: string): DiagramRender => ({ svg, failedIncludes: new Map() });
+const rendered = (svg: string): DiagramRender => ({ svg, failedIncludes: new Map(), dependencies: [] });
 
 /** The start of a PNG of `width`×`height` pixels: its signature and IHDR chunk. */
 function pngOf(width: number, height: number): Uint8Array {
