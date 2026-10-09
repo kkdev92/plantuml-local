@@ -1,7 +1,7 @@
 import { INCLUDE_LIMITS } from '../core/constants';
+import { forEachCodeLine } from '../core/shape';
 import type { IncludedFile, IncludeLoader } from '../core/types';
 import { includesAzure, themeLines } from '../render/palette';
-import { fragmentShape } from './fragment';
 import { parseIncludePath, type PathRefusal } from './path-policy';
 import { readIncludeFile, type ReadRefusal } from './reader';
 import { includeCandidates, isWithin, type IncludeScope, type SearchFoldersProblem } from './resolver';
@@ -47,8 +47,6 @@ export type IncludeFailureReason =
   /** Not found next to the including file, nor in a search folder when `searched`. */
   | { kind: 'missing'; searched: boolean }
   | { kind: 'read'; refusal: Exclude<ReadRefusal, 'too-large'> }
-  /** The file holds a second diagram, or a command outside its diagram, at `line` (from 0). */
-  | { kind: 'fragment'; shape: 'several' | 'outside'; line: number }
   | { kind: 'limit'; limit: keyof typeof INCLUDE_LIMITS };
 
 export interface IncludeFailure {
@@ -62,7 +60,11 @@ export class IncludeSession {
   readonly failures: IncludeFailure[] = [];
   /** Every path looked at: a later change to one of them can change the diagram. */
   readonly dependencies = new Set<string>();
-  /** The `!theme` lines of the files delivered, in order, for the palette (src/render/palette.ts). */
+  /**
+   * What the files delivered set the palette with, in order
+   * (src/render/palette.ts): their `!theme` lines, and the lines of a theme
+   * read from a folder of the workspace.
+   */
   readonly themes: string[] = [];
   /** Whether a file delivered includes the bundled Azure library. */
   azure = false;
@@ -78,7 +80,7 @@ export class IncludeSession {
     private readonly limits: typeof INCLUDE_LIMITS = INCLUDE_LIMITS
   ) {}
 
-  readonly load: IncludeLoader = async (path, from) => {
+  readonly load: IncludeLoader = async (path, from, kind) => {
     const fail = (reason: IncludeFailureReason): never => {
       this.failures.push({ path, reason });
       // The engine writes this to the console; the failure above is what is shown.
@@ -130,19 +132,38 @@ export class IncludeSession {
             : { kind: 'read', refusal: outcome.refusal }
         );
       }
-      const shape = fragmentShape(outcome.text);
-      if (shape.kind !== 'usable') {
-        return fail({ kind: 'fragment', shape: shape.kind, line: shape.line });
-      }
       this.files++;
       this.bytes += Buffer.byteLength(outcome.text, 'utf8');
       this.depths.set(outcome.id, outer + 1);
       this.dependencies.add(outcome.id);
-      this.themes.push(...themeLines(outcome.text));
+      // A theme-shaped filename can also be an ordinary include. Only the
+      // engine knows which operation requested it; selection stays there too.
+      this.themes.push(...(kind === 'theme' ? themeContent(outcome.text) : themeLines(outcome.text)));
       this.azure ||= includesAzure(outcome.text);
       const file: IncludedFile = { id: outcome.id, text: outcome.text };
       return file;
     }
     return fail({ kind: 'missing', searched: !parsed.path.anchored && scope.searchFolders.length > 0 });
   };
+}
+
+/**
+ * The lines a theme read from a folder sets the palette with: its code
+ * lines, trimmed, without the YAML header that the engine skips when the
+ * file's first line is `---`.
+ */
+function themeContent(text: string): string[] {
+  const all = text.split(/\r?\n/);
+  let start = 0;
+  if (all[0] === '---') {
+    const end = all.indexOf('---', 1);
+    start = end === -1 ? all.length : end + 1;
+  }
+  const lines: string[] = [];
+  forEachCodeLine(all.slice(start).join('\n'), (line) => {
+    if (line.trim() !== '') {
+      lines.push(line.trim());
+    }
+  });
+  return lines;
 }

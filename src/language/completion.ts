@@ -14,13 +14,16 @@ import { SUPPORTED_DIAGRAMS } from '../grammar/plantuml';
 
 /**
  * The directives offered after `!`. Left out: `!includeurl`, since URLs
- * are refused, and `!includedef`, `!includesub`, `!import`, `!startsub` and
- * `!endsub`, which the bundled engine does not act on.
+ * are refused, and `!includedef` and `!import`, which the bundled engine
+ * does not act on.
  */
 export const DIRECTIVES: readonly string[] = [
   'include',
   'include_once',
   'include_many',
+  'includesub',
+  'startsub',
+  'endsub',
   'theme',
   'define',
   'definelong',

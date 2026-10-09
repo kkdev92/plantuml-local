@@ -225,8 +225,7 @@ In a diagram — a ` ```plantuml ` block or a `.puml` file — suggestions open 
 
 - `@` at the start of a line: the start line of each diagram type the bundled
   engine draws, or inside a diagram, its end line
-- `!` at the start of a line: the preprocessor directives, without the ones
-  the engine does not act on, such as `!includesub`
+- `!` at the start of a line: the preprocessor directives
 - `!theme `: the themes that ship with the extension
 - `<&`: the names of the OpenIconic icons
 - `!include ` and a `/` in its path: the folders and the files it can include
@@ -258,11 +257,9 @@ it is on:
 - the engine's errors and warnings;
 - an included file that is not read, and why (see
   [Including files](#including-files));
-- what the bundled engine cannot do: a library other than `azure`, a theme
-  from a folder, a URL, emoji;
+- what the bundled engine cannot do: a library other than `azure`, a URL, emoji;
 - what it would drop without a word: a second diagram in a block, the pages
-  after `newpage`, an `!includesub`, a selector after the path of an
-  `!include` (`!1`, `!ID`);
+  after `newpage`;
 - a diagram with no `@enduml` line, which is drawn anyway.
 
 ![Three diagrams with problems: the lines marked in the editor, the engine's messages in the preview, and the list in the Problems panel](images/problems-panel.png)
@@ -296,15 +293,24 @@ take their path from a variable, and a file on a branch the diagram does not
 take is never read. As the engine does, a repeated `!include` of a file is
 skipped (PlantUML's migration notes say otherwise), `!include_many` includes
 it again and `!include_once` reports the second one as an error. A file holding a whole `@startuml` … `@enduml` diagram
-contributes the inside of it.
+contributes the inside of it. With several diagrams in the included file,
+`!include file.puml!1` chooses the second diagram and `!include file.puml!ID`
+chooses an `@startuml(id=ID)` diagram. Without a selector the first diagram
+is used; text outside the selected diagram is ignored. Different selectors
+of the same file are included separately. `!includesub file.puml!PART`
+includes a named `!startsub PART` / `!endsub` section. A selector or sub that
+is not found reports an error.
+
+`!theme name from themes` reads `themes/puml-theme-name.puml` under the same
+file access rules. Includes inside a theme resolve relative to the file
+that requests the theme.
 
 Files are read only in a trusted workspace, and only from the workspace folder
 of the document: text in UTF-8, ending in `.puml`, `.plantuml`, `.pu`, `.iuml`,
 `.wsd`, `.inc` or `.txt`. An absolute path or a URL, a path that leaves the
 workspace folder or passes through a symbolic link or a junction, a `.git`,
-`.hg` or `.svn` folder, and a file holding a second diagram or a command
-outside its diagram are refused, and the preview, the Problems panel and the
-export say why. A document open in the editor is read with its unsaved
+`.hg` or `.svn` folder are refused, and the preview, the Problems panel and
+the export say why. A document open in the editor is read with its unsaved
 changes.
 
 A diagram is drawn again when a file it includes changes — edited, saved, or
@@ -528,9 +534,6 @@ and would show the referenced image as a second copy.
 - A block draws one diagram, on one page: a block holding a second
   `@startuml` … `@enduml`, or a diagram using `newpage`, shows a message
   instead, since the engine would draw only the first diagram or page
-- `!includesub` is ignored without an error, and so is a selector after the
-  path of an `!include` (`!1`, `!ID`): the file is included as if it had none.
-  The Problems panel lists both
 - Functions that read the machine return nothing: `%getenv()`, `%filename()`
   and `%dirpath()` are empty and `%file_exists()` is `0`
 - Hyperlinks (`[[https://…]]`) are drawn as text, not as links

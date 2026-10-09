@@ -540,12 +540,6 @@ function includeLabels(l10n: L10n): IncludeLabels {
     encoding: l10n.t('It is not UTF-8 text.'),
     nul: l10n.t('It holds a NUL character.'),
     unreadable: l10n.t('It could not be read.'),
-    severalDiagrams: (line) =>
-      l10n.t(
-        'It holds more than one diagram, the second at line {0}. Only a file with one diagram can be included.',
-        String(line)
-      ),
-    outsideDiagram: (line) => l10n.t('Line {0} is outside its diagram and would be dropped.', String(line)),
     tooDeep: (most) => l10n.t('Includes nest more than {0} deep.', String(most)),
     tooMany: (most) => l10n.t('More than {0} files are included.', String(most)),
     tooLarge: (mebibytes) => l10n.t('The included files are larger than {0} MiB in all.', String(mebibytes)),
@@ -1995,12 +1989,8 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         ),
         missingEnd: (end) =>
           l10n.t('This diagram has no {0} line; it is drawn as if the block ended with one.', end),
-        includesub: l10n.t('!includesub is not supported: the engine ignores it, so nothing is included.'),
-        selector: l10n.t(
-          'A selector after ! is not supported: the engine ignores it and includes the file as if it had none.'
-        ),
         localFile: l10n.t('the bundled engine reads no files.'),
-        themeFrom: l10n.t('only the bundled themes can be loaded.'),
+        themeFrom: l10n.t('only bundled themes and themes from a folder of the workspace can be loaded.'),
         libraryNotBundled: (library) =>
           l10n.t('The {0} standard library is not bundled; only azure is.', library),
         emojiUnavailable: l10n.t('Emoji (<:name:>) are not supported: the emoji images are not bundled.'),

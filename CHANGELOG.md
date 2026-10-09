@@ -39,9 +39,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a defined name is not followed. After `!include ` the path completes with
   the folders and the files it can lead to, a search folder's names marked
   with the folder. Neither is offered in Restricted Mode.
-- **A selector is reported.** The engine ignores a selector after the path of
-  an `!include` (`!1`, `!ID`) and includes the file as if it had none, so the
-  Problems panel lists one as not supported (`PLLOCAL-CAP001`).
+- **Include selectors, sub sections and local themes.** An `!include` can
+  choose a diagram by index or id, `!includesub` reads a named section, and
+  `!theme name from folder` reads a local theme. Selection and missing-section
+  errors come from the engine. Different selections of the same file are
+  included separately, and local theme colours take part in palette selection.
 
 ### Changed
 

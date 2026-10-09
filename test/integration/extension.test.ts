@@ -542,7 +542,7 @@ describe('export (dist)', () => {
       const document = makeEditor(uri, DOCUMENT, 0).document;
       vscodeStub._test.openDocument(document);
       try {
-        const found = await problemsOf(uri, (items) => items.length >= 6);
+        const found = await problemsOf(uri, (items) => items.length >= (hasFileLoader ? 6 : 5));
         const ERROR = vscodeStub.DiagnosticSeverity.Error;
         const WARNING = vscodeStub.DiagnosticSeverity.Warning;
         expect(found.map((p) => [p.line, p.code, p.severity])).toEqual([
@@ -550,7 +550,9 @@ describe('export (dist)', () => {
           // The host refuses the include, saying why: /c is no folder on disk.
           [12, hasFileLoader ? 'PLLOCAL-INC001' : 'PLLOCAL-CAP001', ERROR],
           [20, 'PLLOCAL-DOC003', ERROR],
-          [27, 'PLLOCAL-CAP001', WARNING],
+          // !includesub reads its file through the loader too, which refuses it;
+          // an engine without the loader skips the line without a word.
+          ...(hasFileLoader ? [[27, 'PLLOCAL-INC001', ERROR]] : []),
           [33, 'PLLOCAL-DOC002', WARNING],
           [38, 'PLLOCAL-WRN001', WARNING],
         ]);
@@ -562,8 +564,13 @@ describe('export (dist)', () => {
             ? "cannot include shared.puml: Only files in the document's workspace folder are read. Open the folder that holds it."
             : 'cannot include shared.puml: the bundled engine reads no files.'
         );
-        expect(found[4]?.message).toContain('@enduml');
-        expect(found[5]?.message).toContain('deprecated');
+        if (hasFileLoader) {
+          expect(found[3]?.message).toBe(
+            "cannot include shared.puml!PART: Only files in the document's workspace folder are read. Open the folder that holds it."
+          );
+        }
+        expect(found[found.length - 2]?.message).toContain('@enduml');
+        expect(found[found.length - 1]?.message).toContain('deprecated');
       } finally {
         vscodeStub._test.closeDocument(document);
       }

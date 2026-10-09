@@ -6,8 +6,7 @@
  * banner drawn above the diagram that names no line, and a few failures as
  * exceptions; the engine stops at the first error, so a block yields at most
  * one. What the engine drops or ignores without a word is found in the
- * source instead (src/core/shape.ts, and `!includesub` and the selector of a
- * local include here).
+ * source instead (src/core/shape.ts).
  *
  * Lines are document lines, counting from 0. A problem the engine places
  * nowhere (a warning, an exception, an error inside an included library, or
@@ -18,10 +17,9 @@
  */
 
 import { EMOJI_UNAVAILABLE, remoteReferenceLine } from '../core/constants';
-import { diagramShape, forEachCodeLine } from '../core/shape';
+import { diagramShape } from '../core/shape';
 import type { PlantUmlBlock } from '../export/blocks';
 import { withIncludeReason } from '../includes/describe';
-import { includePathOf } from '../includes/directives';
 import { recognizeEngineError, recognizeEngineWarnings } from '../render/engine-error';
 
 /**
@@ -63,12 +61,9 @@ export interface ProblemLabels {
   severalDiagrams: string;
   pages: string;
   missingEnd(end: string): string;
-  includesub: string;
-  /** A selector after the path of a local include (`!1`, `!ID`), which the engine ignores. */
-  selector: string;
   /** Follows the engine's "cannot include …" or "Cannot import". */
   localFile: string;
-  /** Follows the engine's "Cannot load theme … in …". */
+  /** Follows the engine's "Cannot load theme … in …" for a theme no file was asked for: from a library or a URL. */
   themeFrom: string;
   libraryNotBundled(library: string): string;
   emojiUnavailable: string;
@@ -121,16 +116,6 @@ export function checkSource(block: PlantUmlBlock, labels: ProblemLabels): Source
   if (shape.addedEnd !== null) {
     problem(startLine, 'warning', PROBLEM_CODES.DOC002, labels.missingEnd(shape.addedEnd));
   }
-  forEachCodeLine(block.source, (line, index) => {
-    if (/^\s*!includesub\b/.test(line)) {
-      problem(at(index), 'warning', PROBLEM_CODES.CAP001, labels.includesub);
-    }
-    // The engine reads the file the path names, whatever selector follows it.
-    const include = includePathOf(line);
-    if (include !== null && line.charAt(include.end) === '!') {
-      problem(at(index), 'warning', PROBLEM_CODES.CAP001, labels.selector);
-    }
-  });
   return { problems, render: shape.source, startLine };
 }
 
@@ -193,12 +178,21 @@ function classify(
 ): { code: string; message: string } {
   if (/^cannot include /.test(message) || message === 'Cannot import') {
     const explained = withIncludeReason(message, failedIncludes);
-    return explained !== message
-      ? { code: PROBLEM_CODES.INC001, message: explained }
-      : { code: PROBLEM_CODES.CAP001, message: `${message}: ${labels.localFile}` };
+    if (explained !== message) {
+      return { code: PROBLEM_CODES.INC001, message: explained };
+    }
+    // Unless the file was refused, a name after its `!` is a diagram or a
+    // sub the file does not have: the engine's own error.
+    if (!/^cannot include [^!]*!/.test(message)) {
+      return { code: PROBLEM_CODES.CAP001, message: `${message}: ${labels.localFile}` };
+    }
   }
   if (/^Cannot load theme \S+ in /.test(message)) {
-    return { code: PROBLEM_CODES.CAP001, message: `${message}: ${labels.themeFrom}` };
+    // A theme from a folder is asked of the loader, which says why it failed.
+    const explained = withIncludeReason(message, failedIncludes);
+    return explained !== message
+      ? { code: PROBLEM_CODES.INC001, message: explained }
+      : { code: PROBLEM_CODES.CAP001, message: `${message}: ${labels.themeFrom}` };
   }
   // The engine's only words for a library that is not bundled.
   const library = /^\s*!include(?:_once|_many)?\s*<([^/>]+)/.exec(line)?.[1];

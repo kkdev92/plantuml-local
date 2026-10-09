@@ -1,11 +1,12 @@
-import type { IncludeRequestMessage, IncludeResponseMessage } from '../core/types';
+import type { IncludeKind, IncludeRequestMessage, IncludeResponseMessage } from '../core/types';
 
 /**
  * Hands the engine the files of local includes, from the extension host.
  *
  * The engine asks `PLANTUML_FILE_LOADER` for the file of each local
- * `!include`, `!include_once` and `!include_many`, and waits for the answer;
- * it reads nothing itself. Which file may be read is not the worker's to
+ * `!include`, `!include_once`, `!include_many`, `!includesub` and
+ * `!theme … from` and waits for the answer; it reads
+ * nothing itself. Which file may be read is not the worker's to
  * decide — the host does that, with the workspace's trust, its folders and
  * the editor's open documents at hand (src/includes/) — so each request
  * goes to the host and the answer comes back.
@@ -18,6 +19,16 @@ import type { IncludeRequestMessage, IncludeResponseMessage } from '../core/type
 
 type Ok = (id: string, text: string) => void;
 type Fail = (reason: string) => void;
+
+function requestKind(value: unknown): IncludeKind | undefined {
+  if (value !== null && typeof value === 'object' && 'kind' in value) {
+    const kind = value.kind;
+    if (kind === 'include' || kind === 'includesub' || kind === 'theme') {
+      return kind;
+    }
+  }
+  return undefined;
+}
 
 export interface FileLoaderBridge {
   /** The requests that follow belong to `render`; `answered` when the host will answer them. */
@@ -37,14 +48,16 @@ export function installFileLoader(post: (message: IncludeRequestMessage) => void
     path: string,
     from: string | null,
     ok: Ok,
-    fail: Fail
+    fail: Fail,
+    details?: unknown
   ): false | undefined => {
     if (current === null || !current.answered) {
       return false;
     }
     const request = nextRequest++;
     waiting.set(request, { ok, fail });
-    post({ type: 'include', render: current.render, request, path, from });
+    const kind = requestKind(details);
+    post({ type: 'include', render: current.render, request, path, from, ...(kind === undefined ? {} : { kind }) });
     return undefined;
   };
 
