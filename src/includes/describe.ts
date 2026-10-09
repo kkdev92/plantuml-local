@@ -9,20 +9,46 @@ import type { IncludeFailure, IncludeFailureReason } from './session';
 /**
  * A line that may ask for a local file: `!include`, `!include_once` or
  * `!include_many` with anything but a library (`<…>`) or a URL, a variable
- * included. A source without one never makes the engine ask, so it is
- * drawn without a loader and shared between documents as before.
+ * included; `!includesub` of a file (`file!PART`, where the sub of the
+ * diagram itself has no `!`); `!theme … from` a folder rather than a
+ * library or a URL. A source without one never makes the engine ask, so it
+ * is drawn without a loader and shared between documents as before.
  */
-const LOCAL_INCLUDE = /^[ \t]*!include(?:_once|_many)?\b(?![ \t]*(?:<|https?:\/\/))/im;
+const LOCAL_FILE_LINES: readonly RegExp[] = [
+  /^[ \t]*!include(?:_once|_many)?\b(?![ \t]*(?:<|https?:\/\/))/i,
+  /^[ \t]*!includesub[ \t]+[^<\s][^!\n]*!/i,
+  /^[ \t]*!theme[ \t]+\S.*?[ \t]from[ \t]+(?!<|https?:\/\/)\S/i,
+];
+
+const asksForLocalFile = (line: string): boolean => LOCAL_FILE_LINES.some((pattern) => pattern.test(line));
 
 /** Whether `source` may include a local file. */
 export function hasLocalInclude(source: string): boolean {
-  return LOCAL_INCLUDE.test(source);
+  return source.split(/\r?\n/).some(asksForLocalFile);
 }
 
 /** The line (from 0) of the first line of `source` that may include a local file, or -1. */
 export function firstLocalIncludeLine(source: string): number {
-  const line = /^[ \t]*!include(?:_once|_many)?\b(?![ \t]*(?:<|https?:\/\/))/i;
-  return source.split(/\r?\n/).findIndex((text) => line.test(text));
+  return source.split(/\r?\n/).findIndex(asksForLocalFile);
+}
+
+/**
+ * The path the engine asked the loader for, when an error message of its
+ * names one: `cannot include x`, where `!includesub` adds its sub
+ * (`x!PART`), or `Cannot load theme NAME in DIR`, for which it asked for
+ * `DIR/puml-theme-NAME.puml`.
+ */
+function askedPaths(message: string): string[] {
+  const include = /^cannot include (.+)$/.exec(message)?.[1];
+  if (include !== undefined) {
+    return [include, include.replace(/!.*$/, '')];
+  }
+  const theme = /^Cannot load theme (\S+) in (.+)$/.exec(message);
+  if (theme !== null) {
+    const folder = theme[2] ?? '';
+    return [`${folder}${folder.endsWith('/') ? '' : '/'}puml-theme-${theme[1] ?? ''}.puml`];
+  }
+  return [];
 }
 
 export interface IncludeLabels {
@@ -48,9 +74,6 @@ export interface IncludeLabels {
   encoding: string;
   nul: string;
   unreadable: string;
-  /** `line` counts from 1. */
-  severalDiagrams(line: number): string;
-  outsideDiagram(line: number): string;
   tooDeep(most: number): string;
   tooMany(most: number): string;
   tooLarge(mebibytes: number): string;
@@ -126,10 +149,6 @@ export function describeIncludeFailure(
           return labels.unreadable;
       }
       break;
-    case 'fragment':
-      return reason.shape === 'several'
-        ? labels.severalDiagrams(reason.line + 1)
-        : labels.outsideDiagram(reason.line + 1);
     case 'limit':
       switch (reason.limit) {
         case 'depth':
@@ -148,8 +167,9 @@ export function describeIncludeFailure(
  * known: "cannot include x" says nothing more.
  */
 export function withIncludeReason(message: string, failedIncludes: ReadonlyMap<string, string>): string {
-  const path = /^cannot include (.+)$/.exec(message)?.[1];
-  const reason = path === undefined ? undefined : failedIncludes.get(path);
+  const reason = askedPaths(message)
+    .map((path) => failedIncludes.get(path))
+    .find((found) => found !== undefined);
   return reason === undefined ? message : `${message}: ${reason}`;
 }
 

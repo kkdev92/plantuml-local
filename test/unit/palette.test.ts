@@ -253,6 +253,22 @@ describe('paletteLines', () => {
     expect(paletteLines('@startuml\n!theme a\n@enduml')).toEqual(['!theme a']);
     expect(paletteLines('@startuml\n!theme a\n@enduml', { themes: [], azure: true })).toEqual(['!theme a']);
   });
+
+  it('puts the lines of a theme read from a folder in place of the line that names it', () => {
+    const source = ['@startuml', '!theme local from themes', '!theme b from <lib/themes>', 'A -> B', '@enduml'].join('\n');
+    expect(paletteLines(source)).toEqual(['!theme local from themes', '!theme b from <lib/themes>']);
+    expect(paletteLines(source, { themes: ['skinparam backgroundColor #FEDCBA'], azure: false })).toEqual([
+      'skinparam backgroundColor #FEDCBA',
+      '!theme b from <lib/themes>',
+    ]);
+  });
+
+  it('does the same for a theme an included file reads from a folder', () => {
+    const included = { themes: ['!theme local from themes', 'skinparam backgroundColor #FEDCBA'], azure: false };
+    expect(paletteLines('@startuml\n!include style.iuml\n@enduml', included)).toEqual([
+      'skinparam backgroundColor #FEDCBA',
+    ]);
+  });
 });
 
 describe('ThemePalettes and what a diagram included', () => {

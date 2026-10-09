@@ -48,8 +48,9 @@ describe('suggest', () => {
     const offered = found?.items.map((item) => item.label);
 
     expect(offered).toContain('!include');
+    expect(offered).toContain('!includesub');
     expect(offered).toContain('!theme');
-    for (const ignored of ['!includeurl', '!includedef', '!includesub', '!import', '!startsub']) {
+    for (const ignored of ['!includeurl', '!includedef', '!import']) {
       expect(offered).not.toContain(ignored);
     }
     // The directive is replaced, the path after it kept.
@@ -182,6 +183,9 @@ describe('DIRECTIVES', () => {
       include: '!include <azure/AzureCommon>',
       include_once: '!include_once <azure/AzureCommon>',
       include_many: '!include_many <azure/AzureCommon>',
+      includesub: '!includesub common.puml!PART',
+      startsub: '!startsub PART',
+      endsub: '!endsub',
       theme: '!theme cerulean',
       define: '!define NAME value',
       definelong: '!definelong NAME(x)',

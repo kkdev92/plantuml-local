@@ -10,7 +10,6 @@ const LABELS: ProblemLabels = {
   severalDiagrams: 'several',
   pages: 'pages',
   missingEnd: (end) => `no ${end}`,
-  includesub: 'includesub',
   localFile: 'no files',
   themeFrom: 'bundled themes only',
   libraryNotBundled: (library) => `${library} not bundled`,
@@ -56,17 +55,19 @@ describe('checkSource', () => {
     expect(pages.problems).toEqual([{ line: 5, severity: 'error', code: PROBLEM_CODES.CAP001, message: 'pages' }]);
   });
 
-  it('warns about what is drawn anyway: a missing end line, and !includesub', () => {
-    const check = checkSource(blockOf('@startuml', '!includesub x.puml!PART', 'Alice -> Bob'), LABELS);
+  it('warns about what is drawn anyway: a missing end line', () => {
+    const check = checkSource(blockOf('@startuml', 'Alice -> Bob'), LABELS);
     expect(check.problems).toEqual([
       { line: 3, severity: 'warning', code: PROBLEM_CODES.DOC002, message: 'no @enduml' },
-      { line: 4, severity: 'warning', code: PROBLEM_CODES.CAP001, message: 'includesub' },
     ]);
-    expect(check.render).toBe('@startuml\n!includesub x.puml!PART\nAlice -> Bob\n@enduml');
+    expect(check.render).toBe('@startuml\nAlice -> Bob\n@enduml');
   });
 
-  it('ignores !includesub in a comment', () => {
-    const check = checkSource(blockOf('@startuml', "' !includesub x.puml!PART", 'Alice -> Bob', '@enduml'), LABELS);
+  it('leaves !includesub and a selector to the engine, which applies them', () => {
+    const check = checkSource(
+      blockOf('@startuml', '!includesub x.puml!PART', '!include parts.puml!1', '!include_once parts.puml!SECOND', '@enduml'),
+      LABELS
+    );
     expect(check.problems).toEqual([]);
   });
 });
@@ -116,6 +117,34 @@ describe('renderProblems', () => {
       severity: 'error',
       code: PROBLEM_CODES.CAP001,
       message: 'Cannot load theme foo in ./themes: bundled themes only',
+    });
+  });
+
+  it('leaves a diagram or a sub the delivered file does not have to the engine’s words', () => {
+    const { block, check } = at('@startuml', '!include parts.puml!THIRD', '!includesub parts.puml!OTHER', '@enduml');
+    for (const [line, message] of [
+      [2, 'cannot include parts.puml!THIRD'],
+      [3, 'cannot include parts.puml!OTHER'],
+    ] as const) {
+      expect(renderProblems(block, check, { svg: errorImage(line, message), failedIncludes: new Map() }, LABELS)[0]).toEqual({
+        line: line + 2,
+        severity: 'error',
+        code: PROBLEM_CODES.SYN001,
+        message,
+      });
+    }
+  });
+
+  it('says why a theme from a folder was not read, when the loader was asked for it', () => {
+    const { block, check } = at('@startuml', '!theme foo from themes', 'Alice -> Bob', '@enduml');
+    const failedIncludes = new Map([['themes/puml-theme-foo.puml', 'missing']]);
+    expect(
+      renderProblems(block, check, { svg: errorImage(2, 'Cannot load theme foo in themes'), failedIncludes }, LABELS)[0]
+    ).toEqual({
+      line: 4,
+      severity: 'error',
+      code: PROBLEM_CODES.INC001,
+      message: 'Cannot load theme foo in themes: missing',
     });
   });
 

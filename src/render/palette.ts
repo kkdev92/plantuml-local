@@ -64,20 +64,28 @@ export function themeLines(source: string): string[] {
     .map((line) => line.trim());
 }
 
+/** A `!theme` read from a folder of the workspace, which only the file loader can give a probe. */
+const THEME_FROM_FOLDER = /^[ \t]*!theme[ \t]+\S.*?[ \t]from[ \t]+(?!<|https?:\/\/)\S/i;
+
 /**
  * The `!theme` lines a diagram applies, those of the files it included
  * taken as written where its first local include is: the engine applies
- * them in the order it meets them, the last over the others.
+ * them in the order it meets them, the last over the others. A theme read
+ * from a folder comes back as its own lines, which stand in for the
+ * `!theme … from` line that names it, in the diagram or in a file it
+ * includes.
  */
 export function paletteLines(source: string, included?: IncludedStyle): string[] {
   if (included === undefined || included.themes.length === 0) {
     return themeLines(source);
   }
+  const fromFolder = (line: string): boolean => THEME_FROM_FOLDER.test(line);
+  const own = (lines: readonly string[]): string[] => themeLines(lines.join('\n')).filter((line) => !fromFolder(line));
   const at = firstLocalIncludeLine(source);
   const lines = source.split(/\r?\n/);
   const before = at < 0 ? lines : lines.slice(0, at);
   const after = at < 0 ? [] : lines.slice(at);
-  return [...themeLines(before.join('\n')), ...included.themes, ...themeLines(after.join('\n'))];
+  return [...own(before), ...included.themes.filter((line) => !fromFolder(line)), ...own(after)];
 }
 
 /**

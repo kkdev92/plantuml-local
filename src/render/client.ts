@@ -209,7 +209,7 @@ export class RendererClient {
       reply({ error: 'Local includes are not answered for this render' });
       return;
     }
-    load(message.path, message.from).then(
+    load(message.path, message.from, message.kind).then(
       (file) => {
         reply({ file });
       },
