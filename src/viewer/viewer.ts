@@ -16,7 +16,9 @@
 
 import { DIAGRAM_BACKDROP, EMOJI_UNAVAILABLE, hasRemoteReference } from '../core/constants';
 import { diagramShape } from '../core/shape';
+import type { DiagramRender } from '../core/types';
 import { blockAtLine, findFileDiagrams, type PlantUmlBlock } from '../export/blocks';
+import { withIncludeReason } from '../includes/describe';
 import { recognizeEngineError } from '../render/engine-error';
 
 /** What the viewer needs of its panel. */
@@ -44,7 +46,8 @@ export interface ViewerLabels {
 }
 
 export interface ViewerDeps {
-  render(source: string, dark: boolean): Promise<string>;
+  /** Renders a diagram of the file at `document`, a URI, next to which its local includes are looked for. */
+  render(source: string, dark: boolean, document: string): Promise<DiagramRender>;
   resolvePalette(source: string, dark: boolean): Promise<boolean>;
   isDark(): boolean;
   /**
@@ -219,7 +222,7 @@ export class DiagramViewer {
     await this.status(labels.rendering, false, false);
     try {
       const dark = await this.deps.resolvePalette(shape.source, this.deps.isDark());
-      const svg = await this.deps.render(shape.source, dark);
+      const { svg, failedIncludes } = await this.deps.render(shape.source, dark, this.uri);
       if (generation !== this.generation) {
         return;
       }
@@ -238,7 +241,7 @@ export class DiagramViewer {
         await this.status(this.note, false, false);
       } else {
         const line = failure.line === null ? null : diagram.sourceLine + failure.line;
-        await this.status(labels.engineError(failure.message, line), true, false);
+        await this.status(labels.engineError(withIncludeReason(failure.message, failedIncludes), line), true, false);
       }
     } catch (error: unknown) {
       if (generation !== this.generation) {

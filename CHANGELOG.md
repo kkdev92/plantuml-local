@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Local `!include`.** `!include`, `!include_once` and `!include_many` read
+  files of the workspace, in the Markdown preview, the `.puml` preview, the
+  Problems panel and the export alike. A path is looked for next to the file
+  it is written in, and a bare name then in the folders of the new setting
+  `plantumlLocal.includePaths`. Only UTF-8 files ending in `.puml`,
+  `.plantuml`, `.pu`, `.iuml`, `.wsd`, `.inc` or `.txt` are read, from the
+  document's workspace folder, through no symbolic link or junction, in a
+  trusted workspace. A repeated `!include` of a file is skipped, as the
+  engine does, although PlantUML's migration notes say it may be included
+  again; `!include_many` includes it again. An include that is refused says
+  why in the preview and in the Problems panel (`PLLOCAL-INC001`).
+
+### Changed
+
+- Untrusted and virtual workspaces are supported in part: there, no file is
+  read for an `!include`, and `plantumlLocal.includePaths` is not used in
+  Restricted Mode.
+
 ## [0.12.1] - 2026-10-04
 
 ### Changed

@@ -2,7 +2,14 @@ import { join } from 'node:path';
 import { Worker } from 'node:worker_threads';
 
 import { RENDER_TIMEOUT_MS, WORKER_IDLE_TIMEOUT_MS } from '../core/constants';
-import type { RenderLog, RenderRequestMessage, RenderResponseMessage } from '../core/types';
+import type {
+  IncludeLoader,
+  IncludeRequestMessage,
+  IncludeResponseMessage,
+  RenderLog,
+  RenderRequestMessage,
+  RenderResponseMessage,
+} from '../core/types';
 
 /**
  * Extension-host side of the render worker.
@@ -17,6 +24,10 @@ import type { RenderLog, RenderRequestMessage, RenderResponseMessage } from '../
  * {@link WORKER_IDLE_TIMEOUT_MS}, which returns the engine and any
  * sprite libraries it loaded to the OS; the next render starts a fresh
  * one.
+ *
+ * A render given an {@link IncludeLoader} has its local includes answered
+ * by it: the worker passes each file the engine asks for here, and the
+ * answer goes back to the worker that asked.
  */
 export class RendererClient {
   private worker: Worker | null = null;
@@ -29,6 +40,7 @@ export class RendererClient {
       reject: (error: Error) => void;
       request: RenderRequestMessage;
       timer: NodeJS.Timeout;
+      load: IncludeLoader | undefined;
     }
   >();
 
@@ -39,11 +51,12 @@ export class RendererClient {
     private readonly idleTimeoutMs: number = WORKER_IDLE_TIMEOUT_MS
   ) {}
 
-  render(source: string, dark: boolean): Promise<string> {
+  /** Renders `source`; `load` answers its local includes, which fail without one. */
+  render(source: string, dark: boolean, load?: IncludeLoader): Promise<string> {
     return new Promise<string>((resolve, reject) => {
       const id = this.nextId++;
-      const request: RenderRequestMessage = { id, source, dark };
-      this.pending.set(id, { resolve, reject, request, timer: this.startTimer(id) });
+      const request: RenderRequestMessage = { id, source, dark, includes: load !== undefined };
+      this.pending.set(id, { resolve, reject, request, timer: this.startTimer(id), load });
       this.stopIdleTimer();
       this.getWorker().postMessage(request);
     });
@@ -139,7 +152,11 @@ export class RendererClient {
     this.log.debug('Starting render worker');
     const created = new Worker(this.workerPath);
 
-    created.on('message', (message: RenderResponseMessage) => {
+    created.on('message', (message: RenderResponseMessage | IncludeRequestMessage) => {
+      if ('type' in message) {
+        this.answerInclude(created, message);
+        return;
+      }
       const entry = this.settle(message.id);
       if (entry === undefined) {
         return;
@@ -172,6 +189,34 @@ export class RendererClient {
 
     this.worker = created;
     return created;
+  }
+
+  /**
+   * Answers a file the engine asks for in `worker`, through the loader of
+   * the render it belongs to. A render that has ended, by a timeout or a
+   * replaced worker, gets an error; the worker that asked may be gone by
+   * the time the answer is ready, and then nobody is waiting for it.
+   */
+  private answerInclude(worker: Worker, message: IncludeRequestMessage): void {
+    const reply = (answer: Omit<IncludeResponseMessage, 'type' | 'request'>): void => {
+      if (this.worker === worker) {
+        const response: IncludeResponseMessage = { type: 'include', request: message.request, ...answer };
+        worker.postMessage(response);
+      }
+    };
+    const load = this.pending.get(message.render)?.load;
+    if (load === undefined) {
+      reply({ error: 'Local includes are not answered for this render' });
+      return;
+    }
+    load(message.path, message.from).then(
+      (file) => {
+        reply({ file });
+      },
+      (error: unknown) => {
+        reply({ error: error instanceof Error ? error.message : String(error) });
+      }
+    );
   }
 }
 

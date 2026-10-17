@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import Module from 'node:module';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
@@ -24,6 +24,13 @@ import {
 
 const extensionPath = join(__dirname, '../../dist/extension.js');
 const require = createRequire(import.meta.url);
+
+/**
+ * Whether the bundled engine asks the host for the files of local includes.
+ * @plantuml/core 1.2026.8 does not: its includes fail before anyone is asked.
+ */
+const enginePath = join(__dirname, '../../dist/engine/plantuml.js');
+const hasFileLoader = existsSync(enginePath) && readFileSync(enginePath, 'utf8').includes('PLANTUML_FILE_LOADER');
 
 /**
  * `activate` is asynchronous: the framework builds what it resolves to last,
@@ -539,7 +546,8 @@ describe('export (dist)', () => {
         const WARNING = vscodeStub.DiagnosticSeverity.Warning;
         expect(found.map((p) => [p.line, p.code, p.severity])).toEqual([
           [5, 'PLLOCAL-SYN001', ERROR],
-          [12, 'PLLOCAL-CAP001', ERROR],
+          // The host refuses the include, saying why: /c is no folder on disk.
+          [12, hasFileLoader ? 'PLLOCAL-INC001' : 'PLLOCAL-CAP001', ERROR],
           [20, 'PLLOCAL-DOC003', ERROR],
           [27, 'PLLOCAL-CAP001', WARNING],
           [33, 'PLLOCAL-DOC002', WARNING],
@@ -548,7 +556,11 @@ describe('export (dist)', () => {
         expect(found[0]?.message).toContain('Syntax Error?');
         // In the quote, past the marker; and an explanation, not the engine's bare words.
         expect(found[1]?.character).toBe(2);
-        expect(found[1]?.message).toBe('cannot include shared.puml: the bundled engine reads no files.');
+        expect(found[1]?.message).toBe(
+          hasFileLoader
+            ? "cannot include shared.puml: Only files in the document's workspace folder are read. Open the folder that holds it."
+            : 'cannot include shared.puml: the bundled engine reads no files.'
+        );
         expect(found[4]?.message).toContain('@enduml');
         expect(found[5]?.message).toContain('deprecated');
       } finally {

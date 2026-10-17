@@ -19,6 +19,7 @@
 import { EMOJI_UNAVAILABLE, remoteReferenceLine } from '../core/constants';
 import { diagramShape, forEachCodeLine } from '../core/shape';
 import type { PlantUmlBlock } from '../export/blocks';
+import { withIncludeReason } from '../includes/describe';
 import { recognizeEngineError, recognizeEngineWarnings } from '../render/engine-error';
 
 /**
@@ -34,6 +35,8 @@ export const PROBLEM_CODES = {
   SYN001: 'PLLOCAL-SYN001',
   /** Something this extension does not support, including what the engine drops silently. */
   CAP001: 'PLLOCAL-CAP001',
+  /** A local include that failed, with why. */
+  INC001: 'PLLOCAL-INC001',
   /** A diagram larger than the engine draws. */
   LIM001: 'PLLOCAL-LIM001',
   /** A render that took too long. */
@@ -77,8 +80,11 @@ export interface SourceCheck {
   startLine: number;
 }
 
-/** What rendering produced: the engine's SVG, or the error it threw. */
-export type RenderOutcome = { svg: string } | { error: string };
+/**
+ * What rendering produced: the engine's SVG, with why each failed local
+ * include failed, or the error it threw.
+ */
+export type RenderOutcome = { svg: string; failedIncludes?: ReadonlyMap<string, string> } | { error: string };
 
 export function checkSource(block: PlantUmlBlock, labels: ProblemLabels): SourceCheck {
   const at = (index: number): number => block.sourceLine + index;
@@ -165,14 +171,22 @@ export function renderProblems(
   const located = failure.line !== null && failure.line <= lines.length ? failure.line : null;
   const line = located === null ? check.startLine : block.sourceLine + located - 1;
   const text = located === null ? '' : (lines[located - 1] ?? '');
-  const { code, message } = classify(failure.message, text, labels);
+  const { code, message } = classify(failure.message, text, labels, outcome.failedIncludes);
   return [{ line, severity: 'error', code, message }];
 }
 
 /** Tells an unsupported feature from a syntax error, by the engine's message. */
-function classify(message: string, line: string, labels: ProblemLabels): { code: string; message: string } {
+function classify(
+  message: string,
+  line: string,
+  labels: ProblemLabels,
+  failedIncludes: ReadonlyMap<string, string> = new Map()
+): { code: string; message: string } {
   if (/^cannot include /.test(message) || message === 'Cannot import') {
-    return { code: PROBLEM_CODES.CAP001, message: `${message}: ${labels.localFile}` };
+    const explained = withIncludeReason(message, failedIncludes);
+    return explained !== message
+      ? { code: PROBLEM_CODES.INC001, message: explained }
+      : { code: PROBLEM_CODES.CAP001, message: `${message}: ${labels.localFile}` };
   }
   if (/^Cannot load theme \S+ in /.test(message)) {
     return { code: PROBLEM_CODES.CAP001, message: `${message}: ${labels.themeFrom}` };

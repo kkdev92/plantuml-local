@@ -10,7 +10,8 @@ import {
   isDiagramFence,
 } from '../core/constants';
 import { diagramShape } from '../core/shape';
-import type { RenderLog } from '../core/types';
+import type { DiagramRender, RenderLog } from '../core/types';
+import { hasLocalInclude } from '../includes/describe';
 
 /**
  * The markdown-it side of the extension.
@@ -58,6 +59,8 @@ export interface PluginLabels {
   missingEnd(end: string): string;
   /** Note above a diagram not drawn again since its block changed. */
   notUpdated(mode: Exclude<UpdateMode, 'onChange'>): string;
+  /** Note above a diagram whose local include of `path` failed, and why. */
+  includeFailed(path: string, reason: string): string;
 }
 
 /**
@@ -69,8 +72,11 @@ export type UpdateMode = 'onChange' | 'onSave' | 'manual';
 export interface PluginDeps {
   /** Whether diagrams should currently render in dark colours. */
   isDark(): boolean;
-  /** Renders PlantUML source to sanitised SVG (the worker round-trip). */
-  render(source: string, dark: boolean): Promise<string>;
+  /**
+   * Renders PlantUML source to sanitised SVG (the worker round-trip); its
+   * local includes are looked for next to `document`, a URI.
+   */
+  render(source: string, dark: boolean, document: string | undefined): Promise<DiagramRender>;
   /**
    * The palette to draw `source` in when `dark` is asked for: the other one
    * for a diagram whose `!theme` cannot be read in it (src/render/palette.ts).
@@ -222,8 +228,13 @@ export function createPlantUmlPlugin(deps: PluginDeps): PlantUmlPlugin {
   /** Document → the sources of its blocks when last accepted, as on a save. */
   const accepted = new Map<string, ReadonlySet<string>>();
 
-  function cacheKey(source: string, dark: boolean): string {
-    return `${dark ? 'dark' : 'light'}\n${source}`;
+  /**
+   * A diagram with a local include draws the files next to its document,
+   * so the same source in another document is another diagram.
+   */
+  function cacheKey(source: string, dark: boolean, document: string | undefined): string {
+    const where = hasLocalInclude(source) ? `${document ?? ''}\n` : '';
+    return `${dark ? 'dark' : 'light'}\n${where}${source}`;
   }
 
   function isPlantUmlFence(token: { type?: string; info: string } | undefined): boolean {
@@ -256,7 +267,7 @@ export function createPlantUmlPlugin(deps: PluginDeps): PlantUmlPlugin {
     return `${document}\n${String(ordinal)}`;
   }
 
-  function startRender(source: string, dark: boolean, key: string): void {
+  function startRender(source: string, dark: boolean, key: string, document: string | undefined): void {
     if (inFlight.has(key)) {
       return;
     }
@@ -264,12 +275,12 @@ export function createPlantUmlPlugin(deps: PluginDeps): PlantUmlPlugin {
 
     deps
       .resolvePalette(source, dark)
-      .then(async (palette) => ({ svg: await deps.render(source, palette), palette }))
+      .then(async (palette) => ({ result: await deps.render(source, palette, document), palette }))
       .then(
-        ({ svg, palette }) => {
-          rendered.set(key, diagramHtml(svg, palette));
+        ({ result, palette }) => {
+          rendered.set(key, includeNotes(result.failedIncludes) + diagramHtml(result.svg, palette));
           failed.delete(key);
-          deps.log.debug(`Rendered diagram (${String(svg.length)} bytes)`);
+          deps.log.debug(`Rendered diagram (${String(result.svg.length)} bytes)`);
         },
         (error: unknown) => {
           const message = error instanceof Error ? error.message : String(error);
@@ -292,6 +303,16 @@ export function createPlantUmlPlugin(deps: PluginDeps): PlantUmlPlugin {
    */
   function diagramHtml(svg: string, dark: boolean): string {
     return `<div class="plantuml-diagram plantuml-diagram--${dark ? 'dark' : 'light'}">${svg}</div>`;
+  }
+
+  /** Why each failed include failed, above the engine's "cannot include" drawing. */
+  function includeNotes(failedIncludes: ReadonlyMap<string, string>): string {
+    return [...failedIncludes]
+      .map(
+        ([path, reason]) =>
+          `<div class="plantuml-notice">${deps.escapeHtml(deps.labels.includeFailed(path, reason))}</div>`
+      )
+      .join('');
   }
 
   function errorBlock(message: string, source?: string): string {
@@ -375,9 +396,9 @@ export function createPlantUmlPlugin(deps: PluginDeps): PlantUmlPlugin {
             : `<div class="plantuml-notice">${deps.escapeHtml(deps.labels.missingEnd(shape.addedEnd))}</div>`;
 
         const dark = deps.isDark();
-        const key = cacheKey(shape.source, dark);
-
         const document = documentOf(env);
+        const key = cacheKey(shape.source, dark, document);
+
         const position = document === undefined ? undefined : positionKey(tokens, index, document);
         if (document !== undefined) {
           showing(document, env, key);
@@ -409,7 +430,7 @@ export function createPlantUmlPlugin(deps: PluginDeps): PlantUmlPlugin {
           );
         }
 
-        startRender(shape.source, dark, key);
+        startRender(shape.source, dark, key, document);
         return (
           notice +
           (previous ??

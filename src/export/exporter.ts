@@ -1,5 +1,7 @@
 import { DIAGRAM_BACKDROP, EMOJI_UNAVAILABLE, hasRemoteReference } from '../core/constants';
 import { diagramShape } from '../core/shape';
+import type { DiagramRender } from '../core/types';
+import { withIncludeReason } from '../includes/describe';
 import { recognizeEngineError } from '../render/engine-error';
 import { isValidBlockName, type PlantUmlBlock } from './blocks';
 
@@ -19,8 +21,11 @@ import { isValidBlockName, type PlantUmlBlock } from './blocks';
  */
 
 export interface ExporterDeps {
-  /** Renders PlantUML source to sanitised SVG (the worker round-trip). */
-  render(source: string, dark: boolean): Promise<string>;
+  /**
+   * Renders PlantUML source to sanitised SVG (the worker round-trip), its
+   * local includes looked for next to the document being exported.
+   */
+  render(source: string, dark: boolean): Promise<DiagramRender>;
   /** Whether diagrams should currently render in dark colours. */
   isDark(): boolean;
   /**
@@ -262,7 +267,7 @@ async function drawBlock(
 
   try {
     const dark = await deps.resolvePalette(shape.source, deps.isDark());
-    const rendered = await deps.render(shape.source, dark);
+    const { svg: rendered, failedIncludes } = await deps.render(shape.source, dark);
 
     // The engine reports a syntax error, a failed include or an empty
     // diagram by drawing it, through the same success path as a diagram.
@@ -273,11 +278,12 @@ async function drawBlock(
       // sourceLine counts from 0 and the engine's line from 1, so the sum
       // is the document line counting from 1, as an editor shows it.
       const line = failure.line === null ? null : block.sourceLine + failure.line;
+      const message = withIncludeReason(failure.message, failedIncludes);
       return {
         name,
         path: null,
-        error: deps.engineErrorMessage(failure.message, line),
-        engineError: { message: failure.message, line },
+        error: deps.engineErrorMessage(message, line),
+        engineError: { message, line },
       };
     }
 

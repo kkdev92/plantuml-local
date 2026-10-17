@@ -90,6 +90,19 @@ describe('renderProblems', () => {
     ]);
   });
 
+  it('names why a local include failed, when the host knows', () => {
+    const { block, check } = at('@startuml', '!include shared.puml', 'Alice -> Bob', '@enduml');
+    const failedIncludes = new Map([['shared.puml', 'not found next to the including file']]);
+    expect(renderProblems(block, check, { svg: engineOutput('include-failure'), failedIncludes }, LABELS)).toEqual([
+      {
+        line: 4,
+        severity: 'error',
+        code: PROBLEM_CODES.INC001,
+        message: 'cannot include shared.puml: not found next to the including file',
+      },
+    ]);
+  });
+
   it('explains an include, an import or a theme the engine cannot read', () => {
     const { block, check } = at('@startuml', '!include shared.puml', 'Alice -> Bob', '@enduml');
     expect(renderProblems(block, check, { svg: engineOutput('include-failure') }, LABELS)).toEqual([

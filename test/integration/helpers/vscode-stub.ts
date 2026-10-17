@@ -373,6 +373,8 @@ export interface VscodeStub {
       scope?: unknown
     ) => {
       get: <T>(key: string, fallback?: T) => T | undefined;
+      /** The folder's value as the folder tier, the rest as the user's. */
+      inspect: <T>(key: string) => { key: string; globalValue?: T; workspaceFolderValue?: T } | undefined;
       update: () => Promise<void>;
     };
     onDidChangeConfiguration: (listener: (e: unknown) => void) => { dispose(): void };
@@ -382,6 +384,8 @@ export interface VscodeStub {
     ) => { dispose(): void };
     onDidCloseTextDocument: (listener: (document: TextEditorStub['document']) => void) => { dispose(): void };
     onDidSaveTextDocument: (listener: (document: TextEditorStub['document']) => void) => { dispose(): void };
+    /** Never fires: the workspace starts trusted. */
+    onDidGrantWorkspaceTrust: (listener: () => void) => { dispose(): void };
     /** Both read by the framework's runtime preflight, at activation. */
     isTrusted: boolean;
     workspaceFolders: unknown[] | undefined;
@@ -1034,6 +1038,17 @@ export function createVscodeStub(): VscodeStub {
           }
           return configuration.has(key) ? (configuration.get(key) as T) : fallback;
         },
+        inspect: <T>(key: string) => {
+          const resource = scope === undefined ? undefined : String(scope);
+          let workspaceFolderValue: T | undefined;
+          for (const [folder, values] of folderConfiguration) {
+            if (resource?.startsWith(`${folder}/`) === true && values.has(key)) {
+              workspaceFolderValue = values.get(key) as T;
+            }
+          }
+          const globalValue = configuration.has(key) ? (configuration.get(key) as T) : undefined;
+          return { key, globalValue, workspaceFolderValue };
+        },
         update: async () => undefined,
       }),
       onDidChangeConfiguration: (listener) => {
@@ -1045,6 +1060,7 @@ export function createVscodeStub(): VscodeStub {
         track('workspace.onDidChangeTextDocument', subscribe(changeListeners, listener)),
       onDidCloseTextDocument: (listener) => track('workspace.onDidCloseTextDocument', subscribe(closeListeners, listener)),
       onDidSaveTextDocument: (listener) => track('workspace.onDidSaveTextDocument', subscribe(saveListeners, listener)),
+      onDidGrantWorkspaceTrust: () => track('workspace.onDidGrantWorkspaceTrust'),
       isTrusted: true,
       workspaceFolders: undefined,
       get textDocuments() {
