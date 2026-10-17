@@ -88,6 +88,8 @@ import {
 } from './diagnostics/problems';
 import type { IncludeLabels } from './includes/describe';
 import { drawInDocuments, type DrawDiagram } from './includes/host';
+import { changeTo } from './includes/tracking';
+import { IncludeWatcher } from './includes/watch';
 import { createPlantUmlPlugin, type PlantUmlPlugin, type UpdateMode } from './preview/plugin';
 import { RendererClient, defaultWorkerPath } from './render/client';
 import { shareRenders, type SharedRender } from './render/memo';
@@ -239,6 +241,12 @@ const Palettes: ServiceToken<ThemePalettes> = serviceToken<ThemePalettes>('plant
 const Renders: ServiceToken<SharedRender> = serviceToken<SharedRender>('plantuml.renders');
 
 /**
+ * Watches the files that diagrams with local includes depend on. An object
+ * with `dispose`, so the container stops the watchers.
+ */
+const IncludeWatch: ServiceToken<IncludeWatcher> = serviceToken<IncludeWatcher>('plantuml.includeWatch');
+
+/**
  * Coalesces a burst of finished renders into one preview refresh.
  *
  * A function rather than an object, so the container cannot dispose it — the
@@ -268,6 +276,12 @@ interface ViewerSet {
   stale(document: vscode.TextDocument, note: string): void;
   /** Draws every viewer again, after the palette changed. */
   updateAll(): void;
+  /**
+   * Files changed (path key → saved or changed on disk): a viewer whose diagram
+   * includes one of them is drawn again under its file's update mode, or marked
+   * as not updated.
+   */
+  filesChanged(changes: ReadonlyMap<string, boolean>): void;
 }
 const Viewers: ServiceToken<ViewerSet> = serviceToken<ViewerSet>('plantuml.viewers');
 
@@ -537,11 +551,21 @@ function includeLabels(l10n: L10n): IncludeLabels {
   };
 }
 
-/** Draws diagrams with their local includes, the setting and the words for failures read through `settings` and `l10n`. */
-function drawWith(renderer: RendererClient, settings: SettingsReader, l10n: L10n): DrawDiagram {
+/**
+ * Draws diagrams with their local includes, the setting and the words for
+ * failures read through `settings` and `l10n`; `watch`, when given, follows
+ * the files they include.
+ */
+function drawWith(renderer: RendererClient, settings: SettingsReader, l10n: L10n, watch?: IncludeWatcher): DrawDiagram {
   return drawInDocuments(renderer, {
     includePaths: (document) => includePathsOf(settings, document),
     labels: includeLabels(l10n),
+    remember:
+      watch === undefined
+        ? undefined
+        : (key, paths): void => {
+            watch.remember(key, paths);
+          },
   });
 }
 
@@ -1162,9 +1186,11 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
     create: ({ renderer }) => new ThemePalettes((source, dark) => renderer.render(source, dark)),
   });
 
+  module.services.singleton(IncludeWatch, () => new IncludeWatcher());
+
   module.services.singleton(Renders, {
-    inject: { renderer: Renderer, settings: Settings.token, l10n: Localization },
-    create: ({ renderer, settings, l10n }) => shareRenders(drawWith(renderer, settings, l10n)),
+    inject: { renderer: Renderer, settings: Settings.token, l10n: Localization, watch: IncludeWatch },
+    create: ({ renderer, settings, l10n, watch }) => shareRenders(drawWith(renderer, settings, l10n, watch)),
   });
 
   module.services.singleton(RequestRefresh, {
@@ -1365,6 +1391,20 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
             void entry.viewer.update(entry.document.getText());
           }
         },
+        filesChanged: (changes): void => {
+          for (const entry of open.values()) {
+            const change = entry.viewer.dependsOn(changes);
+            if (change === 'none') {
+              continue;
+            }
+            const mode = updateModeOf(settings, entry.document.uri);
+            if (mode === 'onChange' || (mode === 'onSave' && change === 'saved')) {
+              void entry.viewer.update(entry.document.getText());
+            } else {
+              void entry.viewer.stale(notUpdatedNote(l10n, mode));
+            }
+          }
+        },
       };
     },
   });
@@ -1382,10 +1422,11 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
 
   module.raw.register({
     id: 'plantuml.includeAccess',
-    inject: { plugin: Plugin, renders: Renders, viewers: Viewers },
-    bind: ({ registrations }, { plugin, renders, viewers }): undefined => {
+    inject: { plugin: Plugin, renders: Renders, viewers: Viewers, watch: IncludeWatch },
+    bind: ({ registrations }, { plugin, renders, viewers, watch }): undefined => {
       // A diagram with a local include reads other files, or some at last,
-      // once the search folders change or the workspace is trusted.
+      // once the search folders or the workspace folders change, or the
+      // workspace is trusted.
       const redraw = (): void => {
         renders.clear();
         plugin.clearCache();
@@ -1399,6 +1440,14 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         })
       );
       registrations.own(vscode.workspace.onDidGrantWorkspaceTrust(redraw));
+      registrations.own(vscode.workspace.onDidChangeWorkspaceFolders(redraw));
+      // And it is drawn again when a file it includes changes.
+      registrations.own(
+        watch.onDidChange((changes) => {
+          plugin.filesChanged(changes);
+          viewers.filesChanged(changes);
+        })
+      );
       return undefined;
     },
   });
@@ -1919,8 +1968,14 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
 
   module.raw.register({
     id: 'plantuml.diagnostics',
-    inject: { renders: Renders, palettes: Palettes, settings: Settings.token, l10n: Localization },
-    bind: ({ registrations, logger }, { renders, palettes, settings, l10n }): undefined => {
+    inject: {
+      renders: Renders,
+      palettes: Palettes,
+      settings: Settings.token,
+      l10n: Localization,
+      watch: IncludeWatch,
+    },
+    bind: ({ registrations, logger }, { renders, palettes, settings, l10n, watch }): undefined => {
       // Puts the problems of the diagrams in open Markdown documents in the
       // Problems panel, whether or not a preview is open. Renders are shared
       // with the preview, so a document shown in both is drawn once.
@@ -1951,13 +2006,19 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
       const enabled = (document: vscode.TextDocument): boolean =>
         settings.read({ resource: document.uri }).values[CONFIG.DIAGNOSTICS_ENABLED] !== false;
 
-      const outcomeOf = async (source: string, document: vscode.Uri): Promise<RenderOutcome> => {
+      /** Document → what the local includes of its diagrams looked at, when last checked. */
+      const dependencies = new Map<string, readonly string[]>();
+
+      const outcomeOf = async (
+        source: string,
+        document: vscode.Uri
+      ): Promise<{ outcome: RenderOutcome; read: readonly string[] }> => {
         try {
           const dark = await palettes.resolve(source, isDark(settings.read().values[CONFIG.THEME]));
-          const { svg, failedIncludes } = await renders(source, dark, document.toString());
-          return { svg, failedIncludes };
+          const { svg, failedIncludes, dependencies: read } = await renders(source, dark, document.toString());
+          return { outcome: { svg, failedIncludes }, read };
         } catch (error: unknown) {
-          return { error: error instanceof Error ? error.message : String(error) };
+          return { outcome: { error: error instanceof Error ? error.message : String(error) }, read: [] };
         }
       };
 
@@ -1966,20 +2027,27 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         const text = document.getText();
         const lines = text.split(/\r\n|\r|\n/);
         const found: vscode.Diagnostic[] = [];
+        const reads: string[] = [];
         for (const block of findPlantUmlBlocks(text)) {
           const check = checkSource(block, labels);
           const problems = [...check.problems];
           if (check.render !== null) {
-            const outcome = await outcomeOf(check.render, document.uri);
+            const { outcome, read } = await outcomeOf(check.render, document.uri);
             if (generations.get(key) !== generation) {
               return;
             }
+            reads.push(...read);
             problems.push(...renderProblems(block, check, outcome, labels));
           }
           found.push(...problems.map((problem) => toDiagnostic(problem, lines, block.container)));
         }
         if (generations.get(key) === generation) {
           collection.set(document.uri, found);
+          if (reads.length > 0) {
+            dependencies.set(key, reads);
+          } else {
+            dependencies.delete(key);
+          }
         }
       };
 
@@ -2013,11 +2081,26 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         timers.delete(key);
         generations.delete(key);
         collection.delete(document.uri);
+        dependencies.delete(key);
       };
 
       registrations.own(
         vscode.workspace.onDidOpenTextDocument((document) => {
           schedule(document, 0);
+        })
+      );
+      // A document whose diagrams include a file that changed is checked again.
+      registrations.own(
+        watch.onDidChange((changes) => {
+          for (const [key, read] of dependencies) {
+            if (changeTo(read, changes) === 'none') {
+              continue;
+            }
+            const document = vscode.workspace.textDocuments.find((open) => open.uri.toString() === key);
+            if (document !== undefined) {
+              schedule(document, 0);
+            }
+          }
         })
       );
       registrations.own(
@@ -2048,8 +2131,9 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
           }
         })
       );
-      // Local includes are read from now on.
+      // Local includes are read from now on, or from other folders.
       registrations.own(vscode.workspace.onDidGrantWorkspaceTrust(checkAll));
+      registrations.own(vscode.workspace.onDidChangeWorkspaceFolders(checkAll));
       checkAll();
 
       registrations.defer(() => {

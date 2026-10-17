@@ -26,7 +26,7 @@ function makeDeps(
   const inner = overrides?.render ?? ((source: string) => Promise.resolve(`<svg>${source}</svg>`));
   const render = vi.fn((source: string, dark: boolean, document: string) =>
     inner(source, dark, document).then((value): DiagramRender =>
-      typeof value === 'string' ? { svg: value, failedIncludes: new Map() } : value
+      typeof value === 'string' ? { svg: value, failedIncludes: new Map(), dependencies: [] } : value
     )
   );
   return {
@@ -346,5 +346,23 @@ describe('viewerBody', () => {
     expect(body).not.toContain('<i>');
     expect(body).toContain('aria-label="&quot;&gt;&lt;script&gt;"');
     expect(body).toContain('aria-label="a&amp;b"');
+  });
+});
+
+describe('DiagramViewer and the files its diagram includes', () => {
+  it('tells whether changed files are ones the diagram shown includes', async () => {
+    const panel = makePanel();
+    const deps = makeDeps({
+      render: () =>
+        Promise.resolve({ svg: '<svg/>', failedIncludes: new Map(), dependencies: ['/ws/docs/common.puml'] }),
+    });
+    const viewer = new DiagramViewer(panel, deps, 'one', 'file:///one.puml');
+    // Nothing drawn yet: nothing to depend on.
+    expect(viewer.dependsOn(new Map([['/ws/docs/common.puml', true]]))).toBe('none');
+
+    await viewer.show('@startuml\n!include common.puml\n@enduml', 0);
+    expect(viewer.dependsOn(new Map([['/ws/docs/common.puml', false]]))).toBe('edited');
+    expect(viewer.dependsOn(new Map([['/ws/docs/common.puml', true]]))).toBe('saved');
+    expect(viewer.dependsOn(new Map([['/ws/docs/other.puml', true]]))).toBe('none');
   });
 });

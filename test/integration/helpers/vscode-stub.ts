@@ -31,7 +31,7 @@ export interface TextEditorStub {
     languageId: string;
     version: number;
     isUntitled: boolean;
-    uri: { toString(): string; scheme: string; path: string };
+    uri: { toString(): string; scheme: string; path: string; fsPath: string };
     getText(): string;
     lineAt(line: number): {
       text: string;
@@ -249,9 +249,26 @@ export interface DiagnosticStub {
   source?: string;
 }
 
+/** A file system watcher as created, with a way to report an event to it. */
+export interface FileWatcherStub {
+  pattern: { base: unknown; pattern: string };
+  onDidCreate: (listener: (uri: UriStub) => void) => { dispose(): void };
+  onDidChange: (listener: (uri: UriStub) => void) => { dispose(): void };
+  onDidDelete: (listener: (uri: UriStub) => void) => { dispose(): void };
+  /** Reports an event, as the file system would. */
+  fire(kind: 'create' | 'change' | 'delete', uri: UriStub): void;
+  dispose(): void;
+}
+
 export interface VscodeStub {
   ColorThemeKind: Record<'Light' | 'Dark' | 'HighContrast' | 'HighContrastLight', number>;
   DiagnosticSeverity: Record<'Error' | 'Warning' | 'Information' | 'Hint', number>;
+  EventEmitter: new <T>() => {
+    event: (listener: (value: T) => void) => { dispose(): void };
+    fire(value: T): void;
+    dispose(): void;
+  };
+  RelativePattern: new (base: unknown, pattern: string) => { base: unknown; pattern: string };
   Diagnostic: new (
     range: { start: PositionStub; end: PositionStub },
     message: string,
@@ -386,6 +403,10 @@ export interface VscodeStub {
     onDidSaveTextDocument: (listener: (document: TextEditorStub['document']) => void) => { dispose(): void };
     /** Never fires: the workspace starts trusted. */
     onDidGrantWorkspaceTrust: (listener: () => void) => { dispose(): void };
+    /** Never fires: the folders stay as they are. */
+    onDidChangeWorkspaceFolders: (listener: () => void) => { dispose(): void };
+    /** Kept in `_test.fileWatchers` until disposed. */
+    createFileSystemWatcher: (pattern: unknown) => FileWatcherStub;
     /** Both read by the framework's runtime preflight, at activation. */
     isTrusted: boolean;
     workspaceFolders: unknown[] | undefined;
@@ -514,6 +535,8 @@ export interface VscodeStub {
      * Counts of zero are left out, so `{}` means all of them were released.
      */
     live(): Record<string, number>;
+    /** File system watchers created and not yet disposed. */
+    fileWatchers: FileWatcherStub[];
   };
 }
 
@@ -600,6 +623,30 @@ export function createVscodeStub(): VscodeStub {
       },
     };
   };
+
+  /** Enough of vscode.EventEmitter: listeners in order, none after dispose. */
+  class EventEmitter<T> {
+    private listeners: ((value: T) => void)[] = [];
+    readonly event = (listener: (value: T) => void): { dispose(): void } => subscribe(this.listeners, listener);
+    fire(value: T): void {
+      for (const listener of [...this.listeners]) {
+        listener(value);
+      }
+    }
+    dispose(): void {
+      this.listeners = [];
+    }
+  }
+
+  class RelativePattern {
+    constructor(
+      readonly base: unknown,
+      readonly pattern: string
+    ) {}
+  }
+
+  /** The file system watchers created and not yet disposed, with a way to report an event. */
+  const fileWatchers: FileWatcherStub[] = [];
 
   class Diagnostic implements DiagnosticStub {
     code?: unknown;
@@ -811,6 +858,8 @@ export function createVscodeStub(): VscodeStub {
   return {
     ColorThemeKind: { Light: 1, Dark: 2, HighContrast: 3, HighContrastLight: 4 },
     DiagnosticSeverity: { Error: 0, Warning: 1, Information: 2, Hint: 3 },
+    EventEmitter,
+    RelativePattern,
     Diagnostic,
     CompletionItem,
     CompletionItemKind: { Keyword: 13, Value: 11, Snippet: 14 },
@@ -1061,6 +1110,33 @@ export function createVscodeStub(): VscodeStub {
       onDidCloseTextDocument: (listener) => track('workspace.onDidCloseTextDocument', subscribe(closeListeners, listener)),
       onDidSaveTextDocument: (listener) => track('workspace.onDidSaveTextDocument', subscribe(saveListeners, listener)),
       onDidGrantWorkspaceTrust: () => track('workspace.onDidGrantWorkspaceTrust'),
+      onDidChangeWorkspaceFolders: () => track('workspace.onDidChangeWorkspaceFolders'),
+      createFileSystemWatcher: (pattern) => {
+        const listeners = { create: [] as Listener[], change: [] as Listener[], delete: [] as Listener[] };
+        type Listener = (uri: UriStub) => void;
+        const watcher: FileWatcherStub = {
+          pattern: pattern as FileWatcherStub['pattern'],
+          onDidCreate: (listener) => subscribe(listeners.create, listener),
+          onDidChange: (listener) => subscribe(listeners.change, listener),
+          onDidDelete: (listener) => subscribe(listeners.delete, listener),
+          fire: (kind, uri) => {
+            for (const listener of [...listeners[kind]]) {
+              listener(uri);
+            }
+          },
+          dispose: () => undefined,
+        };
+        const tracked = track('workspace.createFileSystemWatcher', {
+          dispose: () => {
+            fileWatchers.splice(fileWatchers.indexOf(watcher), 1);
+          },
+        });
+        watcher.dispose = (): void => {
+          tracked.dispose();
+        };
+        fileWatchers.push(watcher);
+        return watcher;
+      },
       isTrusted: true,
       workspaceFolders: undefined,
       get textDocuments() {
@@ -1275,6 +1351,7 @@ export function createVscodeStub(): VscodeStub {
         }
       },
       live: () => Object.fromEntries([...live].filter(([, count]) => count !== 0)),
+      fileWatchers,
     },
   };
 }
