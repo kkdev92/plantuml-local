@@ -32,6 +32,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   written in the diagram does: when it turns the choice, the diagram is drawn
   once more in the other palette. The `.puml` preview says when it shows a
   diagram in the palette other than the one asked for, and why.
+- **Going to an included file, and completing its path.** Ctrl+Click on the
+  path of a local `!include`, or *Go to Definition*, opens the file the
+  diagram reads: the one the preview draws, next to the including file or in
+  a search folder. A path the engine works out from a variable, a function or
+  a defined name is not followed. After `!include ` the path completes with
+  the folders and the files it can lead to, a search folder's names marked
+  with the folder. Neither is offered in Restricted Mode.
 
 ### Changed
 

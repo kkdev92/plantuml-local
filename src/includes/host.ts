@@ -42,14 +42,10 @@ export function drawInDocuments(renderer: Renderer, host: IncludeHost): DrawDiag
       return { svg: await renderer.render(source, dark), failedIncludes: new Map(), dependencies: [] };
     }
     const { access, folder } = await accessFor(vscode.Uri.parse(document), host);
-    // The files are found by real path, from the real path of the workspace
-    // folder; VS Code knows them under the folder as it was opened, which a
-    // link in its path can make another path.
-    const asOpened = (path: string): string =>
-      access.available && folder !== undefined ? join(folder, relative(access.scope.root, path)) : path;
-    const session = new IncludeSession(access, (path) => openText(asOpened(path)) ?? openText(path));
+    const opened = (path: string): string => asOpened(access, folder, path);
+    const session = new IncludeSession(access, (path) => openText(opened(path)) ?? openText(path));
     const svg = await renderer.render(source, dark, session.load);
-    const dependencies = [...session.dependencies].map((path) => pathKey(asOpened(path)));
+    const dependencies = [...session.dependencies].map((path) => pathKey(opened(path)));
     host.remember?.(`${document}\n${source}`, dependencies);
     const styled = session.themes.length > 0 || session.azure;
     return {
@@ -61,9 +57,19 @@ export function drawInDocuments(renderer: Renderer, host: IncludeHost): DrawDiag
   };
 }
 
-async function accessFor(
+/**
+ * A path found under the real path of the workspace folder, as VS Code
+ * knows it: under the folder as it was opened, which a link in its path can
+ * make another path. `folder` is that folder, from {@link accessFor}.
+ */
+export function asOpened(access: IncludeAccess, folder: string | undefined, path: string): string {
+  return access.available && folder !== undefined ? join(folder, relative(access.scope.root, path)) : path;
+}
+
+/** Whether the diagrams of `document` get their local includes, and its workspace folder's path as opened. */
+export async function accessFor(
   document: vscode.Uri,
-  host: IncludeHost
+  host: Pick<IncludeHost, 'includePaths'>
 ): Promise<{ access: IncludeAccess; folder: string | undefined }> {
   const workspaceFolder = vscode.workspace.getWorkspaceFolder(document);
   const folder = workspaceFolder?.uri.scheme === 'file' ? workspaceFolder.uri.fsPath : undefined;

@@ -7,6 +7,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { RendererClient } from '../../src/render/client';
 import { recognizeEngineError } from '../../src/render/engine-error';
 import { drawReadable, ThemePalettes } from '../../src/render/palette';
+import { includeDirectives, includePathOf } from '../../src/includes/directives';
 import { IncludeSession, type IncludeAccess } from '../../src/includes/session';
 
 /**
@@ -178,5 +179,76 @@ describe.runIf(hasFileLoader)('the palette of a diagram whose included file pick
     expect(asked).toEqual([true, false]);
     expect(palette).toBe(false);
     expect(recognizeEngineError(result.svg)).toBeNull();
+  });
+});
+
+describe.runIf(hasFileLoader)('the path an include line asks for', () => {
+  let client: RendererClient;
+
+  beforeAll(() => {
+    client = new RendererClient(workerPath, log);
+  });
+
+  afterAll(() => {
+    client.dispose();
+  });
+
+  /** The paths the engine asks the loader for while it draws `lines`. */
+  const askedFor = async (...lines: string[]): Promise<string[]> => {
+    const asked: string[] = [];
+    await client.render(['@startuml', ...lines, '@enduml'].join('\n'), false, (path) => {
+      asked.push(path);
+      return Promise.resolve({ id: `/ws/${String(asked.length)}`, text: '' });
+    });
+    return asked;
+  };
+
+  const space = (code: number): string => String.fromCharCode(code);
+
+  it.each([
+    '!include common.puml',
+    '!include_once common.puml',
+    '!include_many common.puml',
+    '  \t!include indented.puml',
+    `!include${space(0x3000)}ideographic.puml`,
+    `!include${space(0x2003)}em.puml`,
+    `!include common.puml${space(0xa0)}`,
+    `!include common.puml${space(0x3000)}`,
+    "!include common.puml /' note '/",
+    "!include common.puml\t/' note '/\t",
+    `!include common.puml /' note '/${space(0xa0)}`,
+    "!include common.puml /' a '/ /' b '/",
+    "!include common.puml /' note '/ x",
+    "!include /' note '/ common.puml",
+    "!include common.puml ' not a comment",
+    '!include common.puml!PART',
+    '!include a!b!c.puml',
+    '!include common.puml !PART',
+    '!include "quoted name.puml"',
+  ])('is read from %j as the engine reads it', async (line) => {
+    const path = includePathOf(line)?.path;
+    expect(path).toBeDefined();
+    await expect(askedFor(line)).resolves.toEqual([path]);
+  });
+
+  it.each(['!INCLUDE common.puml', '!includesub common.puml!PART', '!includedef common.puml'])(
+    'is not read from %j, for which the engine asks for no file',
+    async (line) => {
+      expect(includePathOf(line)).toBeNull();
+      await expect(askedFor(line)).resolves.toEqual([]);
+    }
+  );
+
+  it.each([
+    ['!include common.puml', true],
+    ['!common = "other"\n!include common.puml', false],
+    ['!define common other\n!include common.puml', false],
+    ['!puml = "z"\n!include common.puml', false],
+    ['!$f = "common.puml"\n!include $f', false],
+  ])('is taken as written from %j only when the engine asks for it as written', async (source, literal) => {
+    const [directive] = includeDirectives(source);
+    expect(directive?.literal).toBe(literal);
+    const asked = await askedFor(...source.split('\n'));
+    expect(asked[0] === directive?.path).toBe(literal);
   });
 });
