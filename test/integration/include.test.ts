@@ -116,7 +116,6 @@ describe.runIf(hasFileLoader)('local includes through the built worker', () => {
     ['../../outside/secret.puml', { kind: 'outside' }],
     ['linked/secret.puml', { kind: 'read', refusal: 'link' }],
     ['missing.puml', { kind: 'missing', searched: true }],
-    ['two.puml', { kind: 'fragment', shape: 'several', line: 3 }],
   ])('refuses %s, naming the same path the engine names', async (path, reason) => {
     const { svg, session } = await draw(`!include ${path}`);
     expect(labels(svg)).not.toContain('secret');
@@ -231,7 +230,7 @@ describe.runIf(hasFileLoader)('the path an include line asks for', () => {
     await expect(askedFor(line)).resolves.toEqual([path]);
   });
 
-  it.each(['!INCLUDE common.puml', '!includesub common.puml!PART', '!includedef common.puml'])(
+  it.each(['!INCLUDE common.puml', '!includedef common.puml'])(
     'is not read from %j, for which the engine asks for no file',
     async (line) => {
       expect(includePathOf(line)).toBeNull();
@@ -250,5 +249,135 @@ describe.runIf(hasFileLoader)('the path an include line asks for', () => {
     expect(directive?.literal).toBe(literal);
     const asked = await askedFor(...source.split('\n'));
     expect(asked[0] === directive?.path).toBe(literal);
+  });
+});
+
+describe.runIf(hasFileLoader)('a selector, !includesub and !theme … from through the session', () => {
+  let client: RendererClient;
+  let temp: string;
+  let root: string;
+  let access: IncludeAccess;
+
+  beforeAll(async () => {
+    client = new RendererClient(workerPath, log);
+    temp = await realpath(await mkdtemp(join(tmpdir(), 'plantuml-local-include-sections-')));
+    root = join(temp, 'ws');
+    await mkdir(join(root, 'themes'), { recursive: true });
+    await writeFile(
+      join(root, 'ids.puml'),
+      '@startuml(id=FIRST)\nAlice -> Bob : fromFirst\n@enduml\n@startuml(id=SECOND)\nCarol -> Dave : fromSecond\n@enduml\n'
+    );
+    await writeFile(
+      join(root, 'subs.puml'),
+      '!startsub PART\nEve -> Frank : fromSub\n!endsub\nGina -> Hal : outsideTheSub\n'
+    );
+    // A painted page: the engine leaves a white one unpainted, as its own.
+    await writeFile(join(root, 'themes', 'puml-theme-whitepage.puml'), '---\nname: whitepage\n---\nskinparam backgroundColor #FEFEFE\n');
+    await writeFile(join(root, 'themes', 'puml-theme-ink.puml'), 'skinparam defaultFontColor #202020\nskinparam ArrowColor #202020\n');
+    await writeFile(join(root, 'puml-theme-sections.puml'), '@startuml\n!theme cerulean\nAlice -> Bob : fromOrdinaryInclude\n@enduml\n');
+    await writeFile(join(root, 'style.iuml'), '!theme ink from themes\n');
+    access ={ available: true, scope: { root, documentFolder: root, searchFolders: [] } };
+  });
+
+  afterAll(async () => {
+    client.dispose();
+    await rm(temp, { recursive: true, force: true });
+  });
+
+  const draw = async (
+    ...lines: string[]
+  ): Promise<{ svg: string; session: IncludeSession }> => {
+    const session = new IncludeSession(access, () => undefined);
+    const svg = await client.render(['@startuml', ...lines, '@enduml'].join('\n'), false, session.load);
+    return { svg, session };
+  };
+
+  it.each(['SECOND', '1', 'SE.OND'])('draws the diagram chosen by %s in a file of several', async (selector) => {
+    const { svg, session } = await draw(`!include ids.puml!${selector}`);
+    expect(recognizeEngineError(svg)).toBeNull();
+    expect(labels(svg)).toContain('fromSecond');
+    expect(labels(svg)).not.toContain('fromFirst');
+    expect(session.failures).toEqual([]);
+  });
+
+  it.each(['THIRD', '2', '(', '999999999999999999999'])('reports the invalid selector %s', async (selector) => {
+    const { svg, session } = await draw(`!include ids.puml!${selector}`);
+    expect(recognizeEngineError(svg)?.message).toBe(`cannot include ids.puml!${selector}`);
+    expect(session.failures).toEqual([]);
+    expect(session.dependencies).toContain(join(root, 'ids.puml'));
+  });
+
+  it('includes different selections of the same file, keeping duplicate detection in the engine', async () => {
+    const { svg } = await draw('!include ids.puml!FIRST', '!include ids.puml!SECOND', '!include ./ids.puml!FIRST');
+    expect(recognizeEngineError(svg)).toBeNull();
+    expect(labels(svg).filter((label) => label === 'fromFirst')).toHaveLength(1);
+    expect(labels(svg).filter((label) => label === 'fromSecond')).toHaveLength(1);
+  });
+
+  it('uses the first diagram when no selector is given', async () => {
+    const { svg } = await draw('!include ids.puml');
+    expect(recognizeEngineError(svg)).toBeNull();
+    expect(labels(svg)).toContain('fromFirst');
+    expect(labels(svg)).not.toContain('fromSecond');
+  });
+
+  it('draws the sub !includesub takes from a file, and nothing else of it', async () => {
+    const { svg, session } = await draw('!includesub subs.puml!PART');
+    expect(recognizeEngineError(svg)).toBeNull();
+    expect(labels(svg)).toContain('fromSub');
+    expect(labels(svg)).not.toContain('outsideTheSub');
+    expect(session.failures).toEqual([]);
+  });
+
+  it('fails an !includesub of a sub the file does not have, saying why', async () => {
+    const { svg, session } = await draw('!includesub subs.puml!OTHER');
+    expect(recognizeEngineError(svg)?.message).toBe('cannot include subs.puml!OTHER');
+    expect(session.failures).toEqual([]);
+  });
+
+  it('draws with a theme read from a folder, and keeps its lines for the palette', async () => {
+    const { svg, session } = await draw('!theme whitepage from themes', 'Alice -> Bob : themed');
+    expect(recognizeEngineError(svg)).toBeNull();
+    expect(svg.toUpperCase()).toContain('#FEFEFE');
+    expect(session.themes).toEqual(['skinparam backgroundColor #FEFEFE']);
+  });
+
+  it('says which theme file was not found', async () => {
+    const { svg, session } = await draw('!theme missing from themes');
+    expect(recognizeEngineError(svg)?.message).toBe('Cannot load theme missing in themes');
+    expect(session.failures).toEqual([
+      { path: 'themes/puml-theme-missing.puml', reason: { kind: 'missing', searched: false } },
+    ]);
+  });
+
+  it.each([
+    ['a local theme with a background', '!theme whitepage from themes'],
+    ['a local theme with fixed dark text', '!theme ink from themes'],
+    ['a variable theme name', '!$theme = "ink"\n!theme $theme from themes'],
+    ['an ordinary include with a theme-shaped name', '!include puml-theme-sections.puml'],
+    ['an included file that reads a theme from a folder', '!include style.iuml'],
+  ])('chooses a readable palette for %s', async (_what, directive) => {
+    const palettes = new ThemePalettes((source, dark) => client.render(source, dark));
+    const source = `@startuml\n${directive}\nAlice -> Bob : hello\n@enduml`;
+    const asked: boolean[] = [];
+    const { palette, result } = await drawReadable(
+      source,
+      true,
+      (themed, dark, included) => palettes.resolve(themed, dark, included),
+      async (dark) => {
+        asked.push(dark);
+        const session = new IncludeSession(access, () => undefined);
+        const svg = await client.render(source, dark, session.load);
+        return {
+          svg,
+          failedIncludes: new Map(),
+          dependencies: [],
+          includedStyle: { themes: session.themes, azure: session.azure },
+        };
+      }
+    );
+    expect(asked).toEqual([true, false]);
+    expect(palette).toBe(false);
+    expect(recognizeEngineError(result.svg)).toBeNull();
   });
 });

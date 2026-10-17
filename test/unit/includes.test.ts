@@ -4,7 +4,6 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { INCLUDE_LIMITS } from '../../src/core/constants';
-import { fragmentShape } from '../../src/includes/fragment';
 import { parseIncludePath, parseSearchFolder } from '../../src/includes/path-policy';
 import { readIncludeFile, type ReadOptions } from '../../src/includes/reader';
 import { includeCandidates, isWithin, MAX_SEARCH_FOLDERS, searchFolders } from '../../src/includes/resolver';
@@ -270,26 +269,5 @@ describe('readIncludeFile', () => {
       kind: 'refused',
       refusal: 'too-large',
     });
-  });
-});
-
-describe('fragmentShape', () => {
-  it('takes plain lines, and one whole diagram with comments around it', () => {
-    expect(fragmentShape('Alice -> Bob\n')).toEqual({ kind: 'usable' });
-    expect(fragmentShape("' shared styles\n\n@startuml\nskinparam shadowing false\n@enduml\n/' end '/\n")).toEqual({
-      kind: 'usable',
-    });
-  });
-
-  it('refuses a second diagram, which the engine would drop', () => {
-    expect(fragmentShape('@startuml\nA -> B\n@enduml\n@startuml\nC -> D\n@enduml')).toEqual({
-      kind: 'several',
-      line: 3,
-    });
-  });
-
-  it('refuses a command outside the diagram, which the engine would drop', () => {
-    expect(fragmentShape('!$x = 1\n@startuml\nA -> B\n@enduml')).toEqual({ kind: 'outside', line: 0 });
-    expect(fragmentShape('@startuml\nA -> B\n@enduml\nC -> D')).toEqual({ kind: 'outside', line: 3 });
   });
 });
