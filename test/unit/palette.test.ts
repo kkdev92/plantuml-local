@@ -2,9 +2,11 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   choosePalette,
+  drawReadable,
   contrast,
   labelContrast,
   MIN_TEXT_CONTRAST,
+  paletteLines,
   probeSource,
   themeLines,
   ThemePalettes,
@@ -238,5 +240,71 @@ describe('ThemePalettes', () => {
     expect(render).toHaveBeenCalledTimes(130);
     await palettes.resolve(diagram('!theme t0'), false);
     expect(render).toHaveBeenCalledTimes(132);
+  });
+});
+
+describe('paletteLines', () => {
+  it('takes the theme lines of the included files where the first local include is', () => {
+    const source = ['@startuml', '!theme a', '!include styles.puml', '!theme c', 'A -> B', '@enduml'].join('\n');
+    expect(paletteLines(source, { themes: ['!theme b'], azure: false })).toEqual(['!theme a', '!theme b', '!theme c']);
+  });
+
+  it('keeps the diagram’s own lines when the files it included set no theme', () => {
+    expect(paletteLines('@startuml\n!theme a\n@enduml')).toEqual(['!theme a']);
+    expect(paletteLines('@startuml\n!theme a\n@enduml', { themes: [], azure: true })).toEqual(['!theme a']);
+  });
+});
+
+describe('ThemePalettes and what a diagram included', () => {
+  const render = (source: string): Promise<string> =>
+    Promise.resolve(probeSvg(source.includes('!theme for-dark-page') ? '#FFFFFF' : '#000000'));
+  const diagram = '@startuml\n!include styles.puml\nAlice -> Bob : hi\n@enduml';
+
+  it('measures the theme an included file picks', async () => {
+    const palettes = new ThemePalettes(render);
+    expect(await palettes.resolve(diagram, true)).toBe(true);
+    expect(await palettes.resolve(diagram, true, { themes: ['!theme for-white-page'], azure: false })).toBe(false);
+    expect(await palettes.resolve(diagram, false, { themes: ['!theme for-dark-page'], azure: false })).toBe(true);
+  });
+
+  it('draws in the light palette a diagram whose included file brings the Azure icons and no theme', async () => {
+    const palettes = new ThemePalettes(render);
+    expect(await palettes.resolve(diagram, true, { themes: [], azure: true })).toBe(false);
+  });
+});
+
+describe('drawReadable', () => {
+  const drawn = (palette: boolean, includedStyle?: { themes: string[]; azure: boolean }) => ({
+    svg: String(palette),
+    failedIncludes: new Map<string, string>(),
+    dependencies: [],
+    ...(includedStyle === undefined ? {} : { includedStyle }),
+  });
+
+  it('draws once when nothing it included bears on the palette', async () => {
+    const draw = vi.fn((palette: boolean) => Promise.resolve(drawn(palette)));
+    const resolve = vi.fn((_source: string, dark: boolean) => Promise.resolve(dark));
+    expect(await drawReadable('src', true, resolve, draw)).toMatchObject({ palette: true, result: { svg: 'true' } });
+    expect(draw).toHaveBeenCalledTimes(1);
+    expect(resolve).toHaveBeenCalledTimes(1);
+  });
+
+  it('draws once more in the other palette when what it included turns the choice, and takes that', async () => {
+    const style = { themes: ['!theme for-white-page'], azure: false };
+    const draw = vi.fn((palette: boolean) => Promise.resolve(drawn(palette, style)));
+    const resolve = vi.fn((_source: string, dark: boolean, included?: unknown) =>
+      Promise.resolve(included === undefined ? dark : false)
+    );
+    expect(await drawReadable('src', true, resolve, draw)).toMatchObject({ palette: false, result: { svg: 'false' } });
+    expect(draw.mock.calls.map((call) => call[0])).toEqual([true, false]);
+    expect(resolve).toHaveBeenLastCalledWith('src', true, style);
+  });
+
+  it('keeps the first drawing when the choice holds', async () => {
+    const style = { themes: ['!theme cerulean'], azure: false };
+    const draw = vi.fn((palette: boolean) => Promise.resolve(drawn(palette, style)));
+    const resolve = vi.fn((_source: string, dark: boolean) => Promise.resolve(dark));
+    expect(await drawReadable('src', false, resolve, draw)).toMatchObject({ palette: false });
+    expect(draw).toHaveBeenCalledTimes(1);
   });
 });

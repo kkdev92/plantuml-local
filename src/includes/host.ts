@@ -51,7 +51,13 @@ export function drawInDocuments(renderer: Renderer, host: IncludeHost): DrawDiag
     const svg = await renderer.render(source, dark, session.load);
     const dependencies = [...session.dependencies].map((path) => pathKey(asOpened(path)));
     host.remember?.(`${document}\n${source}`, dependencies);
-    return { svg, failedIncludes: describeIncludeFailures(session.failures, describe), dependencies };
+    const styled = session.themes.length > 0 || session.azure;
+    return {
+      svg,
+      failedIncludes: describeIncludeFailures(session.failures, describe),
+      dependencies,
+      ...(styled ? { includedStyle: { themes: [...session.themes], azure: session.azure } } : {}),
+    };
   };
 }
 

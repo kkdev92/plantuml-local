@@ -121,5 +121,7 @@
   "Includes nest more than {0} deep.": "include の入れ子が {0} 段を超えています。",
   "More than {0} files are included.": "取り込むファイルが {0} 個を超えています。",
   "The included files are larger than {0} MiB in all.": "取り込むファイルが合計で {0} MiB を超えています。",
-  "Cannot include {0}: {1}": "{0} を include できません: {1}"
+  "Cannot include {0}: {1}": "{0} を include できません: {1}",
+  "Drawn in the dark palette: its theme is hard to read in the light one.": "ダーク配色で描いています。テーマの文字がライト配色では読みにくいためです。",
+  "Drawn in the light palette: its theme is hard to read in the dark one.": "ライト配色で描いています。テーマの文字がダーク配色では読みにくいためです。"
 }

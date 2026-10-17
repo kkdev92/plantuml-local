@@ -1,4 +1,6 @@
 import { DIAGRAM_BACKDROP } from '../core/constants';
+import type { DiagramRender, IncludedStyle } from '../core/types';
+import { firstLocalIncludeLine } from '../includes/describe';
 
 /**
  * The palette a diagram that picks a `!theme` is drawn in.
@@ -16,6 +18,12 @@ import { DIAGRAM_BACKDROP } from '../core/constants';
  * of its message label against what is behind it decides. Measuring keeps
  * up with the engine's theme library, and takes in several `!theme` lines,
  * which the engine applies one over the other.
+ *
+ * A `!theme`, or the Azure library, can also come from a file the diagram
+ * includes, which is known only once the diagram is drawn. The diagram is
+ * drawn in the palette its own lines choose; if what it included turns the
+ * choice, it is drawn once more in the other palette, and that drawing is
+ * taken as it is ({@link drawReadable}).
  */
 
 /** The probe's message, found again in the rendered SVG. */
@@ -34,6 +42,11 @@ export const MIN_TEXT_CONTRAST = 4.5;
  */
 const AZURE_INCLUDE = /^[ \t]*!include(?:_many|_once)?[ \t]*<azure\//m;
 
+/** Whether `text` includes the bundled Azure library. */
+export function includesAzure(text: string): boolean {
+  return AZURE_INCLUDE.test(text);
+}
+
 /** How many sets of `!theme` lines keep their measurement. */
 const MAX_MEASUREMENTS = 64;
 
@@ -49,6 +62,42 @@ export function themeLines(source: string): string[] {
     .split(/\r?\n/)
     .filter((line) => /^[ \t]*!theme[ \t]/.test(line))
     .map((line) => line.trim());
+}
+
+/**
+ * The `!theme` lines a diagram applies, those of the files it included
+ * taken as written where its first local include is: the engine applies
+ * them in the order it meets them, the last over the others.
+ */
+export function paletteLines(source: string, included?: IncludedStyle): string[] {
+  if (included === undefined || included.themes.length === 0) {
+    return themeLines(source);
+  }
+  const at = firstLocalIncludeLine(source);
+  const lines = source.split(/\r?\n/);
+  const before = at < 0 ? lines : lines.slice(0, at);
+  const after = at < 0 ? [] : lines.slice(at);
+  return [...themeLines(before.join('\n')), ...included.themes, ...themeLines(after.join('\n'))];
+}
+
+/**
+ * Draws a diagram in the palette its themes can be read in: the one chosen
+ * from its own lines first, then — when the files it included turn that
+ * choice — once more in the other, which is taken as it is.
+ */
+export async function drawReadable(
+  source: string,
+  dark: boolean,
+  resolve: (source: string, dark: boolean, included?: IncludedStyle) => Promise<boolean>,
+  draw: (palette: boolean) => Promise<DiagramRender>
+): Promise<{ result: DiagramRender; palette: boolean }> {
+  const palette = await resolve(source, dark);
+  const result = await draw(palette);
+  if (result.includedStyle === undefined) {
+    return { result, palette };
+  }
+  const again = await resolve(source, dark, result.includedStyle);
+  return again === palette ? { result, palette } : { result: await draw(again), palette: again };
 }
 
 /** A diagram that shows only what `lines` do to a message label. */
@@ -110,11 +159,14 @@ export class ThemePalettes {
 
   constructor(private readonly render: (source: string, dark: boolean) => Promise<string>) {}
 
-  /** The palette to draw `source` in when `dark` is asked for. */
-  async resolve(source: string, dark: boolean): Promise<boolean> {
-    const lines = themeLines(source);
+  /**
+   * The palette to draw `source` in when `dark` is asked for, taking in what
+   * the files it included set, once a drawing has told.
+   */
+  async resolve(source: string, dark: boolean, included?: IncludedStyle): Promise<boolean> {
+    const lines = paletteLines(source, included);
     if (lines.length === 0) {
-      return AZURE_INCLUDE.test(source) ? false : dark;
+      return includesAzure(source) || included?.azure === true ? false : dark;
     }
     const measured = await this.measure(lines.join('\n'), lines);
     return measured === undefined ? dark : choosePalette(dark, measured);

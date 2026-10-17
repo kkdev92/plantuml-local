@@ -1,5 +1,6 @@
 import { INCLUDE_LIMITS } from '../core/constants';
 import type { IncludedFile, IncludeLoader } from '../core/types';
+import { includesAzure, themeLines } from '../render/palette';
 import { fragmentShape } from './fragment';
 import { parseIncludePath, type PathRefusal } from './path-policy';
 import { readIncludeFile, type ReadRefusal } from './reader';
@@ -61,6 +62,10 @@ export class IncludeSession {
   readonly failures: IncludeFailure[] = [];
   /** Every path looked at: a later change to one of them can change the diagram. */
   readonly dependencies = new Set<string>();
+  /** The `!theme` lines of the files delivered, in order, for the palette (src/render/palette.ts). */
+  readonly themes: string[] = [];
+  /** Whether a file delivered includes the bundled Azure library. */
+  azure = false;
 
   private files = 0;
   private bytes = 0;
@@ -133,6 +138,8 @@ export class IncludeSession {
       this.bytes += Buffer.byteLength(outcome.text, 'utf8');
       this.depths.set(outcome.id, outer + 1);
       this.dependencies.add(outcome.id);
+      this.themes.push(...themeLines(outcome.text));
+      this.azure ||= includesAzure(outcome.text);
       const file: IncludedFile = { id: outcome.id, text: outcome.text };
       return file;
     }

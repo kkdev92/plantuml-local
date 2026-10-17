@@ -308,3 +308,33 @@ describe('installFileLoader', () => {
     expect(loader()('a.puml', null, vi.fn(), vi.fn())).toBe(false);
   });
 });
+
+describe('IncludeSession and the palette', () => {
+  let temp: string;
+  let root: string;
+
+  beforeEach(async () => {
+    temp = await realpath(await mkdtemp(join(tmpdir(), 'plantuml-local-palette-')));
+    root = join(temp, 'ws');
+    await mkdir(root, { recursive: true });
+    await writeFile(join(root, 'styles.iuml'), "' shared look\n!theme cerulean\nskinparam shadowing false\n");
+    await writeFile(join(root, 'icons.iuml'), '!include <azure/AzureCommon>\n');
+  });
+
+  afterEach(async () => {
+    await rm(temp, { recursive: true, force: true });
+  });
+
+  it('keeps the !theme lines of the files delivered, and whether one brings the Azure icons', async () => {
+    const session = new IncludeSession(
+      { available: true, scope: { root, documentFolder: root, searchFolders: [] } },
+      () => undefined
+    );
+    expect(session.themes).toEqual([]);
+    expect(session.azure).toBe(false);
+    await session.load('styles.iuml', null);
+    await session.load('icons.iuml', null);
+    expect(session.themes).toEqual(['!theme cerulean']);
+    expect(session.azure).toBe(true);
+  });
+});

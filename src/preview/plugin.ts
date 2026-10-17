@@ -10,9 +10,10 @@ import {
   isDiagramFence,
 } from '../core/constants';
 import { diagramShape } from '../core/shape';
-import type { DiagramRender, RenderLog } from '../core/types';
+import type { DiagramRender, IncludedStyle, RenderLog } from '../core/types';
 import { hasLocalInclude } from '../includes/describe';
 import { changeTo } from '../includes/tracking';
+import { drawReadable } from '../render/palette';
 
 /**
  * The markdown-it side of the extension.
@@ -80,9 +81,10 @@ export interface PluginDeps {
   render(source: string, dark: boolean, document: string | undefined): Promise<DiagramRender>;
   /**
    * The palette to draw `source` in when `dark` is asked for: the other one
-   * for a diagram whose `!theme` cannot be read in it (src/render/palette.ts).
+   * for a diagram whose `!theme` cannot be read in it (src/render/palette.ts),
+   * `included` telling what the files it included set, once drawn.
    */
-  resolvePalette(source: string, dark: boolean): Promise<boolean>;
+  resolvePalette(source: string, dark: boolean, included?: IncludedStyle): Promise<boolean>;
   /** Asks VS Code to refresh Markdown previews (debounced by the caller). */
   requestRefresh(): void;
   /** Escapes text for inclusion in HTML. */
@@ -320,10 +322,12 @@ export function createPlantUmlPlugin(deps: PluginDeps): PlantUmlPlugin {
     forced.delete(key);
     changedWhileRendering.set(key, new Map());
 
-    deps
-      .resolvePalette(source, dark)
-      .then(async (palette) => ({ result: await deps.render(source, palette, document), palette }))
-      .then(
+    drawReadable(
+      source,
+      dark,
+      (themed, asked, included) => deps.resolvePalette(themed, asked, included),
+      (palette) => deps.render(source, palette, document)
+    ).then(
         ({ result, palette }) => {
           rendered.set(key, includeNotes(result.failedIncludes) + diagramHtml(result.svg, palette));
           failed.delete(key);

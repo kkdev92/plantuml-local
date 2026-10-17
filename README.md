@@ -560,7 +560,11 @@ of the palette. When the theme's text would be hard to read on that backdrop,
 the diagram is drawn in the other palette instead — a theme made for a white
 page, such as `plain` or `cerulean`, gets the light palette in a dark editor.
 So does a diagram with the Azure icons and no theme, whose boxes are white
-whatever the palette. This applies to the preview and to exports alike.
+whatever the palette. This applies to the preview and to exports alike, and
+counts a theme or the Azure icons that a diagram gets from a file it includes:
+such a diagram is drawn once more in the other palette when that file turns
+the choice. The `.puml` preview says when it shows a diagram in the other
+palette.
 
 ---
 
