@@ -144,6 +144,17 @@ export const VIEWER_DEBOUNCE_MS = 300;
 export const RENDER_TIMEOUT_MS = 30_000;
 
 /**
+ * What the local includes of one diagram may read: how deep includes may
+ * nest, how many files they may deliver, and how many bytes in all. A file
+ * asked for again counts again: the engine asks before it can tell the
+ * file is one it already has. Within these, a loop of includes ends on its
+ * own, as the engine skips a file it has already included; one that keeps
+ * going stops here, and so does one that runs past
+ * {@link RENDER_TIMEOUT_MS}.
+ */
+export const INCLUDE_LIMITS = { depth: 32, files: 2048, bytes: 16 * 1024 * 1024 } as const;
+
+/**
  * How long the render worker may sit idle before it is shut down.
  *
  * The worker holds the engine, the Graphviz WebAssembly and any sprite
