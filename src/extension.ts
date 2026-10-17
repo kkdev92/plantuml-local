@@ -1233,6 +1233,7 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
           ),
           missingEnd: (end) =>
             l10n.t('This diagram has no {0} line; it is drawn as if the block ended with one.', end),
+          beforeStart: (start) => l10n.t('The lines above {0} are not drawn.', start),
           notUpdated: (mode) => notUpdatedNote(l10n, mode),
           includeFailed: (path, reason) => l10n.t('Cannot include {0}: {1}', path, reason),
         },
@@ -1989,6 +1990,7 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         ),
         missingEnd: (end) =>
           l10n.t('This diagram has no {0} line; it is drawn as if the block ended with one.', end),
+        beforeStart: (start) => l10n.t('The lines above {0} are not drawn.', start),
         localFile: l10n.t('the bundled engine reads no files.'),
         themeFrom: l10n.t('only bundled themes and themes from a folder of the workspace can be loaded.'),
         libraryNotBundled: (library) =>

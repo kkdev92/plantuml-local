@@ -10,6 +10,7 @@ const LABELS: ProblemLabels = {
   severalDiagrams: 'several',
   pages: 'pages',
   missingEnd: (end) => `no ${end}`,
+  beforeStart: (start) => `above ${start}`,
   localFile: 'no files',
   themeFrom: 'bundled themes only',
   libraryNotBundled: (library) => `${library} not bundled`,
@@ -61,6 +62,15 @@ describe('checkSource', () => {
       { line: 3, severity: 'warning', code: PROBLEM_CODES.DOC002, message: 'no @enduml' },
     ]);
     expect(check.render).toBe('@startuml\nAlice -> Bob\n@enduml');
+  });
+
+  it('warns about what is drawn anyway: lines above the start line, on the first of them', () => {
+    const block = blockOf("' a comment", 'title Before', 'skinparam monochrome true', '@startuml', 'Alice -> Bob', '@enduml');
+    const check = checkSource(block, LABELS);
+    expect(check.problems).toEqual([
+      { line: 4, severity: 'warning', code: PROBLEM_CODES.DOC004, message: 'above @startuml' },
+    ]);
+    expect(check.render).toBe(block.source);
   });
 
   it('leaves !includesub and a selector to the engine, which applies them', () => {
