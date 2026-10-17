@@ -187,6 +187,18 @@ end note
 @endjson
 ```
 
+## Wireframe
+
+```plantuml
+@startsalt
+{
+  Login    | "MyName   "
+  Password | "****     "
+  [Cancel] | [  OK   ]
+}
+@endsalt
+```
+
 ## Themes and icons
 
 `!theme` picks one of PlantUML's themes, and `<&…>` draws an OpenIconic icon. A theme made for a white page, such as `cerulean`, gets the light palette in a dark editor, so that it stays readable.
@@ -239,6 +251,17 @@ F000000F
 FFFFFFFF
 }
 rectangle "<$box>\n==inline sprite" as a
+@enduml
+```
+
+## Including a file of the workspace
+
+In a trusted workspace, `!include` reads a file next to this one: [sample-styles.iuml](sample-styles.iuml) colours the arrows and the participants. Ctrl+Click on the path opens it, and the diagram is drawn again when the file changes.
+
+```plantuml
+@startuml
+!include sample-styles.iuml
+Alice -> Bob : styled by the included file
 @enduml
 ```
 
@@ -311,6 +334,15 @@ Alice -> Bob
 ```plantuml
 @startuml
 Alice -> Bob : This block has no end line
+```
+
+### A line above `@startuml` (drawn without it, with a note)
+
+```plantuml
+title This title is above @startuml
+@startuml
+Alice -> Bob : drawn without the title
+@enduml
 ```
 
 ### Two diagrams in one block (a message instead of only the first)

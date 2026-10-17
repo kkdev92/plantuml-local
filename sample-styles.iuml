@@ -1,0 +1,4 @@
+' Included by the "Including a file of the workspace" block of sample.md.
+skinparam sequenceArrowColor #2E7D32
+skinparam sequenceLifeLineBorderColor #2E7D32
+skinparam sequenceParticipantBorderColor #2E7D32
