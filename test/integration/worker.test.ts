@@ -154,11 +154,12 @@ describe('render worker (dist)', () => {
 
   // How the engine reads the shape of its input. The preview, the export and
   // the error messages are built around this, so it is re-checked on every
-  // engine update. The next engine (upstream's TextareaSource) changes the
-  // last two: it ignores lines before @startuml and closes a diagram that has
-  // no @enduml. When an update fails here, take the new behaviour on purpose:
-  // adjust these and the export tests that expect "Diagram not supported",
-  // and say what changes for users in the changelog.
+  // engine update. Upstream's TextareaSource (from 1.2026.9) ignores lines
+  // before @startuml, puts one in front of a source without it, closes a
+  // diagram that has no @enduml, and reads a start line only with `@`. When
+  // an update fails here, take the new behaviour on purpose: adjust these,
+  // src/core/shape.ts and the export tests, and say what changes for users in
+  // the changelog.
   describe('the shape of the input (re-check on every engine update)', () => {
     it('draws only the first of two diagrams in one source', async () => {
       const svg = await render('@startuml\nAlice -> Bob : first\n@enduml\n@startuml\nCarol -> Dave : second\n@enduml');
@@ -179,13 +180,26 @@ describe('render worker (dist)', () => {
       expect(string).toContain('after');
     });
 
-    it('does not draw a source with a line before @startuml', async () => {
+    it('draws a source with a line before @startuml, without that line', async () => {
       const svg = await render('title Before\n@startuml\nAlice -> Bob : x\n@enduml');
-      expect(svg).toContain('Diagram not supported by this release of PlantUML');
+      expect(svg).toContain('Alice');
+      expect(svg).not.toContain('Before');
     });
 
-    it('fails a source that has no @enduml', async () => {
-      await expect(render('@startuml\nAlice -> Bob : open')).rejects.toThrow(/IndexOutOfBoundsException/);
+    it('draws a source without @startuml as a diagram', async () => {
+      const svg = await render('Alice -> Bob : no start line');
+      expect(svg).toContain('no start line');
+      expect(svg).not.toContain('Diagram not supported');
+    });
+
+    it('closes a diagram that has no @enduml', async () => {
+      const svg = await render('@startuml\nAlice -> Bob : open');
+      expect(svg).toContain('open');
+    });
+
+    it('does not read \\startuml as a start line', async () => {
+      const svg = await render('\\startuml\nAlice -> Bob : x\n\\enduml');
+      expect(svg).toMatch(/Syntax Error/);
     });
   });
 
@@ -220,6 +234,20 @@ describe('render worker (dist)', () => {
     expect(svg).not.toMatch(/zq[-_]/);
     expect(svg).not.toMatch(/<\?|<!--/);
     expect(svg).not.toMatch(/\sdata-/);
+  });
+
+  it('keeps the label of a link and nothing of where it leads', async () => {
+    // The engine wraps what a link draws in an <a> whose title repeats the target.
+    const svg = await render(
+      ['@startuml', 'participant Carol [[https://zq.example/c]]', 'Alice -> Carol : [[https://zq.example/b go]]', '@enduml'].join(
+        '\n'
+      )
+    );
+
+    expect(svg).toContain('Carol');
+    expect(svg).toContain('go');
+    expect(svg).not.toContain('zq.example');
+    expect(svg).not.toMatch(/<a\b/);
   });
 
   it('produces different output in dark mode', async () => {

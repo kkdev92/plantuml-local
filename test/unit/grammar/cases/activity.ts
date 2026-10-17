@@ -44,25 +44,29 @@ export const activityCases: GrammarCase[] = [
   {
     name: 'deprecated forms: a colour in front of the action, a stereotype in front of it',
     covers: ['command:CommandActivity3', 'command:CommandActivityLong3'],
-    // The engine ignores both and warns. It reads `#colour:` only as the
-    // start of an action on several lines: the `;` on the first line does
-    // not end it, the next line ending with `;` does.
+    // The engine ignores both and warns. A `#colour:` line ending with `;` is
+    // an action on one line; without the `;`, the action goes on to the line
+    // ending with one.
     source: uml`
       @startuml
       start
       #pink:coloured in front;
-      second line;
+      #pink:coloured, on
+      two lines;
       <<procedure>> :stereotype in front;
       stop
       @enduml
     `,
-    warns: /deprecated, you must add <<#pink>> at the end.*You must use stereotype at the end/,
+    warns: /deprecated and the color is ignored.*deprecated, you must add <<#pink>> at the end.*<<procedure>> before the ':' is ignored/,
     expect: [
       ['#pink', 'meta.action constant.other.color invalid.deprecated'],
       [':', 'punctuation.definition.action.begin'],
       ['coloured in front', 'meta.action'],
-      [';', 'meta.action !punctuation.definition.action.end'],
-      ['second line', 'meta.action'],
+      [';', 'punctuation.definition.action.end'],
+      ['#pink', 'meta.action constant.other.color invalid.deprecated'],
+      [':', 'punctuation.definition.action.begin'],
+      ['coloured, on', 'meta.action'],
+      ['two lines', 'meta.action'],
       [';', 'punctuation.definition.action.end'],
       ['<<procedure>>', 'meta.action entity.name.tag.stereotype invalid.deprecated'],
       [':', 'punctuation.definition.action.begin'],
@@ -120,6 +124,7 @@ export const activityCases: GrammarCase[] = [
       stop
       @enduml
     `,
+    warns: /This syntax is deprecated, you must add <<#pink>> at the end of the line/,
     expect: [
       ['if', 'keyword.control'],
       ['(', 'punctuation.section.parens.begin'],
@@ -473,7 +478,7 @@ export const activityCases: GrammarCase[] = [
     // `end group` closes the group with a warning (use `}`). It is not
     // marked deprecated: in a sequence diagram the same line is `end` with
     // the comment `group`, and is fine.
-    warns: /You should use a bracket \(\}\) instead of 'end group'/,
+    warns: /'end group' is deprecated: close the group with '\}' instead/,
     source: uml`
       @startuml
       start

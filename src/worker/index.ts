@@ -45,7 +45,7 @@ const files = installFileLoader((message) => {
  *
  * For a source of ten lines or more, the engine first tries the diagram
  * type that accepted the previous diagram (`lastFactory` in upstream's
- * PSystemBuilder2), where the command-line PlantUML always tries them in
+ * PSystemBuilderJs), where the command-line PlantUML always tries them in
  * the same order. A source that reads as two types — lines of
  * `A -> B : message` are both a sequence and a class diagram — therefore
  * depended on what happened to be rendered before it, in any open

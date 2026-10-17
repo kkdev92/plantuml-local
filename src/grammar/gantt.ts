@@ -248,7 +248,7 @@ export const ganttRepository: Record<string, Rule> = {
         match: re`(?i)${BOL}\s*(?:(hide|show)${SP}*)?(footbox)${SP}*$`,
         captures: { 1: kw, 2: kw },
       },
-      // label on first column and left aligned: the engine only warns that it is deprecated
+      // label on first column and left aligned: the engine ignores it with a warning
       {
         match: re`(?i)${BOL}\s*(labels?)${SP}+(on)${SP}*(first|last)${SP}*(column)(?:${SP}*(and)${SP}*(left|right)${SP}*(aligned))?$`,
         captures: { 1: deprecated, 2: deprecated, 3: deprecated, 4: deprecated, 5: deprecated, 6: deprecated, 7: deprecated },

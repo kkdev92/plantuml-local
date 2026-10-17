@@ -164,18 +164,24 @@ export function renderProblems(
   const lines = block.source.split(/\r?\n/);
   const located = failure.line !== null && failure.line <= lines.length ? failure.line : null;
   const line = located === null ? check.startLine : block.sourceLine + located - 1;
-  const text = located === null ? '' : (lines[located - 1] ?? '');
-  const { code, message } = classify(failure.message, text, labels, outcome.failedIncludes);
+  const { code, message } = classify(failure.message, labels, outcome.failedIncludes);
   return [{ line, severity: 'error', code, message }];
 }
 
 /** Tells an unsupported feature from a syntax error, by the engine's message. */
 function classify(
   message: string,
-  line: string,
   labels: ProblemLabels,
   failedIncludes: ReadonlyMap<string, string> = new Map()
 ): { code: string; message: string } {
+  // A standard library the engine cannot read is one that is not bundled.
+  // Azure is: there, the entry does not exist, as the engine says.
+  const library = /^cannot include <([^/>]+)/.exec(message)?.[1];
+  if (library !== undefined) {
+    return library.toLowerCase() === 'azure'
+      ? { code: PROBLEM_CODES.SYN001, message }
+      : { code: PROBLEM_CODES.CAP001, message: labels.libraryNotBundled(library) };
+  }
   if (/^cannot include /.test(message) || message === 'Cannot import') {
     const explained = withIncludeReason(message, failedIncludes);
     if (explained !== message) {
@@ -193,11 +199,6 @@ function classify(
     return explained !== message
       ? { code: PROBLEM_CODES.INC001, message: explained }
       : { code: PROBLEM_CODES.CAP001, message: `${message}: ${labels.themeFrom}` };
-  }
-  // The engine's only words for a library that is not bundled.
-  const library = /^\s*!include(?:_once|_many)?\s*<([^/>]+)/.exec(line)?.[1];
-  if (message === 'Fatal parsing error' && library !== undefined && library.toLowerCase() !== 'azure') {
-    return { code: PROBLEM_CODES.CAP001, message: labels.libraryNotBundled(library) };
   }
   return { code: PROBLEM_CODES.SYN001, message };
 }

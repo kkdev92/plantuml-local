@@ -6,9 +6,9 @@
  * starting with `@end…`; neither counts on a `'` comment line or inside a
  * `/' … '/` block comment, which the engine skips too. The engine draws only
  * the first diagram of an input and only the first page of a diagram that
- * uses `newpage`, and says nothing about the rest; it fails outright on a
- * diagram whose end line is missing. Those cases are told apart here,
- * before the engine sees the source.
+ * uses `newpage`, and says nothing about the rest; it adds the end line a
+ * diagram is missing. Those cases are told apart here, before the engine
+ * sees the source.
  *
  * Lines are counted from 0 within the source.
  */

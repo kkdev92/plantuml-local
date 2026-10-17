@@ -113,6 +113,22 @@ describe('sanitizeSvg', () => {
       expect(out).toContain('Shown</text>');
     });
 
+    it('replaces a link out of the document with what it draws, as its title repeats the target', () => {
+      // The engine's [[https://zq.example/b go]]: the label is drawn, the target is not.
+      const out = sanitizeSvg(
+        window,
+        WRAP(
+          '<a target="_top" href="https://zq.example/b" xlink:href="https://zq.example/b" xlink:type="simple" ' +
+            'xlink:actuate="onRequest" xlink:show="new" title="https://zq.example/b" xlink:title="https://zq.example/b">' +
+            '<text x="1" y="1" fill="#0000FF">go</text></a>'
+        )
+      );
+      expect(out).not.toMatch(/<a\b/);
+      expect(out).not.toContain('zq.example');
+      expect(out).not.toContain('xmlns:xlink');
+      expect(out).toContain('<text x="1" y="1" fill="#0000FF">go</text>');
+    });
+
     it('removes data-* attributes from the root <svg> element too', () => {
       const out = sanitizeSvg(
         window,

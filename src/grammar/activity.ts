@@ -200,22 +200,23 @@ export const activityRepository: Record<string, Rule> = {
    *
    * Two older forms still render, with a warning in the diagram, and are
    * marked deprecated: a stereotype in front of a one-line action, and a
-   * colour in front of the `:`. The engine ignores both. It reads the
-   * colour form only as the start of an action on several lines, so its
-   * first line never ends the action, even when it ends with `;`.
+   * colour in front of the `:`. The engine ignores both. A colour form whose
+   * line ends with `;` is an action on one line; without it, the action
+   * goes on to the line ending with `;`.
    */
   'activity-action': {
     patterns: [
       {
         name: scope('meta.action'),
-        match: re`${BOL}\s*(?:(<<.+?>>)${SP}*)?(:)(.*?)(;)${SP}*(${STEREOGROUP})?${SP}*(${URL})?${EOL}`,
+        match: re`${BOL}\s*(${COLORS})?(?:(<<.+?>>)${SP}*)?(:)(.*?)(;)${SP}*(${STEREOGROUP})?${SP}*(${URL})?${EOL}`,
         captures: {
-          1: named('entity.name.tag.stereotype invalid.deprecated'),
-          2: actionBegin,
-          3: nested('#label'),
-          4: actionEnd,
-          5: nested('#stereotype'),
-          6: nested('#creole-inline'),
+          1: named('constant.other.color invalid.deprecated'),
+          2: named('entity.name.tag.stereotype invalid.deprecated'),
+          3: actionBegin,
+          4: nested('#label'),
+          5: actionEnd,
+          6: nested('#stereotype'),
+          7: nested('#creole-inline'),
         },
       },
       {

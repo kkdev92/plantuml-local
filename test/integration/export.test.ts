@@ -206,8 +206,8 @@ describe('export (dist worker)', () => {
     ['a syntax error', ['@startuml', 'Alice -> Bob', 'this is not valid ;;; [[[', '@enduml'], /at line 5: Syntax Error\?/],
     ['a local include', ['@startuml', '!include shared.puml', 'Alice -> Bob', '@enduml'], /at line 4: cannot include shared\.puml/],
     ['an empty diagram', ['@startuml', '@enduml'], /at line 4: Empty description/],
-    ['a source without @startuml', ['Alice -> Bob : no start line'], /error: Diagram not supported by this release of PlantUML/],
-    ['a library that is not bundled', ['@startuml', '!include <C4/C4_Context>', '@enduml'], /at line 4: Fatal parsing error/],
+    ['a diagram type it does not draw', ['@startdot', 'digraph { a -> b }', '@enddot'], /error: Diagram not supported by this release of PlantUML/],
+    ['a library that is not bundled', ['@startuml', '!include <C4/C4_Context>', '@enduml'], /at line 4: cannot include <C4\/C4_Context>/],
     ['unreadable JSON', ['@startjson', '{ "a": ', '@endjson'], /error: Your data does not sound like JSON data/],
     ['an EBNF syntax error', ['@startebnf', 'rule = "a" | ;;;', '@endebnf'], /error: Syntax error!/],
   ])('refuses the drawing the engine makes for %s instead of writing it', async (_what, lines, reason) => {
@@ -240,12 +240,20 @@ describe('export (dist worker)', () => {
     expect(existsSync(join(workspace, 'docs/images/remote.svg'))).toBe(false);
   });
 
-  it('writes a diagram missing its end line, which the engine alone fails on', async () => {
+  it('writes a diagram missing its end line', async () => {
     const document = join(workspace, 'docs/open.md');
     const outcome = await exportAll(deps, document, 'images', findPlantUmlBlocks('```plantuml open\n@startuml\nAlice -> Bob : unterminated\n```'));
 
     expect(outcome?.failed).toHaveLength(0);
     expect(readFileSync(join(workspace, 'docs/images/open.svg'), 'utf8')).toContain('unterminated');
+  });
+
+  it('writes a block without @startuml, which the engine draws as a diagram', async () => {
+    const document = join(workspace, 'docs/bare.md');
+    const outcome = await exportAll(deps, document, 'images', findPlantUmlBlocks('```plantuml bare\nAlice -> Bob : no start line\n```'));
+
+    expect(outcome?.failed).toHaveLength(0);
+    expect(readFileSync(join(workspace, 'docs/images/bare.svg'), 'utf8')).toContain('no start line');
   });
 
   it('refuses a block with two diagrams or with pages, which the engine would cut short', async () => {

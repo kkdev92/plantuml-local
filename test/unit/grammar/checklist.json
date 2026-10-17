@@ -1,8 +1,8 @@
 {
   "upstream": {
     "repository": "plantuml/plantuml",
-    "tag": "v1.2026.8",
-    "commit": "149874a1bb2b64c42889d7178cb89f6647ac14bc",
+    "tag": "v1.2026.9",
+    "commit": "18d0aae311a4f1eb3723bb4b0ad939185e22f166",
     "build": "TeaVM (browser), MIT flavour"
   },
   "directives": [
@@ -172,7 +172,7 @@
       "types": [
         "SALT"
       ],
-      "supported": false
+      "supported": true
     },
     {
       "name": "sprites",
@@ -704,6 +704,51 @@
       "name": "PSystemVersionFactory",
       "type": "SEQUENCE",
       "commands": []
+    },
+    {
+      "name": "PSystemSaltFactory",
+      "type": "SALT",
+      "commands": [
+        "CommandNope",
+        "CommandPragma",
+        "CommandAssumeTransparent",
+        "CommandSkinParam",
+        "CommandSkinParamJaws",
+        "CommandSkinParamMultilines",
+        "CommandSkin",
+        "CommandMinwidth",
+        "CommandPage",
+        "CommandRotate",
+        "CommandFactorySprite.createMultiLine(false)",
+        "CommandFactorySprite.createSingleLine",
+        "CommandSpriteBase64",
+        "CommandSpriteMd5",
+        "CommandSpriteSvg",
+        "CommandSpriteSvgMultiline",
+        "CommandSpriteFile",
+        "CommandStyleSingleLineCSS",
+        "CommandStyleMultilinesCSS",
+        "CommandStyleImport",
+        "CommandScale",
+        "CommandScaleWidthAndHeight",
+        "CommandScaleWidthOrHeight",
+        "CommandScaleMaxWidth",
+        "CommandScaleMaxHeight",
+        "CommandScaleMaxWidthAndHeight",
+        "CommandTitle",
+        "CommandMainframe",
+        "CommandCaption",
+        "CommandMultilinesCaption",
+        "CommandMultilinesTitle",
+        "CommandMultilinesLegend",
+        "CommandLegend",
+        "CommandFooter",
+        "CommandMultilinesFooter",
+        "CommandHeader",
+        "CommandMultilinesHeader",
+        "CommandNamespaceSeparator",
+        "CommandAnything"
+      ]
     },
     {
       "name": "GanttDiagramFactory",

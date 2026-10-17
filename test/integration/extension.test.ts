@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import Module from 'node:module';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
@@ -24,13 +24,6 @@ import {
 
 const extensionPath = join(__dirname, '../../dist/extension.js');
 const require = createRequire(import.meta.url);
-
-/**
- * Whether the bundled engine asks the host for the files of local includes.
- * @plantuml/core 1.2026.8 does not: its includes fail before anyone is asked.
- */
-const enginePath = join(__dirname, '../../dist/engine/plantuml.js');
-const hasFileLoader = existsSync(enginePath) && readFileSync(enginePath, 'utf8').includes('PLANTUML_FILE_LOADER');
 
 /**
  * `activate` is asynchronous: the framework builds what it resolves to last,
@@ -542,17 +535,16 @@ describe('export (dist)', () => {
       const document = makeEditor(uri, DOCUMENT, 0).document;
       vscodeStub._test.openDocument(document);
       try {
-        const found = await problemsOf(uri, (items) => items.length >= (hasFileLoader ? 6 : 5));
+        const found = await problemsOf(uri, (items) => items.length >= 6);
         const ERROR = vscodeStub.DiagnosticSeverity.Error;
         const WARNING = vscodeStub.DiagnosticSeverity.Warning;
         expect(found.map((p) => [p.line, p.code, p.severity])).toEqual([
           [5, 'PLLOCAL-SYN001', ERROR],
           // The host refuses the include, saying why: /c is no folder on disk.
-          [12, hasFileLoader ? 'PLLOCAL-INC001' : 'PLLOCAL-CAP001', ERROR],
+          [12, 'PLLOCAL-INC001', ERROR],
           [20, 'PLLOCAL-DOC003', ERROR],
-          // !includesub reads its file through the loader too, which refuses it;
-          // an engine without the loader skips the line without a word.
-          ...(hasFileLoader ? [[27, 'PLLOCAL-INC001', ERROR]] : []),
+          // !includesub reads its file through the loader too, which refuses it.
+          [27, 'PLLOCAL-INC001', ERROR],
           [33, 'PLLOCAL-DOC002', WARNING],
           [38, 'PLLOCAL-WRN001', WARNING],
         ]);
@@ -560,15 +552,11 @@ describe('export (dist)', () => {
         // In the quote, past the marker; and an explanation, not the engine's bare words.
         expect(found[1]?.character).toBe(2);
         expect(found[1]?.message).toBe(
-          hasFileLoader
-            ? "cannot include shared.puml: Only files in the document's workspace folder are read. Open the folder that holds it."
-            : 'cannot include shared.puml: the bundled engine reads no files.'
+          "cannot include shared.puml: Only files in the document's workspace folder are read. Open the folder that holds it."
         );
-        if (hasFileLoader) {
-          expect(found[3]?.message).toBe(
-            "cannot include shared.puml!PART: Only files in the document's workspace folder are read. Open the folder that holds it."
-          );
-        }
+        expect(found[3]?.message).toBe(
+          "cannot include shared.puml!PART: Only files in the document's workspace folder are read. Open the folder that holds it."
+        );
         expect(found[found.length - 2]?.message).toContain('@enduml');
         expect(found[found.length - 1]?.message).toContain('deprecated');
       } finally {

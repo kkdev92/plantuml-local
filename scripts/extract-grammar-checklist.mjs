@@ -17,7 +17,7 @@
  *   if (!TeaVM.isTeaVM()) { ... }        dropped
  *
  * Usage:
- *   git clone --depth 1 --branch v1.2026.8 https://github.com/plantuml/plantuml.git
+ *   git clone --depth 1 --branch v1.2026.9 https://github.com/plantuml/plantuml.git
  *   node scripts/extract-grammar-checklist.mjs --source ../plantuml
  */
 
@@ -304,8 +304,9 @@ function diagramTypeOf(index, className) {
 // --- sections ----------------------------------------------------------------
 
 function browserFactories(index) {
-  const code = readFlavoured(classFile(index, 'PSystemBuilder2'));
+  const code = readFlavoured(classFile(index, 'PSystemBuilderJs'));
   const names = [...code.matchAll(/factories\.add\(\s*new (\w+)\(/g)].map((m) => m[1]);
+  if (names.length === 0) throw new Error('no diagram factories in PSystemBuilderJs');
   return [...new Set(names)];
 }
 
@@ -361,8 +362,10 @@ function preprocessorLineTypes(index) {
 }
 
 function builtins(index) {
-  const code = readFlavoured(classFile(index, 'TContext'));
-  const open = code.indexOf('{', code.indexOf('void addStandardFunctions('));
+  const code = readFlavoured(classFile(index, 'StandardFunctions'));
+  const method = code.indexOf('FunctionsSet build(');
+  if (method === -1) throw new Error('StandardFunctions.build not found');
+  const open = code.indexOf('{', method);
   const body = code.slice(open, matchBracket(code, open));
   const names = [];
   for (const m of body.matchAll(/functionsSet\.addFunction\(new (\w+)\(/g)) {
@@ -371,6 +374,7 @@ function builtins(index) {
     if (signatures.length === 0) throw new Error(`no signature in ${m[1]}`);
     names.push(...signatures);
   }
+  if (names.length === 0) throw new Error('no builtin functions in StandardFunctions.build');
   return [...new Set(names)];
 }
 
