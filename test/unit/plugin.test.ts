@@ -20,6 +20,7 @@ const LABELS = {
   severalDiagrams: 'one diagram per block',
   pages: 'no pages',
   missingEnd: (end: string): string => `no ${end}`,
+  beforeStart: (start: string): string => `above ${start}`,
   notUpdated: (mode: string): string => `not updated (${mode})`,
   includeFailed: (path: string, reason: string): string => `cannot include ${path} (${reason})`,
 };
@@ -150,6 +151,17 @@ describe('createPlantUmlPlugin', () => {
     expect(html).toContain('plantuml-notice');
     expect(html).toContain('no @enduml');
     expect(html).toContain('<svg>@startuml\nA -> B\n@enduml</svg>');
+  });
+
+  it('draws a diagram with lines above its start line, and says they are not drawn', async () => {
+    const h = makeHarness();
+    const source = 'title Before\n@startuml\nA -> B';
+    h.fence('plantuml', source);
+    await h.settle();
+    expect(h.deps.render).toHaveBeenCalledWith(`${source}\n@enduml`, false, undefined);
+    const html = h.fence('plantuml', source);
+    expect(html).toContain('<div class="plantuml-notice">above @startuml</div><div class="plantuml-notice">no @enduml</div>');
+    expect(html.indexOf('plantuml-notice')).toBeLessThan(html.indexOf('<svg>'));
   });
 
   it('renders a puml fence as a diagram', async () => {

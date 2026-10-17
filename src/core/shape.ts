@@ -6,9 +6,10 @@
  * starting with `@end…`; neither counts on a `'` comment line or inside a
  * `/' … '/` block comment, which the engine skips too. The engine draws only
  * the first diagram of an input and only the first page of a diagram that
- * uses `newpage`, and says nothing about the rest; it adds the end line a
- * diagram is missing. Those cases are told apart here, before the engine
- * sees the source.
+ * uses `newpage`, and says nothing about the rest; nor about the lines it
+ * leaves out above the start line. It adds the end line a diagram is
+ * missing. Those cases are told apart here, before the engine sees the
+ * source.
  *
  * Lines are counted from 0 within the source.
  */
@@ -19,8 +20,16 @@ export type DiagramShape =
    * Hand `source` to the engine. `addedEnd` is the end line appended
    * because the block had none, or null when the source is unchanged.
    * `startLine` is the diagram's `@start…` line, or null without one.
+   * `before` is the first line above it, which the engine leaves out with
+   * the rest up to the start line `start`, or null when there is none.
    */
-  | { kind: 'drawable'; source: string; addedEnd: string | null; startLine: number | null }
+  | {
+      kind: 'drawable';
+      source: string;
+      addedEnd: string | null;
+      startLine: number | null;
+      before: { line: number; start: string } | null;
+    }
   /** More than one `@start…` line, the second at `line`: only the first diagram would be drawn. */
   | { kind: 'several'; line: number }
   /** `newpage` inside the diagram, at `line`: only the first page would be drawn. */
@@ -52,6 +61,8 @@ export function forEachCodeLine(source: string, visit: (line: string, index: num
 
 export function diagramShape(source: string): DiagramShape {
   let startLine: number | null = null;
+  let startDirective = '';
+  let lineBefore: number | null = null;
   let secondStart: number | null = null;
   let newpage: number | null = null;
   let open = false;
@@ -63,9 +74,16 @@ export function diagramShape(source: string): DiagramShape {
       if (startLine === null) {
         startLine = index;
         open = true;
+        startDirective = `${start[1] ?? '@'}start${start[2] ?? 'uml'}`;
         addedEnd = `${start[1] ?? '@'}end${start[2] ?? 'uml'}`;
       } else {
         secondStart ??= index;
+      }
+      return;
+    }
+    if (startLine === null) {
+      if (line.trim() !== '') {
+        lineBefore ??= index;
       }
       return;
     }
@@ -84,8 +102,14 @@ export function diagramShape(source: string): DiagramShape {
   if (newpage !== null) {
     return { kind: 'pages', line: newpage };
   }
+  // The engine starts the diagram at the first `@start…` line, and only an
+  // `@` one; without one it keeps every line.
+  const before =
+    startLine !== null && lineBefore !== null && startDirective.startsWith('@')
+      ? { line: lineBefore, start: startDirective }
+      : null;
   if (startLine !== null && open) {
-    return { kind: 'drawable', source: `${source}\n${addedEnd}`, addedEnd, startLine };
+    return { kind: 'drawable', source: `${source}\n${addedEnd}`, addedEnd, startLine, before };
   }
-  return { kind: 'drawable', source, addedEnd: null, startLine };
+  return { kind: 'drawable', source, addedEnd: null, startLine, before };
 }

@@ -58,8 +58,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   input differently, which changes what some blocks show:
   - A block without `@startuml` is drawn as a diagram. It used to show
     *Diagram not supported*.
-  - Lines before `@startuml` are left out of the drawing. The block used to
-    show *Diagram not supported*.
+  - Lines above `@startuml` are left out of the drawing; a note above the
+    diagram and a warning in the Problems panel (`PLLOCAL-DOC004`) say so.
+    The block used to show *Diagram not supported*.
   - A diagram between `\startuml` and `\enduml` fails with a syntax error,
     where it used to be drawn. Write `@startuml` and `@enduml`.
   - In an activity diagram, `#pink:text;` is an action on its own line, drawn

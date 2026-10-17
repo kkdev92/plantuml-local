@@ -148,7 +148,9 @@ first time is drawn whatever the mode; the Problems checks still follow every
 change, and export always uses the current text.
 
 A diagram whose `@enduml` line is missing is drawn as if the block ended with
-one, with a note above it saying so; the export writes it the same way.
+one, with a note above it saying so; the export writes it the same way. Lines
+above `@startuml` in a block are left out of the drawing, as the engine reads
+it, and a note above the diagram says so too.
 
 ### Syntax highlighting
 
@@ -260,7 +262,8 @@ it is on:
 - what the bundled engine cannot do: a library other than `azure`, a URL, emoji;
 - what it would drop without a word: a second diagram in a block, the pages
   after `newpage`;
-- a diagram with no `@enduml` line, which is drawn anyway.
+- a diagram with no `@enduml` line, which is drawn anyway, and lines above
+  `@startuml`, which the drawing leaves out.
 
 ![Three diagrams with problems: the lines marked in the editor, the engine's messages in the preview, and the list in the Problems panel](images/problems-panel.png)
 

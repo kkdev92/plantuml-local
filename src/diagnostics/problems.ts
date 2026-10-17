@@ -31,6 +31,8 @@ export const PROBLEM_CODES = {
   DOC002: 'PLLOCAL-DOC002',
   /** More than one diagram in a block. */
   DOC003: 'PLLOCAL-DOC003',
+  /** Lines above a diagram's start line, which the engine leaves out. */
+  DOC004: 'PLLOCAL-DOC004',
   /** A syntax error the engine reported. */
   SYN001: 'PLLOCAL-SYN001',
   /** Something this extension does not support, including what the engine drops silently. */
@@ -61,6 +63,7 @@ export interface ProblemLabels {
   severalDiagrams: string;
   pages: string;
   missingEnd(end: string): string;
+  beforeStart(start: string): string;
   /** Follows the engine's "cannot include …" or "Cannot import". */
   localFile: string;
   /** Follows the engine's "Cannot load theme … in …" for a theme no file was asked for: from a library or a URL. */
@@ -113,6 +116,9 @@ export function checkSource(block: PlantUmlBlock, labels: ProblemLabels): Source
     return { problems, render: null, startLine };
   }
 
+  if (shape.before !== null) {
+    problem(at(shape.before.line), 'warning', PROBLEM_CODES.DOC004, labels.beforeStart(shape.before.start));
+  }
   if (shape.addedEnd !== null) {
     problem(startLine, 'warning', PROBLEM_CODES.DOC002, labels.missingEnd(shape.addedEnd));
   }
