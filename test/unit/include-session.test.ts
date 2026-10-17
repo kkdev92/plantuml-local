@@ -52,6 +52,49 @@ describe('IncludeSession', () => {
     expect([...session.dependencies]).toEqual([join(root, 'docs', 'common.puml')]);
   });
 
+  it('delivers the whole file so the engine can select a diagram', async () => {
+    await writeFile(join(root, 'docs', 'ids.puml'), '@startuml(id=FIRST)\nA -> B\n@enduml\n@startuml(id=SECOND)\nC -> D\n@enduml\n');
+    const session = new IncludeSession(access, closed);
+    await expect(session.load('two.puml', null)).resolves.toMatchObject({
+      id: join(root, 'docs', 'two.puml'),
+    });
+    await expect(session.load('ids.puml', null)).resolves.toMatchObject({
+      id: join(root, 'docs', 'ids.puml'),
+    });
+    expect(session.failures).toEqual([]);
+  });
+
+  it('delivers a sub and the other diagrams without trying to extract them', async () => {
+    await writeFile(
+      join(root, 'docs', 'subs.puml'),
+      '!startsub PART\nA -> B\n!endsub\n@startuml\nC -> D\n@enduml\n@startuml\nE -> F\n@enduml\n'
+    );
+    const session = new IncludeSession(access, closed);
+    await expect(session.load('subs.puml', null)).resolves.toMatchObject({
+      id: join(root, 'docs', 'subs.puml'),
+    });
+    expect(session.failures).toEqual([]);
+  });
+
+  it('keeps the lines of a theme read from a folder for the palette, without its YAML header', async () => {
+    await mkdir(join(root, 'docs', 'themes'));
+    await writeFile(
+      join(root, 'docs', 'themes', 'puml-theme-local.puml'),
+      "---\nname: local\n---\n' how it looks\nskinparam backgroundColor #FEDCBA\n\n!theme cerulean\n"
+    );
+    const session = new IncludeSession(access, closed);
+    await session.load('themes/puml-theme-local.puml', null, 'theme');
+    expect(session.themes).toEqual(['skinparam backgroundColor #FEDCBA', '!theme cerulean']);
+  });
+
+  it.each(['include', 'includesub', undefined] as const)('does not classify a filename as a theme for kind %s', async (kind) => {
+    await writeFile(join(root, 'docs', 'puml-theme-sections.puml'), '@startuml\n!theme cerulean\nA -> B\n@enduml\n');
+    const session = new IncludeSession(access, closed);
+    const file = await session.load('puml-theme-sections.puml', null, kind);
+    expect(file.text).toContain('@startuml');
+    expect(session.themes).toEqual(['!theme cerulean']);
+  });
+
   it('looks for a bare name in the search folders after the document folder, noting where it looked', async () => {
     const session = new IncludeSession(access, closed);
     await expect(session.load('skin.iuml', null)).resolves.toMatchObject({ id: join(root, 'styles', 'skin.iuml') });
@@ -78,14 +121,12 @@ describe('IncludeSession', () => {
     await expect(session.load('./none.puml', null)).rejects.toThrow();
     await expect(session.load('/etc/passwd.txt', null)).rejects.toThrow();
     await expect(session.load('../../outside.puml', null)).rejects.toThrow();
-    await expect(session.load('two.puml', null)).rejects.toThrow();
     await expect(session.load('image.png', null)).rejects.toThrow();
     expect(session.failures.map((failure) => failure.reason)).toEqual([
       { kind: 'missing', searched: true },
       { kind: 'missing', searched: false },
       { kind: 'path', refusal: 'absolute' },
       { kind: 'outside' },
-      { kind: 'fragment', shape: 'several', line: 3 },
       { kind: 'path', refusal: 'extension' },
     ]);
   });
@@ -173,7 +214,14 @@ describe('hasLocalInclude', () => {
     ['!INCLUDE common.puml', true],
     ['!include <azure/AzureCommon>', false],
     ['!include https://example.com/a.puml', false],
-    ['!includesub a.puml!PART', false],
+    ['!includesub a.puml!PART', true],
+    ['!includesub PART', false],
+    ['!includesub <azure/AzureCommon>!PART', false],
+    ['!theme local from themes', true],
+    ['!theme local FROM ../themes', true],
+    ['!theme cerulean', false],
+    ['!theme local from <lib/themes>', false],
+    ['!theme local from https://example.com/themes', false],
     ['!includeurl a.puml', false],
     ["' !include common.puml", false],
     ['A -> B : !include', false],
@@ -203,8 +251,6 @@ describe('describing a failed include', () => {
     encoding: 'encoding',
     nul: 'nul',
     unreadable: 'unreadable',
-    severalDiagrams: (line) => `several ${String(line)}`,
-    outsideDiagram: (line) => `outside diagram ${String(line)}`,
     tooDeep: (most) => `deep ${String(most)}`,
     tooMany: (most) => `many ${String(most)}`,
     tooLarge: (mebibytes) => `large ${String(mebibytes)}`,
@@ -222,8 +268,6 @@ describe('describing a failed include', () => {
     [{ kind: 'missing', searched: false }, 'missing'],
     [{ kind: 'missing', searched: true }, 'missing anywhere'],
     [{ kind: 'read', refusal: 'link' }, 'link'],
-    [{ kind: 'fragment', shape: 'several', line: 3 }, 'several 4'],
-    [{ kind: 'fragment', shape: 'outside', line: 0 }, 'outside diagram 1'],
     [{ kind: 'limit', limit: 'bytes' }, 'large 16'],
   ])('%j', (reason, text) => {
     expect(describe_(reason)).toBe(text);
@@ -250,6 +294,22 @@ describe('describing a failed include', () => {
     expect(withIncludeReason('cannot include b.puml', failed)).toBe('cannot include b.puml');
     expect(withIncludeReason('Syntax Error?', failed)).toBe('Syntax Error?');
   });
+
+  it('finds the file of an !includesub, named with its sub, and of a theme from a folder', () => {
+    const failed = new Map([
+      ['parts.puml', 'no sub PART'],
+      ['themes/puml-theme-local.puml', 'missing'],
+      ['puml-theme-root.puml', 'link'],
+    ]);
+    expect(withIncludeReason('cannot include parts.puml!PART', failed)).toBe('cannot include parts.puml!PART: no sub PART');
+    expect(withIncludeReason('Cannot load theme local in themes', failed)).toBe(
+      'Cannot load theme local in themes: missing'
+    );
+    expect(withIncludeReason('Cannot load theme local in themes/', failed)).toBe(
+      'Cannot load theme local in themes/: missing'
+    );
+    expect(withIncludeReason('Cannot load theme other in themes', failed)).toBe('Cannot load theme other in themes');
+  });
 });
 
 describe('installFileLoader', () => {
@@ -257,7 +317,8 @@ describe('installFileLoader', () => {
     path: string,
     from: string | null,
     ok: (id: string, text: string) => void,
-    fail: (reason: string) => void
+    fail: (reason: string) => void,
+    details?: unknown
   ) => false | undefined;
   const loader = (): Loader => (globalThis as unknown as { PLANTUML_FILE_LOADER: Loader }).PLANTUML_FILE_LOADER;
 
@@ -292,6 +353,31 @@ describe('installFileLoader', () => {
     bridge.answer({ type: 'include', request: 2, error: 'missing' });
     expect(ok).toHaveBeenCalledWith('/ws/a.puml', 'A -> B');
     expect(fail).toHaveBeenCalledWith('missing');
+  });
+
+  it('uses the four-argument loader contract', () => {
+    const posted: IncludeRequestMessage[] = [];
+    installFileLoader((message) => posted.push(message)).begin(3, true);
+    loader()('a.puml', null, vi.fn(), vi.fn());
+    loader()('themes/puml-theme-x.puml', null, vi.fn(), vi.fn());
+    expect(posted).toEqual([
+      { type: 'include', render: 3, request: 1, path: 'a.puml', from: null },
+      { type: 'include', render: 3, request: 2, path: 'themes/puml-theme-x.puml', from: null },
+    ]);
+  });
+
+  it.each(['include', 'includesub', 'theme'])('passes the engine request kind %s to the host', (kind) => {
+    const posted: IncludeRequestMessage[] = [];
+    installFileLoader((message) => posted.push(message)).begin(3, true);
+    loader()('a.puml', null, vi.fn(), vi.fn(), { kind });
+    expect(posted).toEqual([{ type: 'include', render: 3, request: 1, path: 'a.puml', from: null, kind }]);
+  });
+
+  it.each([null, {}, { kind: 'future' }, { kind: 1 }, 'theme'])('ignores an unknown request shape %j', (details) => {
+    const posted: IncludeRequestMessage[] = [];
+    installFileLoader((message) => posted.push(message)).begin(3, true);
+    loader()('a.puml', null, vi.fn(), vi.fn(), details);
+    expect(posted).toEqual([{ type: 'include', render: 3, request: 1, path: 'a.puml', from: null }]);
   });
 
   it('fails what is still waiting when the render ends, and ignores a late answer', () => {

@@ -29,7 +29,11 @@ export interface IncludeRequestMessage {
   path: string;
   /** The file the include is written in, as an id given earlier, or null for the diagram. */
   from: string | null;
+  /** The operation the engine is performing, when its loader API supplies it. */
+  kind?: IncludeKind;
 }
+
+export type IncludeKind = 'include' | 'includesub' | 'theme';
 
 /** The host's answer to an {@link IncludeRequestMessage}. Exactly one of file / error is set. */
 export interface IncludeResponseMessage {
@@ -47,7 +51,7 @@ export interface IncludedFile {
 }
 
 /** Answers the local includes of one render, rejecting a file it does not deliver. */
-export type IncludeLoader = (path: string, from: string | null) => Promise<IncludedFile>;
+export type IncludeLoader = (path: string, from: string | null, kind?: IncludeKind) => Promise<IncludedFile>;
 
 /** A diagram drawn for the document it is written in. */
 export interface DiagramRender {
