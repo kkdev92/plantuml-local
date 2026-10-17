@@ -148,16 +148,18 @@ describe('renderProblems', () => {
     });
   });
 
-  it('names the library behind the engine’s "Fatal parsing error"', () => {
+  it('names a standard library that is not bundled', () => {
     const { block, check } = at('@startuml', '!include <C4/C4_Context>', '@enduml');
-    expect(renderProblems(block, check, { svg: errorImage(2, 'Fatal parsing error') }, LABELS)).toEqual([
+    expect(renderProblems(block, check, { svg: errorImage(2, 'cannot include &lt;C4/C4_Context&gt;') }, LABELS)).toEqual([
       { line: 4, severity: 'error', code: PROBLEM_CODES.CAP001, message: 'C4 not bundled' },
     ]);
-    // Elsewhere it stays the engine's own error.
-    const plain = at('@startuml', 'Alice -> Bob', '@enduml');
-    expect(renderProblems(plain.block, plain.check, { svg: errorImage(2, 'Fatal parsing error') }, LABELS)[0]?.code).toBe(
-      PROBLEM_CODES.SYN001
-    );
+    // Azure is bundled: an entry it does not have is the engine's own error.
+    const azure = at('@startuml', '!include <azure/NoSuchThing>', '@enduml');
+    expect(
+      renderProblems(azure.block, azure.check, { svg: errorImage(2, 'cannot include &lt;azure/NoSuchThing&gt;') }, LABELS)
+    ).toEqual([
+      { line: 4, severity: 'error', code: PROBLEM_CODES.SYN001, message: 'cannot include <azure/NoSuchThing>' },
+    ]);
   });
 
   it('puts an error on a line the extension added on the diagram’s start line', () => {

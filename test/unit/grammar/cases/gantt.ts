@@ -398,7 +398,7 @@ export const ganttCases: GrammarCase[] = [
       'command:CommandTaskCompleteDefault',
     ],
     // `label on first column` does nothing any more; the engine warns.
-    warns: /This command is deprecated/,
+    warns: /'labels on first column' is no longer supported/,
     source: uml`
       @startgantt
       language de

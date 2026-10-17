@@ -20,13 +20,15 @@ import checklist from '../unit/grammar/checklist.json';
  *
  * The engine runs in this process rather than in the render worker: its
  * log names the factories it tries, and has to be read render by render.
+ * The engine logs nothing unless `PLANTUML_DEBUG` is `true`, so this test
+ * turns it on; the worker leaves it off.
  */
 
 const distDir = join(__dirname, '../../dist');
 
 /**
  * The factories the engine tries for each `@start` type, in its order
- * (PSystemBuilder2 upstream). Most log their name when tried; the others
+ * (PSystemBuilderJs upstream). Most log their name when tried; the others
  * are named by position here, and the positions are checked against the
  * names that are logged.
  */
@@ -53,6 +55,7 @@ const ORDER: Record<string, readonly string[]> = {
   yaml: ['YamlDiagramFactory'],
   ebnf: ['PSystemEbnfFactory'],
   regex: ['PSystemRegexFactory'],
+  salt: ['PSystemSaltFactory'],
 };
 
 /**
@@ -85,9 +88,11 @@ beforeAll(async () => {
   writeFileSync(file, bundle.outputFiles[0]?.text ?? '');
   const { loadEngine } = createRequire(__filename)(file) as typeof EngineModule;
   ({ engine } = await loadEngine(join(distDir, 'engine'), join(distDir, 'stdlib')));
+  (globalThis as Record<string, unknown>).PLANTUML_DEBUG = true;
 });
 
 afterAll(() => {
+  delete (globalThis as Record<string, unknown>).PLANTUML_DEBUG;
   rmSync(bundleDir, { recursive: true, force: true });
 });
 
@@ -125,13 +130,19 @@ interface Reading {
 async function read(source: string): Promise<Reading> {
   await engineLog(RESET);
   const log = await engineLog(source);
-  const logged: (string | undefined)[] = [];
+  let logged: (string | undefined)[] = [];
   let accepted = -1;
   for (const [i, line] of log.entries()) {
-    if (line.includes('[PSystemBuilder2] trying ')) {
+    if (line.includes('[PSystemBuilderJs] createDiagram start')) {
+      // A rendering that needed something not ready yet (Graphviz, the
+      // first time it is used) is thrown away and done again: only the
+      // last attempt counts.
+      logged = [];
+      accepted = -1;
+    } else if (line.includes('[PSystemBuilderJs] trying ')) {
       // The factory's own "createSystem" line follows, if it logs one.
       logged.push(/\[(\w+)\] createSystem/.exec(log[i + 1] ?? '')?.[1]);
-    } else if (line.includes('[PSystemBuilder2] ok!')) {
+    } else if (line.includes('[PSystemBuilderJs] ok!')) {
       accepted = logged.length - 1;
     }
   }

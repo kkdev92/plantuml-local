@@ -540,7 +540,8 @@ and would show the referenced image as a second copy.
 - A diagram wider or taller than 8192 pixels is not drawn; an error is shown
   instead
 - Only the first error in a diagram is reported
-- Start and end lines must be lowercase: `@StartUml` fails
+- Start and end lines must be lowercase and begin with `@`: `@StartUml` and
+  `\startuml` fail
 - Four `!theme` themes are not bundled: `mars`, `sunlust`, `toy` and `vibrant`
 - Features excluded from the bundled PlantUML browser build are unavailable.
   Among them: embedded diagrams (`{{ … }}` inside a note, a legend or a class

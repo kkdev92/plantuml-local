@@ -9,7 +9,7 @@ in [`third-party/`](third-party).
 
 | Component | Version | Licence | Full text |
 | --- | --- | --- | --- |
-| [`@plantuml/core`](https://www.npmjs.com/package/@plantuml/core) | 1.2026.8 | MIT | [plantuml-core-LICENSE.txt](third-party/plantuml-core-LICENSE.txt) |
+| [`@plantuml/core`](https://www.npmjs.com/package/@plantuml/core) | 1.2026.9 | MIT | [plantuml-core-LICENSE.txt](third-party/plantuml-core-LICENSE.txt) |
 | [Viz.js](https://github.com/mdaines/viz-js) | 3.24.0 | MIT | [viz-js-LICENSE.txt](third-party/viz-js-LICENSE.txt) |
 | [Graphviz](https://graphviz.org/) | (in Viz.js WebAssembly) | EPL-1.0 | [graphviz-LICENSE.txt](third-party/graphviz-LICENSE.txt) |
 | [Expat](https://libexpat.github.io/) | (in Viz.js WebAssembly) | MIT | [expat-LICENSE.txt](third-party/expat-LICENSE.txt) |

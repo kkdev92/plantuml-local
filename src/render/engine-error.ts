@@ -3,7 +3,7 @@
  * not render.
  *
  * Most failures — a syntax error, an include that cannot be resolved, an
- * empty diagram, a source without `@startuml` — do not reach
+ * empty diagram, a diagram type it does not draw — do not reach
  * `renderToString`'s error callback. The engine draws a diagram that
  * describes the problem and passes that to the success callback instead.
  * The preview shows it as it is, which is what someone fixing the source
@@ -96,8 +96,8 @@ function locatedError(texts: readonly TextElement[]): EngineError | null {
 }
 
 /**
- * The layout for a source the engine cannot place in any diagram type:
- * no `@start…` line, or text before it.
+ * The layout for a diagram type the engine knows but does not draw
+ * (`@startdot`).
  */
 function notSupported(texts: readonly TextElement[]): EngineError | null {
   if (texts[0]?.content !== NOT_SUPPORTED) {

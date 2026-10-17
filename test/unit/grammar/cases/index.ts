@@ -12,6 +12,7 @@ import { interplayCases, letterCaseCases, whitespaceCases } from './interplay';
 import { networkCases } from './network';
 import { outlineCases } from './outline';
 import { preprocessorCases } from './preprocessor';
+import { saltCases } from './salt';
 import { sequenceCases } from './sequence';
 import { stateCases } from './state';
 import { syntaxCases } from './syntax';
@@ -37,6 +38,7 @@ export const caseGroups: Record<string, GrammarCase[]> = {
   outline: outlineCases,
   network: networkCases,
   syntax: syntaxCases,
+  salt: saltCases,
   data: dataCases,
   documents: documentCases,
   interplay: interplayCases,

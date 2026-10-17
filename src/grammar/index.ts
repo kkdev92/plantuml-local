@@ -17,6 +17,7 @@ import { networkRepository } from './network';
 import { notesRepository } from './notes';
 import { afterLeadingComment, plantumlGrammar } from './plantuml';
 import { asciiWhitespace, include, merge, type Grammar, type Rule } from './rules';
+import { saltRepository } from './salt';
 import { sequenceRepository } from './sequence';
 import { stateRepository } from './state';
 import { syntaxDiagramRepository } from './syntaxdiagrams';
@@ -91,6 +92,7 @@ const OTHER_KINDS = [
   'yaml',
   'ebnf',
   'regex',
+  'salt',
 ] as const;
 
 export const grammars: readonly { file: string; grammar: Grammar }[] = [
@@ -114,6 +116,7 @@ export const grammars: readonly { file: string; grammar: Grammar }[] = [
         syntaxDiagramRepository,
         dataRepository,
         versionRepository,
+        saltRepository,
         { 'uml-body': body('diagram-uml'), 'diagram-uml': umlLine },
         Object.fromEntries(OTHER_KINDS.map((kind) => [`${kind}-body`, body(`diagram-${kind}`)]))
       )

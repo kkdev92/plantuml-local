@@ -27,6 +27,10 @@ import type { Window } from 'happy-dom';
  * - `data-*` attributes. The engine tags elements with `data-qualified-name`
  *   and `data-source-line`, and the names include aliases and elements
  *   hidden with `hide`. Nothing draws them.
+ * - links out of the document. The engine wraps what a `[[url]]` link
+ *   draws in an `<a>` whose `title` and `xlink:title` repeat the target,
+ *   which `[[url label]]` does not draw. Such an `<a>` is replaced by what
+ *   it draws.
  *
  * DOMPurify is deliberately not used here: under happy-dom its
  * innerHTML-based parsing mangles SVG structure (the root `<svg>` element
@@ -94,6 +98,17 @@ interface ElementLike extends NodeLike {
   attributes: ArrayLike<{ name: string; value: string }>;
   removeAttribute(name: string): void;
   setAttribute(name: string, value: string): void;
+  replaceWith(...nodes: NodeLike[]): void;
+}
+
+/** An `<a>` leading out of the document (see the module comment). */
+function isOutboundLink(element: ElementLike): boolean {
+  return (
+    element.nodeName.toLowerCase() === 'a' &&
+    Array.from(element.attributes).some(
+      (attribute) => LINK_ATTRIBUTES.has(attribute.name.toLowerCase()) && !attribute.value.startsWith('#')
+    )
+  );
 }
 
 /** Whether any attribute that survived stripping uses the xlink prefix. */
@@ -132,6 +147,11 @@ function walk(element: ElementLike, state: StripState): void {
     const child = node as ElementLike;
     if (DANGEROUS_ELEMENTS.has(child.nodeName.toLowerCase())) {
       child.remove();
+      continue;
+    }
+    if (isOutboundLink(child)) {
+      walk(child, state);
+      child.replaceWith(...Array.from(child.childNodes));
       continue;
     }
     stripAttributes(child, state);

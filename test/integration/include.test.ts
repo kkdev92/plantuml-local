@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -13,14 +13,9 @@ import { IncludeSession, type IncludeAccess } from '../../src/includes/session';
 /**
  * Local includes through the built worker and the bundled engine: the
  * engine asks, the worker passes the request on, the session answers.
- *
- * Skipped with an engine that has no file loader, as @plantuml/core
- * 1.2026.8 has none: its includes fail before anyone is asked.
  */
 
 const workerPath = join(__dirname, '../../dist/worker.js');
-const enginePath = join(__dirname, '../../dist/engine/plantuml.js');
-const hasFileLoader = existsSync(enginePath) && readFileSync(enginePath, 'utf8').includes('PLANTUML_FILE_LOADER');
 
 const log = { debug: vi.fn(), warn: vi.fn(), error: vi.fn() };
 
@@ -29,7 +24,7 @@ function labels(svg: string): string[] {
   return [...svg.matchAll(/<text[^>]*>([^<]*)<\/text>/g)].map((match) => match[1] ?? '');
 }
 
-describe.runIf(hasFileLoader)('local includes through the built worker', () => {
+describe('local includes through the built worker', () => {
   let client: RendererClient;
   let temp: string;
   let root: string;
@@ -136,7 +131,7 @@ describe.runIf(hasFileLoader)('local includes through the built worker', () => {
   });
 });
 
-describe.runIf(hasFileLoader)('the palette of a diagram whose included file picks a theme', () => {
+describe('the palette of a diagram whose included file picks a theme', () => {
   let client: RendererClient;
   let temp: string;
   let root: string;
@@ -181,7 +176,7 @@ describe.runIf(hasFileLoader)('the palette of a diagram whose included file pick
   });
 });
 
-describe.runIf(hasFileLoader)('the path an include line asks for', () => {
+describe('the path an include line asks for', () => {
   let client: RendererClient;
 
   beforeAll(() => {
@@ -252,7 +247,7 @@ describe.runIf(hasFileLoader)('the path an include line asks for', () => {
   });
 });
 
-describe.runIf(hasFileLoader)('a selector, !includesub and !theme … from through the session', () => {
+describe('a selector, !includesub and !theme … from through the session', () => {
   let client: RendererClient;
   let temp: string;
   let root: string;

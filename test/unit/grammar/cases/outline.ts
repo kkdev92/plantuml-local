@@ -65,7 +65,7 @@ export const outlineCases: GrammarCase[] = [
     covers: ['command:CommandWBSItemNew(0)', 'command:CommandWBSItemOld(0)'],
     // The side or shape after the colour or code is the older order: the
     // engine accepts it with a warning.
-    warns: /Please define Direction\/Shape before Color\/Id/,
+    warns: /Shape \(_\) and direction \(< >\) must come before color and id/,
     source: uml`
       @startwbs
       title Work
@@ -103,7 +103,7 @@ export const outlineCases: GrammarCase[] = [
       'command:CommandWBSItemMultilineOld',
       'command:CommandWBSLink',
     ],
-    warns: /Please define Direction\/Shape before Color\/Id/,
+    warns: /Shape \(_\) and direction \(< >\) must come before color and id/,
     source: uml`
       @startwbs
       * "Project" as P

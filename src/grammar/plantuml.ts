@@ -35,6 +35,7 @@ export const SUPPORTED_DIAGRAMS: readonly DiagramKind[] = [
   { names: ['yaml'], body: 'yaml-body' },
   { names: ['ebnf'], body: 'ebnf-body' },
   { names: ['regex'], body: 'regex-body' },
+  { names: ['salt'], body: 'salt-body' },
 ];
 
 const diagramEnd = {

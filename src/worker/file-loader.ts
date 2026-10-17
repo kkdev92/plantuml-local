@@ -5,8 +5,8 @@ import type { IncludeKind, IncludeRequestMessage, IncludeResponseMessage } from 
  *
  * The engine asks `PLANTUML_FILE_LOADER` for the file of each local
  * `!include`, `!include_once`, `!include_many`, `!includesub` and
- * `!theme … from` and waits for the answer; it reads
- * nothing itself. Which file may be read is not the worker's to
+ * `!theme … from`, and draws the diagram again once it has the answer; it
+ * reads nothing itself. Which file may be read is not the worker's to
  * decide — the host does that, with the workspace's trust, its folders and
  * the editor's open documents at hand (src/includes/) — so each request
  * goes to the host and the answer comes back.

@@ -44,12 +44,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `!theme name from folder` reads a local theme. Selection and missing-section
   errors come from the engine. Different selections of the same file are
   included separately, and local theme colours take part in palette selection.
+- **`@startsalt` wireframes are drawn**, by the new engine. In the editor their
+  common commands (`title`, `skinparam`, `scale` …) are coloured and the widget
+  lines are left as text; completion offers `@startsalt`.
 
 ### Changed
 
 - Untrusted and virtual workspaces are supported in part: there, no file is
   read for an `!include`, and `plantumlLocal.includePaths` is not used in
   Restricted Mode.
+- **The diagram engine moved: `@plantuml/core` 1.2026.8 → 1.2026.9**, the
+  first release with the file loader that local includes need. It reads its
+  input differently, which changes what some blocks show:
+  - A block without `@startuml` is drawn as a diagram. It used to show
+    *Diagram not supported*.
+  - Lines before `@startuml` are left out of the drawing. The block used to
+    show *Diagram not supported*.
+  - A diagram between `\startuml` and `\enduml` fails with a syntax error,
+    where it used to be drawn. Write `@startuml` and `@enduml`.
+  - In an activity diagram, `#pink:text;` is an action on its own line, drawn
+    with a warning that the colour is ignored; the line after it is no longer
+    part of it. The colouring in the editor follows. A colour in front of `if`,
+    `elseif`, `while` and `switch` is ignored too, with a warning.
+  - A `[[url]]` link is still drawn as text, not as a link: the engine now
+    wraps it in a link element, which is removed with the target it holds.
+  - Some warnings and errors are worded differently.
+
+### Fixed
+
+- An `!include <azure/…>` of an entry the library does not have is listed in
+  the Problems panel in the engine's own words. It used to be explained as a
+  local file the bundled engine does not read.
 
 ## [0.12.1] - 2026-10-04
 

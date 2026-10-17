@@ -132,6 +132,7 @@ const BODIES: Record<string, string> = {
   yaml: 'a: 1',
   ebnf: 'rule = "a";',
   regex: 'a+b',
+  salt: '{\n  [OK]\n}',
 };
 
 describe('diagrams', () => {
