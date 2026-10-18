@@ -326,16 +326,19 @@ that `files.watcherExclude` leaves out with a pattern ending in `/**` (such as
 `**/generated/**`) is not noticed, as VS Code reports no change there; run
 *Clear Render Cache and Re-render* after one.
 
-Ctrl+Click on the path of an `!include`, or *Go to Definition* (`F12`), opens
-the file the diagram reads there: the one the preview draws, next to the
-including file or in a search folder. A path the engine works out — from a
-variable, a function, or a name the diagram defines with `!define` or
-`!name =` — is not followed, nor one written in a procedure, which is looked
-for next to the file that calls it: a drawing tells which files it read, not
-which line asked for each. After `!include ` the path completes with the
-folders it can go into and the files of the kinds read, each from the first
-place that has it; a name from a search folder shows the folder. In Restricted
-Mode, and in a document outside the workspace folders, neither is offered.
+Ctrl+Click on the path of an `!include` or an `!includesub`, or *Go to
+Definition* (`F12`), opens the file the diagram reads there: the one the
+preview draws, next to the including file or in a search folder. On
+`!theme name from themes`, the name and the folder both open the theme's file.
+A path the engine works out — from a variable, a function, or a name the
+diagram defines with `!define` or `!name =` — is not followed, nor one written
+in a procedure, which is looked for next to the file that calls it: a drawing
+tells which files it read, not which line asked for each. After `!include ` or
+`!includesub ` the path completes with the folders it can go into and the
+files of the kinds read, each from the first place that has it; a name from a
+search folder shows the folder. After the `from ` of a `!theme`, the folders
+complete. In Restricted Mode, and in a document outside the workspace folders,
+neither is offered.
 
 ### Icons and sprites
 
