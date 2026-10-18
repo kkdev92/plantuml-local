@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Going to the file of `!includesub` and `!theme … from`, and completing
+  their paths.** Ctrl+Click or *Go to Definition* on the path of an
+  `!includesub file.puml!PART` opens the file, and on the name or the folder
+  of `!theme name from folder`, the theme's file there, as for `!include`.
+  After `!includesub ` the path completes as after `!include `; after the
+  `from ` of a `!theme`, the folders do.
+
 ### Fixed
 
 - A local include that fails is worded the same everywhere. The Problems

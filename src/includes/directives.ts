@@ -11,6 +11,11 @@ import { PROCEDURE } from '../language/folding';
  * follows it), is the path it asks the file loader for, spaces and quotes
  * included. A library (`<…>`) and a URL are not files of the workspace.
  *
+ * `!includesub` reads the same way, up to its first `!` instead: the
+ * section it names follows. Without one, it names a section of the diagram
+ * itself. `!theme name from folder` asks for `folder/puml-theme-name.puml`,
+ * split at its first ` from `, in any case, both sides trimmed.
+ *
  * Before asking, the engine puts the values of variables and functions in
  * the path, and those of `!define` too: `!include common.puml` asks for
  * `other.puml` once `!common = "other"` has run. A path holding `$` or `%`,
@@ -25,10 +30,13 @@ import { PROCEDURE } from '../language/folding';
 /** A local include written in a diagram's text. */
 export interface IncludeDirective {
   line: number;
-  /** Columns of the path in its line: from `start` up to `end`. */
+  /**
+   * Columns of the path in its line: from `start` up to `end`. A theme read
+   * from a folder has two, its name and its folder, each its own directive.
+   */
   start: number;
   end: number;
-  /** The path as written. */
+  /** The path as written; for a theme read from a folder, its file there. */
   path: string;
   /** Whether the engine asks for `path` as written. */
   literal: boolean;
@@ -39,9 +47,15 @@ export interface IncludeDirective {
  * counts as white space after the directive.
  */
 const DIRECTIVE =
-  /^([ \t]*!include(?:_once|_many)?[\t-\r \u1680\u2000-\u2006\u2008-\u200a\u2028\u2029\u205f\u3000]+)([\s\S]*)$/;
+  /^([ \t]*!include(?:_once|_many|sub)?[\t-\r \u1680\u2000-\u2006\u2008-\u200a\u2028\u2029\u205f\u3000]+)([\s\S]*)$/;
+/** A `!theme` line, up to where its name begins. */
+const THEME = /^([ \t]*!theme[\t-\r \u1680\u2000-\u2006\u2008-\u200a\u2028\u2029\u205f\u3000]+)([\s\S]*)$/;
+/** Where the engine splits a `!theme` line into the theme's name and its folder. */
+const FROM = ' from ';
 /** What the engine trims from the end of a line. */
 const TRAILING = /[\t-\r \u00a0]+$/;
+/** What it trims from the start of the folder of a theme. */
+const LEADING = /^[\t-\r ]+/;
 /** A block comment that ends a line, by its last `'/`. */
 const END_COMMENT = /'\/[\t-\r ]*$/;
 
@@ -53,36 +67,71 @@ const DEFINITIONS: readonly RegExp[] = [
 ];
 const WORD = /[\p{L}\p{N}_]+/gu;
 
+/** A line without the block comment that ends it. */
+function withoutEndComment(line: string): string {
+  const comment = END_COMMENT.test(line) ? line.lastIndexOf("/'") : -1;
+  return comment === -1 ? line : line.slice(0, comment);
+}
+
+/** A library (`<…>`) or a URL, which are not files of the workspace. */
+const notLocal = (path: string): boolean => path.startsWith('<') || /^https?:\/\//.test(path);
+
 /**
  * Where the path of an include line is, and what it is, perhaps empty; null
  * for a line that is not a local include.
  */
 export function includePathOf(line: string): { start: number; end: number; path: string } | null {
-  let text = line;
-  if (END_COMMENT.test(text)) {
-    const comment = text.lastIndexOf("/'");
-    if (comment !== -1) {
-      text = text.slice(0, comment);
-    }
-  }
-  const found = DIRECTIVE.exec(text);
+  const found = DIRECTIVE.exec(withoutEndComment(line));
   if (found === null) {
     return null;
   }
-  const start = (found[1] ?? '').length;
+  const directive = found[1] ?? '';
+  const start = directive.length;
   const rest = (found[2] ?? '').replace(TRAILING, '');
-  const selector = rest.lastIndexOf('!');
+  const selector = directive.trimStart().startsWith('!includesub') ? rest.indexOf('!') : rest.lastIndexOf('!');
   const path = selector === -1 ? rest : rest.slice(0, selector);
-  if (path.startsWith('<') || /^https?:\/\//.test(path)) {
+  if (notLocal(path)) {
     return null;
   }
   return { start, end: start + path.length, path };
 }
 
+/**
+ * Where the folder of a `!theme … from` line is, and what it is, perhaps
+ * empty, with the name of the theme and where that starts; null for a line
+ * that is not one, or reads its theme from a library or a URL.
+ */
+export function themeFolderOf(
+  line: string
+): { start: number; end: number; path: string; name: string; nameStart: number } | null {
+  const found = THEME.exec(withoutEndComment(line));
+  if (found === null) {
+    return null;
+  }
+  const nameStart = (found[1] ?? '').length;
+  const rest = found[2] ?? '';
+  const from = rest.toLowerCase().indexOf(FROM);
+  if (from === -1) {
+    return null;
+  }
+  const after = rest.slice(from + FROM.length);
+  const path = after.replace(LEADING, '').replace(TRAILING, '');
+  if (notLocal(path)) {
+    return null;
+  }
+  const start = nameStart + from + FROM.length + (after.length - after.replace(LEADING, '').length);
+  return { start, end: start + path.length, path, name: rest.slice(0, from).replace(TRAILING, ''), nameStart };
+}
+
+/** The file the engine asks for a theme read from a folder. */
+function themeFile(name: string, folder: string): string {
+  return `${folder}${folder.endsWith('/') ? '' : '/'}puml-theme-${name}.puml`;
+}
+
 /** The local includes of `source`, a diagram's text, in order. */
 export function includeDirectives(source: string): IncludeDirective[] {
   const defined = new Set<string>();
-  const found: (Omit<IncludeDirective, 'literal'> & { inBody: boolean })[] = [];
+  const found: (Omit<IncludeDirective, 'literal'> & { written: string; inBody: boolean })[] = [];
   let inBody = false;
   forEachCodeLine(source, (line, index) => {
     if (PROCEDURE.close.test(line)) {
@@ -97,15 +146,24 @@ export function includeDirectives(source: string): IncludeDirective[] {
       }
     }
     const include = includePathOf(line);
-    if (include !== null && include.path !== '') {
-      found.push({ line: index, ...include, inBody });
+    // An !includesub with no `!` after its path names a section of the diagram itself.
+    const ownSection = /^[ \t]*!includesub/.test(line) && include !== null && line.charAt(include.end) !== '!';
+    if (include !== null && include.path !== '' && !ownSection) {
+      found.push({ line: index, ...include, written: include.path, inBody });
+    }
+    const theme = themeFolderOf(line);
+    if (theme !== null && theme.path !== '' && theme.name !== '') {
+      const path = themeFile(theme.name, theme.path);
+      const written = `${theme.name} ${theme.path}`;
+      found.push({ line: index, start: theme.nameStart, end: theme.nameStart + theme.name.length, path, written, inBody });
+      found.push({ line: index, start: theme.start, end: theme.end, path, written, inBody });
     }
   });
-  return found.map(({ inBody: written, ...include }) => ({
+  return found.map(({ inBody: inside, written, ...include }) => ({
     ...include,
     literal:
-      !written &&
-      !/[$%]/.test(include.path) &&
-      !(include.path.match(WORD) ?? []).some((word) => defined.has(word.toLowerCase())),
+      !inside &&
+      !/[$%]/.test(written) &&
+      !(written.match(WORD) ?? []).some((word) => defined.has(word.toLowerCase())),
   }));
 }

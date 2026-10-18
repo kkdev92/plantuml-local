@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { includeDirectives, includePathOf } from '../../src/includes/directives';
+import { includeDirectives, includePathOf, themeFolderOf } from '../../src/includes/directives';
 
 const IDEOGRAPHIC_SPACE = String.fromCharCode(0x3000);
 const NO_BREAK_SPACE = String.fromCharCode(0xa0);
@@ -35,6 +35,12 @@ describe('includePathOf', () => {
     ['!include "quoted name.puml"', 9, '"quoted name.puml"'],
     ['!include_many   spaced name.puml  ', 16, 'spaced name.puml'],
     ['!include ', 9, ''],
+    // !includesub names its section after the first `!`, not the last.
+    ['!includesub common.puml!PART', 12, 'common.puml'],
+    ['!includesub a!b!c.puml', 12, 'a'],
+    // A section of the diagram itself, or a path being typed.
+    ['!includesub PART', 12, 'PART'],
+    ['!includesub ', 12, ''],
   ])('reads %j as asking for the path at column %i', (line, start, path) => {
     expect(includePathOf(line)).toEqual({ start, end: start + path.length, path });
   });
@@ -42,7 +48,7 @@ describe('includePathOf', () => {
   it.each([
     '!INCLUDE common.puml',
     '!Include common.puml',
-    '!includesub common.puml!PART',
+    '!INCLUDESUB common.puml!PART',
     '!includedef common.puml',
     '!includeurl common.puml',
     '!includecommon.puml',
@@ -54,6 +60,32 @@ describe('includePathOf', () => {
     'Alice -> Bob : !include common.puml',
   ])('finds no local include in %j', (line) => {
     expect(includePathOf(line)).toBeNull();
+  });
+});
+
+describe('themeFolderOf', () => {
+  // Split as the engine's !theme splits it: at the first " from ", in any case, both sides trimmed.
+  it.each([
+    ['!theme local from themes', 7, 'local', 18, 'themes'],
+    ['!theme local FROM themes/', 7, 'local', 18, 'themes/'],
+    ['  !theme\tlocal from   themes  ', 9, 'local', 22, 'themes'],
+    ['!theme my local from a from b', 7, 'my local', 21, 'a from b'],
+    ["!theme local from themes /' note '/", 7, 'local', 18, 'themes'],
+    ['!theme local from ', 7, 'local', 18, ''],
+  ])('reads %j as the name at column %i, %j, and the folder at column %i, %j', (line, nameStart, name, start, path) => {
+    expect(themeFolderOf(line)).toEqual({ start, end: start + path.length, path, name, nameStart });
+  });
+
+  it.each([
+    '!theme local',
+    '!theme local from',
+    '!theme plain from <themes>',
+    '!theme local from https://example.com/themes',
+    '!THEME local from themes',
+    '!themes local from themes',
+    "' !theme local from themes",
+  ])('finds no folder in %j', (line) => {
+    expect(themeFolderOf(line)).toBeNull();
   });
 });
 
@@ -80,6 +112,28 @@ describe('includeDirectives', () => {
 
   it('skips a line whose path is empty', () => {
     expect(paths('!include !PART\n!include ')).toEqual([]);
+  });
+
+  it('finds the file of an !includesub, and none for a section of the diagram itself', () => {
+    expect(includeDirectives('!includesub parts.puml!PART\n!includesub PART')).toEqual([
+      { line: 0, start: 12, end: 22, path: 'parts.puml', literal: true },
+    ]);
+  });
+
+  it('finds the file of a theme read from a folder, from its name and from its folder', () => {
+    const path = 'themes/puml-theme-local.puml';
+    expect(includeDirectives('!theme local from themes\n!theme plain\n!theme local from ')).toEqual([
+      { line: 0, start: 7, end: 12, path, literal: true },
+      { line: 0, start: 18, end: 24, path, literal: true },
+    ]);
+    expect(paths('!theme $name from themes\n!theme local from %dirpath()\n!folder = "x"\n!theme local from folder')).toEqual([
+      [0, 'themes/puml-theme-$name.puml', false],
+      [0, 'themes/puml-theme-$name.puml', false],
+      [1, '%dirpath()/puml-theme-local.puml', false],
+      [1, '%dirpath()/puml-theme-local.puml', false],
+      [3, 'folder/puml-theme-local.puml', false],
+      [3, 'folder/puml-theme-local.puml', false],
+    ]);
   });
 
   it('does not take as written a path with a variable or a function', () => {

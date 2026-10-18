@@ -2,14 +2,15 @@ import * as vscode from 'vscode';
 
 import { findPlantUmlBlocks, type PlantUmlBlock } from '../export/blocks';
 import { lineContext } from '../language/completion';
-import { includeDirectives, includePathOf } from './directives';
+import { includeDirectives, includePathOf, themeFolderOf } from './directives';
 import { accessFor, asOpened, type IncludeHost } from './host';
 import { includeEntries, includeTarget } from './targets';
 
 /**
  * Goes to the file a local `!include` reads, and offers the names its path
  * can go on with, in PlantUML files and in the diagram blocks of Markdown
- * documents: the editor's side of directives.ts and targets.ts.
+ * documents: the editor's side of directives.ts and targets.ts. So for
+ * `!includesub`, and for `!theme … from` a folder, which offers folders.
  *
  * Going there is a definition (Ctrl+Click, F12, Peek), not a document link
  * as well: VS Code runs both on one Ctrl+Click, which would open the file
@@ -72,7 +73,7 @@ export function includeDefinitions(host: Pick<IncludeHost, 'includePaths'>): vsc
   const blocks = blocksOf();
   return {
     provideDefinition: async (document, position): Promise<vscode.LocationLink[] | undefined> => {
-      if (!document.lineAt(position.line).text.includes('!include')) {
+      if (!/!include|!theme/.test(document.lineAt(position.line).text)) {
         return undefined;
       }
       const diagram = diagramAt(document, position.line, blocks);
@@ -118,7 +119,8 @@ export function includeCompletions(host: Pick<IncludeHost, 'includePaths'>): vsc
   return {
     provideCompletionItems: async (document, position): Promise<vscode.CompletionItem[] | undefined> => {
       const before = document.lineAt(position.line).text.slice(0, position.character);
-      if (!/^[\s>]*!include(?:_once|_many)?\s/.test(before)) {
+      const theme = /^[\s>]*!theme\s.* from /i.test(before);
+      if (!theme && !/^[\s>]*!include(?:_once|_many|sub)?\s/.test(before)) {
         return undefined;
       }
       const diagram = diagramAt(document, position.line, blocks);
@@ -129,7 +131,7 @@ export function includeCompletions(host: Pick<IncludeHost, 'includePaths'>): vsc
       const offset = diagram.offsets[row] ?? 0;
       const line = document.lineAt(position.line).text.slice(offset);
       const column = position.character - offset;
-      const path = includePathOf(line);
+      const path = theme ? themeFolderOf(line) : includePathOf(line);
       // A quoted path is asked for with its quotes, and never found.
       if (path === null || column < path.start || column > path.end || path.path.startsWith('"')) {
         return undefined;
@@ -150,7 +152,8 @@ export function includeCompletions(host: Pick<IncludeHost, 'includePaths'>): vsc
         return undefined;
       }
       const entries = await includeEntries(typed.slice(0, cut), access.scope);
-      return entries.map((entry) => {
+      // A theme is read from a folder, named by the line.
+      return entries.filter((entry) => !theme || entry.folder).map((entry) => {
         const item = new vscode.CompletionItem(
           entry.searchFolder === null ? entry.name : { label: entry.name, description: entry.searchFolder },
           entry.folder ? vscode.CompletionItemKind.Folder : vscode.CompletionItemKind.File

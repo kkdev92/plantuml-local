@@ -71,9 +71,11 @@ beforeAll(async () => {
   docs = join(root, 'docs');
   await mkdir(join(docs, 'parts'), { recursive: true });
   await mkdir(join(root, 'lib'), { recursive: true });
+  await mkdir(join(root, 'themes'), { recursive: true });
   await writeFile(join(docs, 'common.puml'), 'A -> B');
   await writeFile(join(docs, 'parts', 'a.iuml'), 'A -> B');
   await writeFile(join(root, 'lib', 'only-lib.puml'), 'A -> B');
+  await writeFile(join(root, 'themes', 'puml-theme-local.puml'), 'skinparam backgroundColor #EEEEEE');
   fake.state.folder = root;
 });
 
@@ -163,6 +165,20 @@ describe('includeDefinitions', () => {
     fake.state.trusted = false;
     await expect(goTo(documentOf('diagram.puml', DIAGRAM), 1, 12)).resolves.toBeUndefined();
   });
+
+  it('goes to the file of an !includesub, and to a theme read from a folder, from its name or its folder', async () => {
+    const document = documentOf(
+      'diagram.puml',
+      ['!includesub parts/a.iuml!PART', '!includesub PART', '!theme local from ../themes', '!theme plain'].join('\n')
+    );
+    await expect(goTo(document, 0, 14)).resolves.toEqual({ target: join(docs, 'parts', 'a.iuml'), from: [0, 12, 24] });
+    await expect(goTo(document, 1, 13)).resolves.toBeUndefined();
+    const theme = join(root, 'themes', 'puml-theme-local.puml');
+    await expect(goTo(document, 2, 8)).resolves.toEqual({ target: theme, from: [2, 7, 12] });
+    await expect(goTo(document, 2, 20)).resolves.toEqual({ target: theme, from: [2, 18, 27] });
+    await expect(goTo(document, 2, 15)).resolves.toBeUndefined();
+    await expect(goTo(document, 3, 8)).resolves.toBeUndefined();
+  });
 });
 
 describe('includeCompletions', () => {
@@ -207,6 +223,17 @@ describe('includeCompletions', () => {
     expect(commented?.[0]?.range).toEqual([9, 11, 11]);
   });
 
+  it('offers the same names after !includesub, and only folders after the from of a theme', async () => {
+    expect(labels(await complete(documentOf('diagram.puml', '!includesub '), 0, 12))).toEqual([
+      'common.puml',
+      'only-lib.puml',
+      'parts',
+    ]);
+    expect(await complete(documentOf('diagram.puml', '!theme local from '), 0, 18)).toEqual([
+      { label: 'parts', kind: 18, insert: 'parts/', range: [18, 18, 18] },
+    ]);
+  });
+
   it('offers names in the diagram blocks of a Markdown document, past their quote markers', async () => {
     const document = documentOf('design.md', ['> ```plantuml', '> !include pa', '> ```'].join('\n'), 'markdown');
     expect(labels(await complete(document, 1, 13))).toEqual(['common.puml', 'only-lib.puml', 'parts']);
@@ -219,7 +246,9 @@ describe('includeCompletions', () => {
     ['a quoted path', '!include "co', 0, 12],
     ['a library', '!include <C4/', 0, 13],
     ['the directive', '!include common.puml', 0, 4],
-    ['an unknown directive', '!includesub ', 0, 12],
+    ['an unknown directive', '!includedef ', 0, 12],
+    ['the name of a theme', '!theme local from ', 0, 9],
+    ['a theme from a library', '!theme plain from <', 0, 19],
   ])('offers nothing in %s', async (_where, text, line, character) => {
     await expect(complete(documentOf('diagram.puml', text), line, character)).resolves.toBeUndefined();
   });
