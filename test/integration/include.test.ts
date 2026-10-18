@@ -9,6 +9,7 @@ import { recognizeEngineError } from '../../src/render/engine-error';
 import { drawReadable, ThemePalettes } from '../../src/render/palette';
 import { includeDirectives, includePathOf } from '../../src/includes/directives';
 import { IncludeSession, type IncludeAccess } from '../../src/includes/session';
+import { withIncludeReason } from '../../src/includes/describe';
 
 /**
  * Local includes through the built worker and the bundled engine: the
@@ -76,6 +77,17 @@ describe('local includes through the built worker', () => {
   it('follows an include written in an included file, next to that file', async () => {
     const { svg } = await draw('!include parts/outer.puml');
     expect(labels(svg)).toContain('fromInner');
+  });
+
+  it('keeps the failure reason and location of a nested include', async () => {
+    await writeFile(join(root, 'docs', 'parts', 'broken.puml'), '!include absent.puml');
+    const { svg, session } = await draw('!include parts/broken.puml');
+    const failure = recognizeEngineError(svg);
+    expect(failure?.line).toBeNull();
+    expect(failure?.message).toContain('broken.puml, line 1)');
+    expect(session.failures).toEqual([{ path: 'absent.puml', reason: { kind: 'missing', searched: true } }]);
+    const explained = withIncludeReason(failure?.message ?? '', new Map([['absent.puml', 'File not found.']]));
+    expect(explained).toMatch(/^cannot include absent\.puml: File not found\. \(.+broken\.puml, line 1\)$/);
   });
 
   it('takes a path from a variable, and a bare name from a search folder', async () => {

@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import Module from 'node:module';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
@@ -172,7 +172,7 @@ describe('extension (dist)', () => {
     const md = makeMd();
     api.extendMarkdownIt(md);
     const rendered = (from: number): string[] =>
-      vscodeStub._test.logs.slice(from).filter((line) => line.startsWith('debug: Rendered diagram'));
+      vscodeStub._test.logs.slice(from).filter((line) => line.startsWith('debug: Diagram rendered'));
 
     const loud = vscodeStub._test.logs.length;
     vscodeStub._test.setConfiguration('logLevel', 'debug');
@@ -211,7 +211,7 @@ describe('extension (dist)', () => {
       expect(await waitFor(() => fence(first).includes('first'))).toBe(true);
 
       const stale = fence(edited);
-      expect(stale).toContain('Not updated: the diagram is drawn again when the file is saved.');
+      expect(stale).toContain('Preview is out of date. Save the file to refresh it.');
       expect(stale).toContain('first');
 
       // Nothing renders now, so the next refresh is the one the save asks for.
@@ -257,7 +257,7 @@ describe('extension (dist)', () => {
     api.extendMarkdownIt(md);
     const html = callFence(md, 'plantuml', '   \n  ');
     expect(html).toContain('plantuml-error');
-    expect(html).toContain('source is empty');
+    expect(html).toContain('There is no PlantUML code to render.');
   });
 
   it('rejects URL-based external references inline', () => {
@@ -457,7 +457,7 @@ describe('export (dist)', () => {
     expect(vscodeStub._test.writtenFiles.get('file:///c/notes/images/second.svg')).toContain('two');
     // The unnamed block is skipped, not guessed at, and the summary says so.
     expect(vscodeStub._test.writtenFiles.size).toBe(3); // orders.svg + these two
-    expect(vscodeStub._test.notifications.warn.some((m) => m.includes('unnamed'))).toBe(true);
+    expect(vscodeStub._test.notifications.warn.some((m) => m.includes('Unnamed'))).toBe(true);
   });
 
   describe('diagnostics', () => {
@@ -548,15 +548,15 @@ describe('export (dist)', () => {
           [33, 'PLLOCAL-DOC002', WARNING],
           [38, 'PLLOCAL-WRN001', WARNING],
         ]);
-        expect(found[0]?.message).toContain('Syntax Error?');
+        expect(found[0]?.message).toContain('Syntax error.');
         // In the quote, past the marker; and an explanation, not the engine's bare words.
         expect(found[1]?.character).toBe(2);
         // Worded as the preview's note words it, for the file the engine asked for.
         expect(found[1]?.message).toBe(
-          "Cannot include shared.puml: Only files in the document's workspace folder are read. Open the folder that holds it."
+          "Could not include shared.puml: Open the folder containing this document as a workspace. Included files must be within that workspace folder."
         );
         expect(found[3]?.message).toBe(
-          "Cannot include shared.puml: Only files in the document's workspace folder are read. Open the folder that holds it."
+          "Could not include shared.puml: Open the folder containing this document as a workspace. Included files must be within that workspace folder."
         );
         expect(found[found.length - 2]?.message).toContain('@enduml');
         expect(found[found.length - 1]?.message).toContain('deprecated');
@@ -661,7 +661,7 @@ describe('export (dist)', () => {
 
       // Visible documents are listed first; the choice, not visibility, decides.
       expect(vscodeStub._test.quickPicksShown.at(-1)).toEqual({
-        title: 'Choose the Markdown document to export from',
+        title: 'Select the Markdown file to export diagrams from',
         labels: ['two/visible.md', 'two/previewed.md'],
       });
       expect(vscodeStub._test.writtenFiles.has('file:///c/two/images/billing.svg')).toBe(true);
@@ -694,7 +694,7 @@ describe('export (dist)', () => {
         reset();
       }
 
-      expect(vscodeStub._test.notifications.warn.at(-1)).toBe('Open a Markdown file first.');
+      expect(vscodeStub._test.notifications.warn.at(-1)).toBe('Open a Markdown file to export its diagrams.');
       expect(vscodeStub._test.quickPicksShown.length).toBe(picksBefore);
     });
 
@@ -720,7 +720,7 @@ describe('export (dist)', () => {
       }
 
       expect(vscodeStub._test.notifications.warn.at(-1)).toBe(
-        'Put the cursor inside a ```plantuml block first.'
+        'Place the cursor inside the PlantUML code block you want to export.'
       );
       expect([...vscodeStub._test.writtenFiles.keys()].some((k) => k.startsWith('file:///c/several/'))).toBe(false);
     });
@@ -760,7 +760,20 @@ describe('export (dist)', () => {
 
     expect(vscodeStub._test.writtenFiles.size).toBe(before);
     expect(vscodeStub._test.webviewPanels).toHaveLength(panels);
-    expect(vscodeStub._test.notifications.warn.some((m) => m.includes('trusted'))).toBe(true);
+    expect(vscodeStub._test.notifications.warn.some((m) => m.includes('Restricted Mode'))).toBe(true);
+
+    // The notification offers VS Code's own way of trusting the workspace.
+    const calls = vscodeStub._test.commandCalls.length;
+    vscodeStub.workspace.isTrusted = false;
+    vscodeStub._test.notificationReply = 'Manage Workspace Trust';
+    try {
+      await vscodeStub._test.registeredCommands.get('plantumlLocal.exportFolderSvg')?.(vscodeStub.Uri.parse('file:///c/docs'));
+      const managed = (): boolean => vscodeStub._test.commandCalls.slice(calls).some((call) => call.id === 'workbench.trust.manage');
+      expect(await waitFor(managed, 5000)).toBe(true);
+    } finally {
+      vscodeStub._test.notificationReply = null;
+      vscodeStub.workspace.isTrusted = true;
+    }
   });
 
   it('refuses an untitled document, which has no folder to write beside', async () => {
@@ -861,8 +874,8 @@ describe('export (dist)', () => {
     expect(vscodeStub._test.writtenFiles.get(svg)).toContain('m');
     expect(editor.document.getText()).toBe(text);
     const warning = vscodeStub._test.notifications.warn.slice(warningsBefore).join('\n');
-    expect(warning).toContain('Exported 1 diagram(s)');
-    expect(warning).toContain('The document changed during the export, so the references were not updated');
+    expect(warning).toContain('Diagrams exported: 1');
+    expect(warning).toContain('Image links were not updated because the Markdown file changed during export. Export again to update them.');
   });
 
   it('update-references links no block that the engine could not render', async () => {
@@ -893,7 +906,7 @@ describe('export (dist)', () => {
     const after = editor.document.getText();
     expect(after).toContain('![working](images/working.svg#plantuml-local)');
     expect(after).not.toContain('broken.svg');
-    expect(vscodeStub._test.notifications.warn.slice(warningsBefore).some((m) => m.includes('failed'))).toBe(true);
+    expect(vscodeStub._test.notifications.warn.slice(warningsBefore).some((m) => m.includes('Diagrams that could not be exported: 1'))).toBe(true);
 
     // The reference inserted above the broken block pushed it down: the
     // reason names the line it is on now, not the one the export read.
@@ -901,8 +914,8 @@ describe('export (dist)', () => {
     expect(now).toBe(text.split('\n').indexOf('this is not valid ;;; [[[') + 1 + 2);
     const reason = vscodeStub._test.logs
       .slice(logsBefore)
-      .find((line) => line.startsWith('warn: Export failed for broken:'));
-    expect(reason).toContain(`PlantUML reported an error at line ${String(now)}: Syntax Error?`);
+      .find((line) => line.startsWith('warn: Could not export broken:'));
+    expect(reason).toContain(`PlantUML error on line ${String(now)}: Syntax error.`);
   });
 
   it('export-all names the line of a failed block as the document has it', async () => {
@@ -918,15 +931,52 @@ describe('export (dist)', () => {
     const editor = makeEditor('file:///c/plain/doc.md', text, 0);
     vscodeStub._test.setActiveEditor(editor);
     const logsBefore = vscodeStub._test.logs.length;
+    const calls = vscodeStub._test.commandCalls.length;
 
-    await vscodeStub._test.registeredCommands.get('plantumlLocal.exportAllSvg')?.();
+    // The failures are in the output channel, which the notification opens.
+    vscodeStub._test.notificationReply = 'Show Output';
+    try {
+      await vscodeStub._test.registeredCommands.get('plantumlLocal.exportAllSvg')?.();
+    } finally {
+      vscodeStub._test.notificationReply = null;
+    }
 
     // Nothing is inserted, so the line stays where the export read it.
     expect(editor.document.getText()).toBe(text);
     const reason = vscodeStub._test.logs
       .slice(logsBefore)
-      .find((line) => line.startsWith('warn: Export failed for broken:'));
-    expect(reason).toContain('PlantUML reported an error at line 5: Syntax Error?');
+      .find((line) => line.startsWith('warn: Could not export broken:'));
+    expect(reason).toContain('PlantUML error on line 5: Syntax error.');
+    // VS Code's command for the channel, named after the extension's id.
+    const manifest = JSON.parse(readFileSync(join(__dirname, '../../package.json'), 'utf8')) as { publisher: string; name: string };
+    expect(vscodeStub._test.commandCalls.slice(calls).map((call) => call.id)).toContain(
+      `workbench.action.output.show.${manifest.publisher}.${manifest.name}.PlantUML Local.log`
+    );
+  });
+
+  it('export-all offers to name a diagram when every block was left out for want of a name', async () => {
+    const text = ['# Title', '', '```plantuml', '@startuml', 'A -> B', '@enduml', '```'].join('\n');
+    const editor = makeEditor('file:///c/unnamed/doc.md', text, 0);
+    vscodeStub._test.setActiveEditor(editor);
+    vscodeStub._test.openDocument(editor.document);
+    const calls = vscodeStub._test.commandCalls.length;
+
+    vscodeStub._test.notificationReply = 'Name Diagram…';
+    try {
+      await vscodeStub._test.registeredCommands.get('plantumlLocal.exportAllSvg')?.();
+    } finally {
+      vscodeStub._test.notificationReply = null;
+    }
+
+    expect(vscodeStub._test.notifications.warn.at(-1)).toBe(
+      'Unnamed code blocks were not exported: 1. Add a name after ```plantuml, for example: "```plantuml my-diagram".'
+    );
+    // The light bulb's command, on the line the name goes on, with the document open there.
+    expect(vscodeStub._test.commandCalls.slice(calls)).toContainEqual({
+      id: 'plantumlLocal.assignDiagramName',
+      args: ['file:///c/unnamed/doc.md', 2, editor.document.version],
+    });
+    expect(vscodeStub._test.shownDocuments.at(-1)).toEqual({ uri: 'file:///c/unnamed/doc.md', line: 2 });
   });
 
   it('exportTheme=dark renders the exported SVG in the dark palette', async () => {
@@ -987,7 +1037,7 @@ describe('export (dist)', () => {
       said.push(vscodeStub._test.notifications.error.slice(before).join(' | '));
     }
     expect(said).toEqual(
-      outside.map((value) => `plantumlLocal.exportDirectory must be a relative path without "..": ${value}`)
+      outside.map((value) => `The folder for exported images, ${value}, cannot be used. In Settings, enter a folder inside the file's folder, for example images.`)
     );
   });
 
@@ -1000,27 +1050,35 @@ describe('export (dist)', () => {
       vscodeStub._test.setConfiguration('exportDirectory', undefined, 'file:///c/empty');
     }
     expect(vscodeStub._test.notifications.error.at(-1)).toBe(
-      'plantumlLocal.exportDirectory is empty. Set a folder relative to the document, such as images.'
+      'No folder is set for exported images. Enter one in Settings, for example images.'
     );
 
-    // Only whitespace is empty too.
+    // Only whitespace is empty too. The button opens the setting.
     const errorsBefore = vscodeStub._test.notifications.error.length;
+    const callsBefore = vscodeStub._test.commandCalls.length;
     vscodeStub._test.setConfiguration('exportDirectory', '   ', 'file:///c/blank');
+    vscodeStub._test.notificationReply = 'Open Settings';
     try {
       vscodeStub._test.setActiveEditor(makeEditor('file:///c/blank/doc.md', NAMED_BLOCK, 1));
       await vscodeStub._test.registeredCommands.get('plantumlLocal.exportSvg')?.();
+      const opened = (): boolean =>
+        vscodeStub._test.commandCalls
+          .slice(callsBefore)
+          .some((call) => call.id === 'workbench.action.openSettings' && call.args[0] === '@id:plantumlLocal.exportDirectory');
+      expect(await waitFor(opened, 5000)).toBe(true);
     } finally {
+      vscodeStub._test.notificationReply = null;
       vscodeStub._test.setConfiguration('exportDirectory', undefined, 'file:///c/blank');
     }
     expect(vscodeStub._test.notifications.error.slice(errorsBefore)).toEqual([
-      'plantumlLocal.exportDirectory is empty. Set a folder relative to the document, such as images.',
+      'No folder is set for exported images. Enter one in Settings, for example images.',
     ]);
 
     const reserved = ['```plantuml CON', '@startuml', 'A -> B', '@enduml', '```'].join('\n');
     vscodeStub._test.setActiveEditor(makeEditor('file:///c/reserved/doc.md', reserved, 1));
     await vscodeStub._test.registeredCommands.get('plantumlLocal.exportAllSvg')?.();
     const failure =
-      'Export failed for CON: Use up to 128 ASCII letters, digits, hyphens and underscores. Windows device names such as CON cannot be used.';
+      'Could not export CON: Use 1–128 letters (A–Z, a–z), digits, hyphens, or underscores. Reserved file names such as CON are not allowed.';
     expect(vscodeStub._test.logs.some((line) => line.includes(failure))).toBe(true);
   });
 
@@ -1089,7 +1147,7 @@ describe('export (dist)', () => {
         'billing'
       );
       expect(vscodeStub._test.notifications.warn.at(-1)).toBe(
-        'Exported 2 diagram(s) · 1 unnamed diagram(s) skipped — name one with @startuml(id=my-diagram)'
+        'Diagrams exported: 2 · Unnamed diagrams were not exported: 1. Add a name to the start line, for example: "@startuml(id=my-diagram)".'
       );
     });
   });
@@ -1127,14 +1185,14 @@ describe('export (dist)', () => {
 
       expect(vscodeStub._test.modals.slice(modalsBefore)).toEqual([
         {
-          message: 'handmade/images/orders.svg already exists with different contents. Replace it?',
+          message: 'handmade/images/orders.svg already exists and has different contents. Overwrite it?',
           detail: undefined,
-          buttons: ['Replace'],
+          buttons: ['Overwrite'],
         },
       ]);
       expect(vscodeStub._test.writtenFiles.get(target)).toBe('<svg>drawn by hand</svg>');
 
-      vscodeStub._test.messageReply = 'Replace';
+      vscodeStub._test.messageReply = 'Overwrite';
       try {
         await exportSvg();
       } finally {
@@ -1173,7 +1231,7 @@ describe('export (dist)', () => {
 
       // Replaced once told to, it is the export's again; open with unsaved
       // edits, it is asked about all the same.
-      vscodeStub._test.messageReply = 'Replace';
+      vscodeStub._test.messageReply = 'Overwrite';
       try {
         await exportLabel('fourth');
       } finally {
@@ -1190,7 +1248,7 @@ describe('export (dist)', () => {
       }
       expect(vscodeStub._test.writtenFiles.get(target)).toContain('fourth');
 
-      const asked = 'owned/images/orders.svg already exists with different contents. Replace it?';
+      const asked = 'owned/images/orders.svg already exists and has different contents. Overwrite it?';
       expect(vscodeStub._test.modals.slice(modalsBefore).map((modal) => modal.message)).toEqual([
         asked,
         asked,
@@ -1223,7 +1281,7 @@ describe('export (dist)', () => {
       vscodeStub._test.setActiveEditor(makeEditor('file:///c/bulk/doc.md', text, 0));
       const modalsBefore = vscodeStub._test.modals.length;
 
-      vscodeStub._test.messageReply = 'Keep Existing';
+      vscodeStub._test.messageReply = 'Keep Existing Files';
       try {
         await vscodeStub._test.registeredCommands.get('plantumlLocal.exportAllSvg')?.();
       } finally {
@@ -1232,24 +1290,31 @@ describe('export (dist)', () => {
 
       expect(vscodeStub._test.modals.slice(modalsBefore)).toEqual([
         {
-          message: '2 files already exist with different contents. Replace them?',
+          message: '2 files already exist and have different contents. Overwrite them?',
           detail: 'bulk/images/kept-a.svg\nbulk/images/kept-b.svg',
-          buttons: ['Replace', 'Keep Existing'],
+          buttons: ['Overwrite', 'Keep Existing Files'],
         },
       ]);
       expect(vscodeStub._test.writtenFiles.get('file:///c/bulk/images/kept-a.svg')).toBe('old a');
       expect(vscodeStub._test.writtenFiles.get('file:///c/bulk/images/kept-b.svg')).toBe('old b');
       expect(vscodeStub._test.writtenFiles.get('file:///c/bulk/images/fresh.svg')).toContain('new');
       expect(vscodeStub._test.notifications.info.at(-1)).toBe(
-        'Exported 1 diagram(s) · 2 existing file(s) kept'
+        'Diagrams exported: 1 · Existing files kept: 2'
       );
     });
 
     it('never writes over a folder of the same name', async () => {
       vscodeStub._test.writtenFiles.set('file:///c/folder/images/orders.svg/inside.txt', 'kept');
       vscodeStub._test.setActiveEditor(makeEditor('file:///c/folder/doc.md', NAMED_BLOCK, 1));
+      const calls = vscodeStub._test.commandCalls.length;
 
-      await exportSvg();
+      // The notification shows the folder in the way.
+      vscodeStub._test.notificationReply = 'Show in Explorer';
+      try {
+        await exportSvg();
+      } finally {
+        vscodeStub._test.notificationReply = null;
+      }
 
       // Renaming over it would have deleted the folder and what it holds.
       expect(vscodeStub._test.writtenFiles.get('file:///c/folder/images/orders.svg/inside.txt')).toBe(
@@ -1257,8 +1322,27 @@ describe('export (dist)', () => {
       );
       expect(vscodeStub._test.writtenFiles.has('file:///c/folder/images/orders.svg')).toBe(false);
       expect(vscodeStub._test.notifications.error.at(-1)).toBe(
-        'Could not export the diagram: folder/images/orders.svg is a folder, not a file.'
+        'Could not export the diagram: Cannot save to folder/images/orders.svg because a folder with that name already exists.'
       );
+      const revealed = vscodeStub._test.commandCalls.slice(calls).filter((call) => call.id === 'revealInExplorer');
+      expect(revealed.map((call) => String(call.args[0]))).toEqual(['file:///c/folder/images/orders.svg']);
+    });
+
+    it('points to the Problems panel when the diagram itself is wrong', async () => {
+      const broken = ['```plantuml broken-one', '@startuml', 'this is not valid ;;; [[[', '@enduml', '```'].join('\n');
+      vscodeStub._test.setActiveEditor(makeEditor('file:///c/problems/doc.md', broken, 1));
+      const calls = vscodeStub._test.commandCalls.length;
+
+      vscodeStub._test.notificationReply = 'Show Problems';
+      try {
+        await exportSvg();
+      } finally {
+        vscodeStub._test.notificationReply = null;
+      }
+
+      expect(vscodeStub._test.notifications.error.at(-1)).toMatch(/^Could not export the diagram: PlantUML error on line 3: /);
+      expect(vscodeStub._test.commandCalls.slice(calls).map((call) => call.id)).toContain('workbench.actions.view.problems');
+      expect(vscodeStub._test.writtenFiles.has('file:///c/problems/images/broken-one.svg')).toBe(false);
     });
 
     it('removes the temporary file when the rename fails', async () => {
@@ -1289,7 +1373,7 @@ describe('export (dist)', () => {
       await exportSvg();
       expect(revealed()).toHaveLength(before);
 
-      vscodeStub._test.notificationReply = 'Reveal in Explorer View';
+      vscodeStub._test.notificationReply = 'Show in Explorer';
       try {
         await exportSvg();
         await vscodeStub._test.registeredCommands.get('plantumlLocal.exportAllSvg')?.();
@@ -1312,6 +1396,32 @@ describe('export (dist)', () => {
     const block = (name: string, label: string): string =>
       ['```plantuml ' + name, '@startuml', `A -> B : ${label}`, '@enduml', '```'].join('\n');
 
+    it('offers to choose another folder when one has too many files to export at once', async () => {
+      const files = Array.from({ length: 501 }, (_, index) => `file:///c/crowded/doc-${String(index).padStart(3, '0')}.md`);
+      for (const file of files) {
+        vscodeStub._test.writtenFiles.set(file, '# Doc');
+      }
+      const calls = vscodeStub._test.commandCalls.length;
+      vscodeStub._test.notificationReply = 'Choose Folder…';
+      try {
+        await exportFolder('file:///c/crowded');
+        // Without a folder, the command asks for one.
+        const chosen = (): boolean =>
+          vscodeStub._test.commandCalls
+            .slice(calls)
+            .some((call) => call.id === 'plantumlLocal.exportFolderSvg' && call.args.length === 0);
+        expect(await waitFor(chosen, 5000)).toBe(true);
+      } finally {
+        vscodeStub._test.notificationReply = null;
+        for (const file of files) {
+          vscodeStub._test.writtenFiles.delete(file);
+        }
+      }
+      expect(vscodeStub._test.notifications.warn.at(-1)).toBe(
+        'crowded has more than 500 Markdown and PlantUML files, too many to export at once. Choose a smaller folder.'
+      );
+    });
+
     it('exports the named diagrams of its documents once that is confirmed, beside each document', async () => {
       vscodeStub._test.writtenFiles.set('file:///c/tree/a.md', block('one', 'first'));
       vscodeStub._test.writtenFiles.set('file:///c/tree/sub/b.puml', '@startuml(id=two)\nC -> D : second\n@enduml');
@@ -1328,15 +1438,15 @@ describe('export (dist)', () => {
 
       expect(vscodeStub._test.modals.slice(modals)).toEqual([
         {
-          message: 'Export 2 named diagram(s) from 2 document(s) in tree?',
-          detail: 'tree/a.md\ntree/sub/b.puml',
+          message: 'Export 2 named diagrams in tree?',
+          detail: 'Source files: 2\ntree/a.md\ntree/sub/b.puml',
           buttons: ['Export'],
         },
       ]);
       expect(vscodeStub._test.writtenFiles.get('file:///c/tree/images/one.svg')).toContain('first');
       expect(vscodeStub._test.writtenFiles.get('file:///c/tree/sub/images/two.svg')).toContain('second');
       expect([...vscodeStub._test.writtenFiles.keys()].filter((key) => key.includes('three'))).toEqual([]);
-      expect(vscodeStub._test.notifications.info.at(-1)).toBe('Exported 2 diagram(s)');
+      expect(vscodeStub._test.notifications.info.at(-1)).toBe('Diagrams exported: 2');
     });
 
     it('writes nothing when the export is not confirmed, or no folder is picked', async () => {
@@ -1349,7 +1459,7 @@ describe('export (dist)', () => {
       await exportFolder();
 
       expect(vscodeStub._test.modals.slice(modals).map((modal) => modal.message)).toEqual([
-        'Export 1 named diagram(s) from 1 document(s) in declined?',
+        'Export the named diagram in declined?',
       ]);
       expect(vscodeStub._test.writtenFiles.has('file:///c/declined/images/one.svg')).toBe(false);
     });
@@ -1357,7 +1467,7 @@ describe('export (dist)', () => {
     it('refuses a folder outside the workspace', async () => {
       await exportFolder('file:///elsewhere/docs');
 
-      expect(vscodeStub._test.notifications.warn.at(-1)).toBe('Choose a folder in the workspace.');
+      expect(vscodeStub._test.notifications.warn.at(-1)).toBe('Select a folder within the current workspace.');
     });
 
     it('says how to name the unnamed diagrams of each kind of document', async () => {
@@ -1377,10 +1487,10 @@ describe('export (dist)', () => {
       }
 
       expect(vscodeStub._test.notifications.warn.slice(-2)).toEqual([
-        'Exported 1 diagram(s)' +
-          ' · 1 unnamed block(s) skipped — name one with ```plantuml my-diagram' +
-          ' · 2 unnamed diagram(s) skipped — name one with @startuml(id=my-diagram)',
-        '2 unnamed diagram(s) skipped — name one with @startuml(id=my-diagram)',
+        'Diagrams exported: 1' +
+          ' · Unnamed code blocks were not exported: 1. Add a name after ```plantuml, for example: "```plantuml my-diagram".' +
+          ' · Unnamed diagrams were not exported: 2. Add a name to the start line, for example: "@startuml(id=my-diagram)".',
+        'Unnamed diagrams were not exported: 2. Add a name to the start line, for example: "@startuml(id=my-diagram)".',
       ]);
     });
   });
@@ -1452,7 +1562,7 @@ describe('export (dist)', () => {
       expect(panel.disposed).toBe(true);
       expect(vscodeStub._test.writtenBytes.get('file:///c/png/images/orders.png')).toEqual(png);
       // Named as the Explorer names it, not by its URI.
-      expect(vscodeStub._test.notifications.info.at(-1)).toBe('Exported png/images/orders.png');
+      expect(vscodeStub._test.notifications.info.at(-1)).toBe('Exported to png/images/orders.png');
     });
 
     it('writes nothing when the page cannot draw it, or sends back another size', async () => {
@@ -1461,7 +1571,16 @@ describe('export (dist)', () => {
       failed.panel.receive({ type: 'error', error: 'no PNG came out of the canvas' });
       await failed.done;
       expect(vscodeStub._test.notifications.error.at(-1)).toBe(
-        'Could not export the diagram: The PNG could not be drawn: no PNG came out of the canvas'
+        'Could not export the diagram: PNG creation failed: no PNG came out of the canvas'
+      );
+
+      // The failure the page itself names is explained once, not wrapped again.
+      const unencoded = await start('file:///c/pngfail/doc.md');
+      unencoded.panel.receive({ type: 'ready' });
+      unencoded.panel.receive({ type: 'error', error: 'PNG encoding failed' });
+      await unencoded.done;
+      expect(vscodeStub._test.notifications.error.at(-1)).toBe(
+        'Could not export the diagram: The PNG could not be created. Try exporting as SVG.'
       );
 
       const wrong = await start('file:///c/pngfail/doc.md');
@@ -1469,10 +1588,10 @@ describe('export (dist)', () => {
       wrong.panel.receive({ type: 'png', data: pngOf(1, 1) });
       await wrong.done;
       expect(vscodeStub._test.notifications.error.at(-1)).toBe(
-        'Could not export the diagram: The PNG could not be made as asked.'
+        'Could not export the diagram: The PNG was not created correctly. Try exporting as SVG.'
       );
 
-      expect([failed.panel.disposed, wrong.panel.disposed]).toEqual([true, true]);
+      expect([failed.panel.disposed, unencoded.panel.disposed, wrong.panel.disposed]).toEqual([true, true, true]);
       expect(writtenUnder('file:///c/pngfail/')).toEqual([]);
     });
 
@@ -1483,7 +1602,7 @@ describe('export (dist)', () => {
       await done;
 
       expect(vscodeStub._test.notifications.error.at(-1)).toBe(
-        'Could not export the diagram: The PNG was not finished: its panel was closed.'
+        'Could not export the diagram: PNG export stopped because its panel was closed.'
       );
       expect(writtenUnder('file:///c/pngclosed/')).toEqual([]);
     });
@@ -1492,18 +1611,38 @@ describe('export (dist)', () => {
       const wide = ['```plantuml wide', '@startuml', `Alice -> Bob : ${'wide '.repeat(100)}`, '@enduml', '```'];
       vscodeStub._test.setConfiguration('exportPngScale', 4, 'file:///c/pngwide');
       const panels = vscodeStub._test.webviewPanels.length;
+      const calls = vscodeStub._test.commandCalls.length;
+      // The setting the message names is a button away.
+      vscodeStub._test.notificationReply = 'Open Settings';
       try {
         vscodeStub._test.setActiveEditor(makeEditor('file:///c/pngwide/doc.md', wide.join('\n'), 1));
         await vscodeStub._test.registeredCommands.get('plantumlLocal.exportPng')?.();
       } finally {
+        vscodeStub._test.notificationReply = null;
         vscodeStub._test.setConfiguration('exportPngScale', undefined, 'file:///c/pngwide');
       }
 
       expect(vscodeStub._test.webviewPanels).toHaveLength(panels);
       expect(vscodeStub._test.notifications.error.at(-1)).toMatch(
-        /^Could not export the diagram: The PNG would be \d+×\d+ pixels, larger than a PNG is made \(8192 a side, 16 million in all\)\. It fits at plantumlLocal\.exportPngScale 2\.$/
+        /^Could not export the diagram: The PNG would be \d+ × \d+ pixels, over the size limit for PNG images\. Set the PNG scale to 2 in Settings, or export as SVG\.$/
       );
+      expect(vscodeStub._test.commandCalls.slice(calls)).toContainEqual({
+        id: 'workbench.action.openSettings',
+        args: ['@id:plantumlLocal.exportPngScale'],
+      });
       expect(writtenUnder('file:///c/pngwide/')).toEqual([]);
+
+      // The other button exports the same diagram as an SVG, under its name.
+      vscodeStub._test.setConfiguration('exportPngScale', 4, 'file:///c/pngwide');
+      vscodeStub._test.notificationReply = 'Export as SVG';
+      try {
+        await vscodeStub._test.registeredCommands.get('plantumlLocal.exportPng')?.();
+      } finally {
+        vscodeStub._test.notificationReply = null;
+        vscodeStub._test.setConfiguration('exportPngScale', undefined, 'file:///c/pngwide');
+      }
+      expect(writtenUnder('file:///c/pngwide/')).toEqual(['file:///c/pngwide/images/wide.svg']);
+      expect(vscodeStub._test.notifications.info.at(-1)).toBe('Exported to pngwide/images/wide.svg');
     });
 
     it('exports the diagram that a file and a line name, as the .puml preview asks', async () => {
@@ -1551,7 +1690,7 @@ describe('export (dist)', () => {
         );
         expect(await waitFor(() => vscodeStub._test.webviewPanels.length > panels, 30_000)).toBe(true);
         const panel = vscodeStub._test.webviewPanels[panels]!;
-        expect(panel.webview.html).toContain('Drawing PNGs…');
+        expect(panel.webview.html).toContain('Creating PNG images…');
         panel.receive({ type: 'ready' });
         for (const index of [0, 1]) {
           expect(await waitFor(() => panel.webview.posted.length > index, 30_000)).toBe(true);
@@ -1572,7 +1711,7 @@ describe('export (dist)', () => {
         'file:///c/pngtree/sub/b.md',
         'file:///c/pngtree/sub/images/two.png',
       ]);
-      expect(vscodeStub._test.notifications.info.at(-1)).toBe('Exported 2 diagram(s)');
+      expect(vscodeStub._test.notifications.info.at(-1)).toBe('Diagrams exported: 2');
     });
   });
 });
@@ -1625,15 +1764,15 @@ describe('Insert Diagram Template (dist)', () => {
     // Dismissed, as the stub answers by default.
     await insert(markdown, 'Class diagram');
     expect(markdown.inserted).toEqual([]);
-    vscodeStub._test.messageReply = 'Insert After It';
+    vscodeStub._test.messageReply = 'Insert Below';
     try {
       await insert(markdown, 'Class diagram');
     } finally {
       vscodeStub._test.messageReply = null;
     }
     expect(vscodeStub._test.modals.slice(modals).map((modal) => modal.message)).toEqual([
-      'This block already holds a diagram. Insert the template as a new block after it?',
-      'This block already holds a diagram. Insert the template as a new block after it?',
+      'This code block already contains a diagram. Insert the template in a new code block below it?',
+      'This code block already contains a diagram. Insert the template in a new code block below it?',
     ]);
     // After the closing fence, the last line of the document, and apart from it.
     expect(markdown.inserted).toMatchObject([
@@ -1643,9 +1782,7 @@ describe('Insert Diagram Template (dist)', () => {
     const flows = makeEditor('file:///c/tpl/flows.puml', '@startuml\nA -> B\n@enduml', 1, { languageId: 'plantuml' });
     await insert(flows, 'State diagram');
     expect(flows.inserted).toEqual([]);
-    expect(vscodeStub._test.notifications.warn.at(-1)).toBe(
-      'The cursor is in a diagram. A template is a whole diagram: put the cursor outside one.'
-    );
+    expect(vscodeStub._test.notifications.warn.at(-1)).toBe('Templates cannot be inserted inside an existing diagram.');
   });
 });
 
@@ -1917,7 +2054,7 @@ describe('naming a diagram (dist)', () => {
     } finally {
       vscodeStub._test.inputBoxReply = null;
     }
-    expect(vscodeStub._test.inputBoxPrompts.at(-1)).toBe('Name for the diagram, which its exported files take');
+    expect(vscodeStub._test.inputBoxPrompts.at(-1)).toBe('Diagram name (used as the exported file name)');
     expect(editor.document.getText()).toBe(text.replace('```plantuml', '```plantuml orders'));
     // Named now: nothing more is offered.
     expect(actionsAt(editor, 2)).toBeUndefined();
@@ -1942,7 +2079,7 @@ describe('naming a diagram (dist)', () => {
       vscodeStub._test.inputBoxReply = null;
     }
     expect(editor.document.getText()).toBe(text);
-    expect(vscodeStub._test.notifications.warn.at(-1)).toBe('The document changed. Name the diagram again from its line.');
+    expect(vscodeStub._test.notifications.warn.at(-1)).toBe('The file has changed. Name the diagram again.');
   });
 
   it('gives every kind of diagram of a PlantUML file an id', async () => {
@@ -2000,7 +2137,7 @@ describe('viewer (dist)', () => {
     await run('plantumlLocal.openPreviewToSide');
 
     const panel = vscodeStub._test.webviewPanels[before];
-    expect(panel).toMatchObject({ viewType: 'plantumlLocal.viewer', title: 'Preview flows.puml' });
+    expect(panel).toMatchObject({ viewType: 'plantumlLocal.viewer', title: 'Preview: flows.puml' });
     expect(panel?.column).toBe(vscodeStub.ViewColumn.Beside);
     expect(panel?.webview.options).toMatchObject({ enableScripts: true, enableForms: false });
     // The extension's own media/viewer, and nothing else.
@@ -2019,8 +2156,8 @@ describe('viewer (dist)', () => {
     expect(csp).toMatch(/img-src [^;]*blob:/);
     expect(panel?.webview.html).toContain('/media/viewer/viewer.js');
     // The zoom toolbar, its buttons named in the display language.
-    expect(panel?.webview.html).toContain('<div id="tools" role="toolbar" aria-label="Zoom">');
-    for (const label of ['Zoom Out', 'Zoom In', 'Fit', 'Actual Size']) {
+    expect(panel?.webview.html).toContain('<div id="tools" role="toolbar" aria-label="Diagram zoom">');
+    for (const label of ['Zoom Out', 'Zoom In', 'Fit to Window', 'Actual Size']) {
       expect(panel?.webview.html).toContain(`aria-label="${label}"`);
     }
     // Nothing is sent before the page says it runs.
@@ -2070,7 +2207,7 @@ describe('viewer (dist)', () => {
     const editor = makeEditor('file:///c/view/flows.puml', FLOWS, 1, { languageId: 'plantuml' });
     vscodeStub._test.setActiveEditor(editor);
     const panels = vscodeStub._test.webviewPanels.length;
-    const panel = vscodeStub._test.webviewPanels.find((candidate) => candidate.title === 'Preview flows.puml');
+    const panel = vscodeStub._test.webviewPanels.find((candidate) => candidate.title === 'Preview: flows.puml');
     const revealed = panel?.revealed ?? 0;
 
     await run('plantumlLocal.openPreview');
@@ -2087,7 +2224,7 @@ describe('viewer (dist)', () => {
 
   it('draws the file again once it stops changing', async () => {
     const editor = makeEditor('file:///c/view/flows.puml', FLOWS, 1, { languageId: 'plantuml' });
-    const panel = vscodeStub._test.webviewPanels.find((candidate) => candidate.title === 'Preview flows.puml');
+    const panel = vscodeStub._test.webviewPanels.find((candidate) => candidate.title === 'Preview: flows.puml');
     const count = posted(panel!, 'render').length;
 
     editor.document.setText(FLOWS.replace('second', 'edited'));
@@ -2116,7 +2253,7 @@ describe('viewer (dist)', () => {
 
       editor.document.setText(FLOWS.replace('Alice -> Bob : orders', 'Alice -> Bob : changed'));
       vscodeStub._test.changeDocument(editor.document);
-      await waitFor(() => statuses().at(-1)?.text === 'Not updated: the diagram is drawn again when the file is saved.');
+      await waitFor(() => statuses().at(-1)?.text === 'Preview is out of date. Save the file to refresh it.');
       expect(statuses().at(-1)).toMatchObject({ error: false, clear: false });
       // Past the delay a change waits for before drawing: nothing drawn.
       await new Promise((resolve) => setTimeout(resolve, 600));
@@ -2137,11 +2274,11 @@ describe('viewer (dist)', () => {
     await run('plantumlLocal.openPreview');
 
     expect(vscodeStub._test.webviewPanels).toHaveLength(panels);
-    expect(vscodeStub._test.notifications.warn.at(-1)).toBe('Open a PlantUML file first.');
+    expect(vscodeStub._test.notifications.warn.at(-1)).toBe('Open a PlantUML file to preview its diagrams.');
   });
 
   describe('after a restart', () => {
-    const restore = async (state: unknown, title = 'Preview kept.puml'): Promise<WebviewPanelStub> => {
+    const restore = async (state: unknown, title = 'Preview: kept.puml'): Promise<WebviewPanelStub> => {
       const panel = vscodeStub._test.restoredPanel('plantumlLocal.viewer', title);
       await vscodeStub._test.webviewSerializers.get('plantumlLocal.viewer')?.deserializeWebviewPanel(panel, state);
       return panel;
@@ -2187,7 +2324,7 @@ describe('viewer (dist)', () => {
         expect(posted(shown, 'render')).toEqual([]);
         expect(shown.webview.posted.at(-1)).toEqual({
           type: 'status',
-          text: 'Choose a diagram in the list.',
+          text: 'Select a diagram from the list.',
           error: false,
           clear: true,
         });
@@ -2199,7 +2336,7 @@ describe('viewer (dist)', () => {
 
     it('closes a panel whose file is gone, or whose state cannot be read', async () => {
       for (const state of [{ uri: 'file:///c/view/missing.puml', name: 'x' }, { uri: 42 }, null, 'kept.puml']) {
-        const panel = vscodeStub._test.restoredPanel('plantumlLocal.viewer', 'Preview gone.puml');
+        const panel = vscodeStub._test.restoredPanel('plantumlLocal.viewer', 'Preview: gone.puml');
         let disposed = false;
         panel.onDidDispose(() => {
           disposed = true;

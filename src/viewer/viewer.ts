@@ -21,7 +21,7 @@ import { blockAtLine, findFileDiagrams, type PlantUmlBlock } from '../export/blo
 import { withIncludeReason } from '../includes/describe';
 import { changeTo } from '../includes/tracking';
 import { drawReadable } from '../render/palette';
-import { recognizeEngineError } from '../render/engine-error';
+import { recognizeEngineError, recognizeEngineWarnings } from '../render/engine-error';
 
 /** What the viewer needs of its panel. */
 export interface ViewerPanel {
@@ -30,6 +30,7 @@ export interface ViewerPanel {
 
 /** Text shown in the panel, localised by the caller. */
 export interface ViewerLabels {
+  errorMessage(message: string): string;
   /** The name of an unnamed diagram, from its position counting from 1. */
   diagram(position: number): string;
   /** A diagram in the list: its name and the line it starts on. */
@@ -45,8 +46,6 @@ export interface ViewerLabels {
   emojiUnavailable: string;
   pages: string;
   engineError(message: string, line: number | null): string;
-  /** A local include that failed, as the Markdown preview's note says it: the path it asked for, and why. */
-  includeFailed(path: string, reason: string): string;
   /** The diagram is drawn in the palette `dark` names, as its colours are hard to read in the one asked for. */
   otherPalette(dark: boolean): string;
 }
@@ -84,6 +83,7 @@ export function parseRequest(message: unknown, count: number): ViewerRequest | n
 
 /** The zoom toolbar's text, localised by the caller. */
 export interface ToolbarLabels {
+  selectDiagram: string;
   toolbar: string;
   zoomOut: string;
   zoomIn: string;
@@ -101,7 +101,7 @@ export function viewerBody(labels: ToolbarLabels, escape: (text: string) => stri
   const button = (id: string, text: string, label: string, key: string, more = ''): string =>
     `<button id="${id}" type="button" aria-label="${escape(label)}" title="${escape(`${label} (${key})`)}"${more}>${escape(text)}</button>`;
   return [
-    '<header><select id="diagrams" hidden></select><span id="status" role="status"></span>',
+    `<header><select id="diagrams" aria-label="${escape(labels.selectDiagram)}" hidden></select><span id="status" role="status"></span>`,
     `<div id="tools" role="toolbar" aria-label="${escape(labels.toolbar)}">`,
     button('zoom-out', '−', labels.zoomOut, '-'),
     '<span id="zoom" aria-live="polite"></span>',
@@ -263,12 +263,14 @@ export class DiagramViewer {
       if (failure === null) {
         // Not drawn as asked: say why, unless the drawing is not up to date.
         const why = this.note === '' && dark !== asked ? labels.otherPalette(dark) : this.note;
-        await this.status(why, false, false);
+        const warnings = recognizeEngineWarnings(svg).flatMap((message) => {
+          const translated = labels.errorMessage(message);
+          return translated === message ? [] : [translated];
+        });
+        await this.status([...warnings, why].filter((text) => text !== '').join(' '), false, false);
       } else {
         const line = failure.line === null ? null : diagram.sourceLine + failure.line;
-        const message = withIncludeReason(failure.message, failedIncludes, (path, reason) =>
-          labels.includeFailed(path, reason)
-        );
+        const message = withIncludeReason(failure.message, failedIncludes);
         await this.status(labels.engineError(message, line), true, false);
       }
     } catch (error: unknown) {
@@ -276,7 +278,7 @@ export class DiagramViewer {
         return;
       }
       const message = error instanceof Error ? error.message : String(error);
-      await this.status(EMOJI_UNAVAILABLE.test(message) ? labels.emojiUnavailable : message, true, true);
+      await this.status(EMOJI_UNAVAILABLE.test(message) ? labels.emojiUnavailable : labels.errorMessage(message), true, true);
     }
   }
 

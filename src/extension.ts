@@ -36,6 +36,7 @@ import {
   DIAGNOSTICS_DEBOUNCE_MS,
   EXTENSION_ID,
   EXTENSION_NAME,
+  PACKAGE_ID,
   PNG_PANEL_TYPE,
   REFRESH_DEBOUNCE_MS,
   SAVE_REFRESH_DELAY_MS,
@@ -60,10 +61,12 @@ import {
   type ExportFormat,
   type ExporterDeps,
   type ExportOutcome,
+  type ExportResult,
 } from './export/exporter';
 import { MAX_DOCUMENTS, findDocuments } from './export/folder';
 import { isLastExport, withExport, type ExportRecords } from './export/ownership';
 import { START, forEachCodeLine } from './core/shape';
+import { errorMessage } from './core/messages';
 import { lineAfterEdits, planReferenceEdits, type ReferenceEdit } from './export/references';
 import {
   lineContext,
@@ -392,7 +395,7 @@ async function chooseMarkdownDocument(
 
   const open = vscode.workspace.textDocuments.filter(isMarkdownFile);
   if (open.length === 0) {
-    void context.notify.warn(context.l10n.t('Open a Markdown file first.'));
+    void context.notify.warn(context.l10n.t('Open a Markdown file to export its diagrams.'));
     return null;
   }
   if (open.length === 1) {
@@ -408,9 +411,87 @@ async function chooseMarkdownDocument(
     ...open.filter((document) => !visible.has(document.uri.toString())),
   ].map((document) => ({ label: workspace.relativePath(document.uri), document }));
   const picked = await context.ask.one(items, {
-    title: context.l10n.t('Choose the Markdown document to export from'),
+    title: context.l10n.t('Select the Markdown file to export diagrams from'),
   });
   return picked?.document ?? null;
+}
+
+/** A button on a notification, and what it does. */
+interface NoticeAction {
+  title: string;
+  run(): Promise<unknown>;
+}
+
+/**
+ * Shows a notification with buttons. VS Code shows a notification without
+ * buttons on a single line, so a message longer than that comes with one: a
+ * way on from what it says.
+ */
+async function notifyWith(
+  context: OperationContext,
+  severity: 'info' | 'warn' | 'error',
+  message: string,
+  actions: readonly NoticeAction[]
+): Promise<void> {
+  const choice = await context.notify[severity](message, {
+    actions: actions.map((action, index) => ({ title: action.title, value: index })),
+  });
+  if (choice !== undefined) {
+    await actions[choice]?.run();
+  }
+}
+
+/** A button that opens the Settings editor at this extension's setting `key`. */
+function settingsButton(context: OperationContext, key: string): NoticeAction {
+  return {
+    title: context.l10n.t('Open Settings'),
+    run: () => context.commands.execute('workbench.action.openSettings', `@id:${EXTENSION_ID}.${key}`),
+  };
+}
+
+/**
+ * A button that selects `uri` in the Explorer view. With `orFolder`, a file
+ * that may not be there: the folder it would be in is selected instead.
+ */
+function explorerButton(context: OperationContext, uri: vscode.Uri, orFolder = false): NoticeAction {
+  return {
+    title: context.l10n.t('Show in Explorer'),
+    run: async (): Promise<void> => {
+      const there =
+        !orFolder ||
+        (await Promise.resolve(vscode.workspace.fs.stat(uri)).then(
+          () => true,
+          () => false
+        ));
+      await context.commands.execute('revealInExplorer', there ? uri : vscode.Uri.joinPath(uri, '..'));
+    },
+  };
+}
+
+/** A button that shows the Problems panel, where the diagnostics say what is wrong in a diagram. */
+function problemsButton(context: OperationContext): NoticeAction {
+  return {
+    title: context.l10n.t('Show Problems'),
+    run: () => context.commands.execute('workbench.actions.view.problems'),
+  };
+}
+
+/** A button that shows the extension's output channel. */
+function outputButton(context: OperationContext): NoticeAction {
+  return { title: context.l10n.t('Show Output'), run: () => showOutput(context) };
+}
+
+/**
+ * Says that exporting needs a trusted workspace, with VS Code's own way of
+ * granting it.
+ */
+async function refuseUntrusted(context: OperationContext): Promise<void> {
+  await notifyWith(
+    context,
+    'warn',
+    context.l10n.t('Export is unavailable in Restricted Mode. Trust this workspace to export diagrams. You can still use the preview.'),
+    [{ title: context.l10n.t('Manage Workspace Trust'), run: (): Promise<unknown> => context.commands.execute('workbench.trust.manage') }]
+  );
 }
 
 /**
@@ -433,9 +514,7 @@ async function activeDocument(
   // `enablement` clause: that only hides the command, leaving someone who
   // went looking for it with no idea why it is missing.
   if (!vscode.workspace.isTrusted) {
-    void context.notify.warn(
-      context.l10n.t('Exporting needs a trusted workspace. The preview works either way.')
-    );
+    void refuseUntrusted(context);
     return null;
   }
 
@@ -511,38 +590,38 @@ function includePathsOf(settings: SettingsReader, document: vscode.Uri): unknown
 /** Why a local include failed, in the user's language. */
 function includeLabels(l10n: L10n): IncludeLabels {
   return {
-    untrusted: l10n.t('Restricted Mode reads no files. Trust the workspace to include them.'),
-    untitled: l10n.t('An untitled document has no folder to look in. Save it first.'),
-    notOnDisk: l10n.t('Only files on disk are read.'),
+    untrusted: l10n.t('Local includes are unavailable in Restricted Mode. Trust this workspace to include files.'),
+    untitled: l10n.t('Save this document before including local files so their paths can be resolved.'),
+    notOnDisk: l10n.t('Local includes require a document saved on disk. Virtual documents are not supported.'),
     outsideWorkspace: l10n.t(
-      "Only files in the document's workspace folder are read. Open the folder that holds it."
+      "Open the folder containing this document as a workspace. Included files must be within that workspace folder."
     ),
-    settingNotAList: l10n.t('plantumlLocal.includePaths must be a list of folders.'),
+    settingNotAList: l10n.t('Set plantumlLocal.includePaths to an array of folder paths, for example: ["includes", "styles"].'),
     settingTooMany: (count, most) =>
-      l10n.t('plantumlLocal.includePaths lists {0} folders, more than {1}.', String(count), String(most)),
+      l10n.t('plantumlLocal.includePaths has {0} entries. Reduce the list to {1} folders or fewer.', String(count), String(most)),
     settingRefused: (folder) =>
-      l10n.t('plantumlLocal.includePaths: {0} is not a folder inside the workspace folder.', folder),
+      l10n.t('Invalid include folder: {0}. In plantumlLocal.includePaths, use paths relative to the workspace folder that stay within it.', folder),
     notRelative: l10n.t(
-      'Write the path relative to the including file: absolute paths, drives, shares, URLs and ~ are not read.'
+      'Use a path relative to the file containing this directive. Absolute paths, drive letters, network shares, URLs, and ~ are not supported.'
     ),
     badName: l10n.t(
-      'This file name is not read: it names a device, ends in a dot or a space, or holds a colon or a control character.'
+      'Invalid file name. Use a non-empty name without reserved device names, colons, control characters, or a trailing dot or space.'
     ),
-    versionControl: l10n.t('Files in .git, .hg and .svn folders are not read.'),
-    extension: (extensions) => l10n.t('Only these kinds of file are read: {0}.', extensions),
-    outside: l10n.t('The path leads out of the workspace folder.'),
-    missing: l10n.t('Not found next to the including file.'),
+    versionControl: l10n.t('Files inside .git, .hg, or .svn folders cannot be included.'),
+    extension: (extensions) => l10n.t('Only files with these extensions can be included: {0}.', extensions),
+    outside: l10n.t('The path is outside the document\'s workspace folder. Move the file into that folder or correct the path.'),
+    missing: l10n.t('File not found. Check the path relative to the file containing this directive.'),
     missingAnywhere: l10n.t(
-      'Not found next to the including file, nor in the folders of plantumlLocal.includePaths.'
+      'File not found relative to the file containing this directive or in the plantumlLocal.includePaths folders.'
     ),
-    link: l10n.t('Files reached through a symbolic link or a junction are not read.'),
-    notAFile: l10n.t('It is not a file.'),
-    encoding: l10n.t('It is not UTF-8 text.'),
-    nul: l10n.t('It holds a NUL character.'),
-    unreadable: l10n.t('It could not be read.'),
-    tooDeep: (most) => l10n.t('Includes nest more than {0} deep.', String(most)),
-    tooMany: (most) => l10n.t('More than {0} files are included.', String(most)),
-    tooLarge: (mebibytes) => l10n.t('The included files are larger than {0} MiB in all.', String(mebibytes)),
+    link: l10n.t('Files accessed through symbolic links or junctions cannot be included. Use a path within the workspace folder that does not pass through either.'),
+    notAFile: l10n.t('The path does not point to a regular file.'),
+    encoding: l10n.t('The file is not UTF-8 text. Save it with UTF-8 encoding.'),
+    nul: l10n.t('The file contains a NUL character and cannot be included as text.'),
+    unreadable: l10n.t('Could not read the file. Check that it exists and that you have permission to read it.'),
+    tooDeep: (most) => l10n.t('Includes are nested more than {0} levels deep. Reduce the nesting or check for files that include each other.', String(most)),
+    tooMany: (most) => l10n.t('This diagram includes more than {0} files. Reduce the number of included files.', String(most)),
+    tooLarge: (mebibytes) => l10n.t('The included files exceed the {0} MiB total size limit. Reduce their size or include fewer files.', String(mebibytes)),
   };
 }
 
@@ -579,12 +658,16 @@ function exportDirectory(
   // could reach them.
   const problem = checkRelativePath(directory);
   if (problem !== undefined) {
-    void context.notify.error(
+    void notifyWith(
+      context,
+      'error',
       problem === 'empty'
-        ? context.l10n.t(
-            'plantumlLocal.exportDirectory is empty. Set a folder relative to the document, such as images.'
-          )
-        : context.l10n.t('plantumlLocal.exportDirectory must be a relative path without "..": {0}', directory)
+        ? context.l10n.t('No folder is set for exported images. Enter one in Settings, for example images.')
+        : context.l10n.t(
+            'The folder for exported images, {0}, cannot be used. In Settings, enter a folder inside the file\'s folder, for example images.',
+            directory
+          ),
+      [settingsButton(context, CONFIG.EXPORT_DIRECTORY)]
     );
     return null;
   }
@@ -603,8 +686,8 @@ function notUpdatedNote(
   mode: Exclude<UpdateMode, 'onChange'>
 ): string {
   return mode === 'onSave'
-    ? l10n.t('Not updated: the diagram is drawn again when the file is saved.')
-    : l10n.t('Not updated: run "PlantUML Local: Clear Render Cache and Re-render" to draw it again.');
+    ? l10n.t('Preview is out of date. Save the file to refresh it.')
+    : l10n.t('Preview is out of date. Run "PlantUML Local: Clear Render Cache and Re-render" to refresh it.');
 }
 
 /** Prompts for a file name for a block that does not carry one. */
@@ -619,7 +702,7 @@ async function askForName(context: OperationContext, format: ExportFormat): Prom
       isValidBlockName(value)
         ? undefined
         : context.l10n.t(
-            'Use up to 128 ASCII letters, digits, hyphens and underscores. Windows device names such as CON cannot be used.'
+            'Use 1–128 letters (A–Z, a–z), digits, hyphens, or underscores. Reserved file names such as CON are not allowed.'
           ),
   });
   return name ?? null;
@@ -632,8 +715,8 @@ function engineErrorMessage(
   line: number | null
 ): string {
   return line === null
-    ? context.l10n.t('PlantUML reported an error: {0}', message)
-    : context.l10n.t('PlantUML reported an error at line {0}: {1}', String(line), message);
+    ? context.l10n.t('PlantUML error: {0}', errorMessage(message, context.l10n))
+    : context.l10n.t('PlantUML error on line {0}: {1}', String(line), errorMessage(message, context.l10n));
 }
 
 /**
@@ -694,7 +777,7 @@ function openPngPanel(l10n: { t(message: string, ...args: string[]): string }, b
   let request: unknown = null;
   let ready = false;
   let closed = false;
-  const closedError = (): Error => new Error(l10n.t('The PNG was not finished: its panel was closed.'));
+  const closedError = (): Error => new Error(l10n.t('PNG export stopped because its panel was closed.'));
   // The page is untrusted: only these three answers are acted on.
   panel.webview.onDidReceiveMessage((message: unknown) => {
     const { type, data, error } = (message ?? {}) as { type?: unknown; data?: unknown; error?: unknown };
@@ -707,7 +790,11 @@ function openPngPanel(l10n: { t(message: string, ...args: string[]): string }, b
     } else if (type === 'png' && data instanceof Uint8Array) {
       pending?.(data);
     } else if (type === 'error') {
-      pending?.(new Error(l10n.t('The PNG could not be drawn: {0}', String(error))));
+      // A failure the page names (see media/png/png.js) has an explanation of
+      // its own; anything else is passed on as it came.
+      const detail = String(error);
+      const explained = errorMessage(detail, l10n);
+      pending?.(new Error(explained !== detail ? explained : l10n.t('PNG creation failed: {0}', detail)));
     }
   });
   panel.onDidDispose(() => {
@@ -733,7 +820,7 @@ function openPngPanel(l10n: { t(message: string, ...args: string[]): string }, b
         };
         pending = finish;
         const timer = setTimeout(() => {
-          finish(new Error(l10n.t('The PNG was not drawn within 30 seconds.')));
+          finish(new Error(l10n.t('Creating the PNG took longer than 30 seconds, so it was stopped. Try exporting as SVG.')));
           // An answer coming later would be taken for the next drawing's.
           panel.dispose();
         }, 30_000);
@@ -772,7 +859,7 @@ async function drawPng(
   height: number,
   background: string
 ): Promise<Uint8Array> {
-  const panel = openPngPanel(l10n, l10n.t('Drawing a PNG of {0}×{1} pixels…', String(width), String(height)));
+  const panel = openPngPanel(l10n, l10n.t('Creating a {0} × {1} pixel PNG…', String(width), String(height)));
   try {
     return await panel.draw(svg, width, height, background);
   } finally {
@@ -796,41 +883,41 @@ function exporterDeps(
 ): ExporterDeps {
   const draw = drawWith(renderer, settings, context.l10n);
   return {
+    errorMessage: (message) => errorMessage(message, context.l10n),
     render: (source, dark) => draw(source, dark, document.toString()),
     resolvePalette: (source, dark, included) => palettes.resolve(source, dark, included),
     remoteReferenceMessage: context.l10n.t(
-      'URL-based external references (!include, !theme) are not supported.'
+      'Loading files or themes from URLs (!include, !theme) is not supported. Use files in your workspace or bundled libraries and themes.'
     ),
     emojiUnavailableMessage: context.l10n.t(
-      'Emoji (<:name:>) are not supported: the emoji images are not bundled.'
+      'Emoji syntax (<:name:>) is not supported because emoji images are not included with this extension.'
     ),
     invalidNameMessage: context.l10n.t(
-      'Use up to 128 ASCII letters, digits, hyphens and underscores. Windows device names such as CON cannot be used.'
+      'Use 1–128 letters (A–Z, a–z), digits, hyphens, or underscores. Reserved file names such as CON are not allowed.'
     ),
     severalDiagramsMessage: context.l10n.t(
-      'This block holds more than one diagram, and only the first would be drawn. Give each diagram a block of its own.'
+      'Each PlantUML code block can contain only one diagram. Move each diagram into a separate code block.'
     ),
     pagesMessage: context.l10n.t(
-      'Pages after newpage cannot be drawn, so only the first page would be. Give each page a block of its own.'
+      'Multi-page diagrams (newpage) are not supported. Split the pages into separate diagrams.'
     ),
     engineErrorMessage: (message, line) => engineErrorMessage(context, message, line),
-    includeFailedMessage: (path, reason) => context.l10n.t('Cannot include {0}: {1}', path, reason),
     pngTooLargeMessage: (width, height, fits) =>
       fits === null
         ? context.l10n.t(
-            'The PNG would be {0}×{1} pixels, larger than a PNG is made (8192 a side, 16 million in all), even at a scale of 1. Export it as SVG instead.',
+            'The PNG would be {0} × {1} pixels even at the smallest scale, over the size limit for PNG images. Export as SVG instead.',
             String(width),
             String(height)
           )
         : context.l10n.t(
-            'The PNG would be {0}×{1} pixels, larger than a PNG is made (8192 a side, 16 million in all). It fits at plantumlLocal.exportPngScale {2}.',
+            'The PNG would be {0} × {1} pixels, over the size limit for PNG images. Set the PNG scale to {2} in Settings, or export as SVG.',
             String(width),
             String(height),
             String(fits)
           ),
-    pngFailedMessage: context.l10n.t('The PNG could not be made as asked.'),
-    sameFileMessage: context.l10n.t('Another diagram is exported to the same file.'),
-    changedMessage: context.l10n.t('The file changed while the export was running, so it was left as it is.'),
+    pngFailedMessage: context.l10n.t('The PNG was not created correctly. Try exporting as SVG.'),
+    sameFileMessage: context.l10n.t('Multiple diagrams would be saved to the same file. Give each diagram a unique name or use separate export folders.'),
+    changedMessage: context.l10n.t('The image file changed during export, so it was not overwritten. Check it, then export again.'),
     pngScale: (): number => {
       const scale = settings.read({ resource: document }).values[CONFIG.EXPORT_PNG_SCALE];
       return PNG_SCALES.includes(scale as 1 | 2 | 4) ? Number(scale) : 2;
@@ -869,7 +956,7 @@ function exporterDeps(
       // Renaming a file over a folder deletes the folder and all it holds.
       if ((stat.type & vscode.FileType.Directory) !== 0) {
         throw new Error(
-          context.l10n.t('{0} is a folder, not a file.', workspace.relativePath(uri))
+          context.l10n.t('Cannot save to {0} because a folder with that name already exists.', workspace.relativePath(uri))
         );
       }
       return vscode.workspace.fs.readFile(uri);
@@ -883,25 +970,29 @@ function exporterDeps(
       const next = withExport(records, path, source, content);
       if (next !== records) {
         await exportRecords.set(next).catch((error: unknown) => {
-          context.logger.warn(`Could not record the export of ${path}: ${String(error)}`);
+          context.logger.warn(context.l10n.t(
+            'Could not save export history for {0}. You may be asked before overwriting this file next time. Details: {1}',
+            path,
+            error instanceof Error ? error.message : String(error)
+          ));
         });
       }
     },
     confirmReplace: (paths, canKeep): Promise<'replace' | 'keep' | undefined> => {
       const files = paths.map((path) => workspace.relativePath(vscode.Uri.parse(path)));
-      const replace = { title: context.l10n.t('Replace'), value: 'replace' as const };
-      const keep = { title: context.l10n.t('Keep Existing'), value: 'keep' as const };
+      const replace = { title: context.l10n.t('Overwrite'), value: 'replace' as const };
+      const keep = { title: context.l10n.t('Keep Existing Files'), value: 'keep' as const };
       const actions = canKeep ? [replace, keep] : [replace];
       // VS Code adds a Cancel button to a modal, which answers undefined.
       if (files.length === 1) {
         return context.notify.warn(
-          context.l10n.t('{0} already exists with different contents. Replace it?', files[0] ?? ''),
+          context.l10n.t('{0} already exists and has different contents. Overwrite it?', files[0] ?? ''),
           { modal: true, actions }
         );
       }
       return context.notify.warn(
         context.l10n.t(
-          '{0} files already exist with different contents. Replace them?',
+          '{0} files already exist and have different contents. Overwrite them?',
           String(files.length)
         ),
         { modal: true, detail: files.join('\n'), actions }
@@ -959,29 +1050,52 @@ function runBulkExport(
 }
 
 /**
+ * A button that asks for a name for the first diagram without one in the
+ * document at `uri`, as its light bulb does, with the document open at the
+ * line the name goes on. The diagram is looked for when the button is
+ * pressed, in the text as it is then.
+ */
+function nameButton(context: OperationContext, uri: vscode.Uri): NoticeAction {
+  return {
+    title: context.l10n.t('Name Diagram…'),
+    run: async (): Promise<void> => {
+      const document = await vscode.workspace.openTextDocument(uri);
+      const block = diagramsOf(document, document.getText()).find((candidate) => candidate.name === null);
+      const start = new vscode.Position(block?.openLine ?? 0, 0);
+      await vscode.window.showTextDocument(document, { selection: new vscode.Range(start, start) });
+      if (block !== undefined) {
+        await context.commands.execute(COMMANDS.ASSIGN_DIAGRAM_NAME, document.uri.toString(), block.openLine, document.version);
+      }
+    },
+  };
+}
+
+/**
  * One summary notification for a bulk export, warnings when warranted.
  * `unnamedDiagrams` says how many of the unnamed are diagrams of PlantUML
- * files, which are named differently.
+ * files, which are named differently; `unnamedIn` is a document with one
+ * of the unnamed.
  */
 async function reportOutcome(
   context: OperationContext,
   outcome: ExportOutcome,
   extra: readonly string[],
   forceWarn: boolean,
-  unnamedDiagrams = 0
+  unnamedDiagrams = 0,
+  unnamedIn?: vscode.Uri
 ): Promise<void> {
   const messages: string[] = [];
   if (outcome.written.length > 0) {
-    messages.push(context.l10n.t('Exported {0} diagram(s)', String(outcome.written.length)));
+    messages.push(context.l10n.t('Diagrams exported: {0}', String(outcome.written.length)));
   }
   messages.push(...extra);
   if (outcome.kept > 0) {
-    messages.push(context.l10n.t('{0} existing file(s) kept', String(outcome.kept)));
+    messages.push(context.l10n.t('Existing files kept: {0}', String(outcome.kept)));
   }
   if (outcome.failed.length > 0) {
-    messages.push(context.l10n.t('{0} failed', String(outcome.failed.length)));
+    messages.push(context.l10n.t('Diagrams that could not be exported: {0}. See the Output panel for the reasons.', String(outcome.failed.length)));
     for (const failure of outcome.failed) {
-      context.logger.warn(`Export failed for ${failure.name}: ${String(failure.error)}`);
+      context.logger.warn(context.l10n.t('Could not export {0}: {1}', failure.name, String(failure.error)));
     }
   }
   // Naming is what keeps a file tied to its block across edits; a
@@ -989,13 +1103,16 @@ async function reportOutcome(
   const unnamedBlocks = outcome.unnamed - unnamedDiagrams;
   if (unnamedBlocks > 0) {
     messages.push(
-      context.l10n.t('{0} unnamed block(s) skipped — name one with ```plantuml my-diagram', String(unnamedBlocks))
+      context.l10n.t(
+        'Unnamed code blocks were not exported: {0}. Add a name after ```plantuml, for example: "```plantuml my-diagram".',
+        String(unnamedBlocks)
+      )
     );
   }
   if (unnamedDiagrams > 0) {
     messages.push(
       context.l10n.t(
-        '{0} unnamed diagram(s) skipped — name one with @startuml(id=my-diagram)',
+        'Unnamed diagrams were not exported: {0}. Add a name to the start line, for example: "@startuml(id=my-diagram)".',
         String(unnamedDiagrams)
       )
     );
@@ -1011,30 +1128,54 @@ async function reportOutcome(
     context,
     summary,
     forceWarn || outcome.failed.length > 0 || outcome.unnamed > 0,
-    outcome.written[0]?.path ?? undefined
+    outcome.written[0]?.path ?? undefined,
+    outcome.failed.length > 0,
+    outcome.unnamed > 0 ? unnamedIn : undefined
   );
 }
 
 /**
  * Shows how an export went, with a button that selects `written`, a file
- * it wrote, in the Explorer view.
+ * it wrote, in the Explorer view; with `failed`, one that shows the output
+ * channel the failures were written to; and with `unnamed`, a document
+ * when nothing was written, one that names a diagram skipped for want of a
+ * name.
  */
 async function announceExport(
   context: OperationContext,
   message: string,
   warn: boolean,
-  written: string | undefined
+  written: string | undefined,
+  failed = false,
+  unnamed?: vscode.Uri
 ): Promise<void> {
-  if (written === undefined) {
-    await (warn ? context.notify.warn(message) : context.notify.info(message));
-    return;
+  const actions: NoticeAction[] = [];
+  if (written !== undefined) {
+    actions.push(explorerButton(context, vscode.Uri.parse(written)));
   }
-  const reveal = { title: context.l10n.t('Reveal in Explorer View'), value: 'reveal' as const };
-  const choice = await (warn
-    ? context.notify.warn(message, { actions: [reveal] })
-    : context.notify.info(message, { actions: [reveal] }));
-  if (choice === 'reveal') {
-    await context.commands.execute('revealInExplorer', vscode.Uri.parse(written));
+  if (failed) {
+    actions.push(outputButton(context));
+  }
+  // A written file's button already shows the message in full; a third
+  // button would crowd the notification.
+  if (unnamed !== undefined && written === undefined) {
+    actions.push(nameButton(context, unnamed));
+  }
+  await notifyWith(context, warn ? 'warn' : 'info', message, actions);
+}
+
+/**
+ * Shows the PlantUML Local output channel. The kit owns the channel, so it
+ * is shown through the command VS Code gives each channel, named after the
+ * channel's id: the extension's id and the name of the channel's log file.
+ * That id is an internal detail of VS Code, so the list of channels stands in
+ * if it ever changes.
+ */
+async function showOutput(context: OperationContext): Promise<void> {
+  try {
+    await context.commands.execute(`workbench.action.output.show.${PACKAGE_ID}.${EXTENSION_NAME}.log`);
+  } catch {
+    await context.commands.execute('workbench.action.showOutputChannels');
   }
 }
 
@@ -1086,7 +1227,7 @@ async function folderToExport(
     return null;
   }
   if (workspace.folderOf(folder) === undefined) {
-    void context.notify.warn(context.l10n.t('Choose a folder in the workspace.'));
+    void context.notify.warn(context.l10n.t('Select a folder within the current workspace.'));
     return null;
   }
   return folder;
@@ -1166,14 +1307,17 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
   module.storage.add(ExportedFiles);
 
   module.services.singleton(Renderer, {
-    inject: { logger: Log, settings: Settings.token },
-    create: ({ logger, settings }) =>
+    inject: { logger: Log, settings: Settings.token, l10n: Localization },
+    create: ({ logger, settings, l10n }) =>
       new RendererClient(
         defaultWorkerPath(),
         // plantumlLocal.logLevel can only make the channel quieter: VS Code
         // owns the channel's level, and an extension cannot raise it. Read on
         // every entry, so a change applies without a reload.
-        filterLogger(logger, () => settings.read().values[CONFIG.LOG_LEVEL])
+        filterLogger(logger, () => settings.read().values[CONFIG.LOG_LEVEL]),
+        undefined,
+        undefined,
+        l10n
       ),
   });
 
@@ -1217,26 +1361,29 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         updateMode: (document) => updateModeOf(settings, vscode.Uri.parse(document)),
         log: filterLogger(logger, () => settings.read().values[CONFIG.LOG_LEVEL]),
         labels: {
+          errorMessage: (message) => errorMessage(message, l10n),
+          rendered: (bytes) => l10n.t('Diagram rendered (SVG size: {0} bytes).', String(bytes)),
+          renderFailed: (message) => l10n.t('Could not render the diagram: {0}', message),
           loading: l10n.t('Rendering diagram…'),
-          failedTitle: l10n.t('Failed to render diagram'),
-          emptySource: l10n.t('The PlantUML source is empty.'),
+          failedTitle: l10n.t('Could not render the diagram'),
+          emptySource: l10n.t('There is no PlantUML code to render.'),
           remoteReference: l10n.t(
-            'URL-based external references (!include, !theme) are not supported.'
+            'Loading files or themes from URLs (!include, !theme) is not supported. Use files in your workspace or bundled libraries and themes.'
           ),
           emojiUnavailable: l10n.t(
-            'Emoji (<:name:>) are not supported: the emoji images are not bundled.'
+            'Emoji syntax (<:name:>) is not supported because emoji images are not included with this extension.'
           ),
           severalDiagrams: l10n.t(
-            'This block holds more than one diagram, and only the first would be drawn. Give each diagram a block of its own.'
+            'Each PlantUML code block can contain only one diagram. Move each diagram into a separate code block.'
           ),
           pages: l10n.t(
-            'Pages after newpage cannot be drawn, so only the first page would be. Give each page a block of its own.'
+            'Multi-page diagrams (newpage) are not supported. Split the pages into separate diagrams, each in its own code block.'
           ),
           missingEnd: (end) =>
-            l10n.t('This diagram has no {0} line; it is drawn as if the block ended with one.', end),
-          beforeStart: (start) => l10n.t('The lines above {0} are not drawn.', start),
+            l10n.t('The closing {0} line is missing. It has been added for rendering; the source is unchanged.', end),
+          beforeStart: (start) => l10n.t('Lines before {0} are ignored when rendering this diagram.', start),
           notUpdated: (mode) => notUpdatedNote(l10n, mode),
-          includeFailed: (path, reason) => l10n.t('Cannot include {0}: {1}', path, reason),
+          includeFailed: (path, reason) => l10n.t('Could not include {0}: {1}', path, reason),
         },
       }),
   });
@@ -1258,39 +1405,40 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
           await commands.invoke(ExportPng, { uri, line });
         },
         labels: {
+          errorMessage: (message) => errorMessage(message, l10n),
           diagram: (position) => l10n.t('Diagram {0}', String(position)),
           entry: (name, line) => l10n.t('{0} (line {1})', name, String(line)),
           rendering: l10n.t('Rendering diagram…'),
-          gone: l10n.t('The diagram shown is no longer in the file. Choose another.'),
-          choose: l10n.t('Choose a diagram in the list.'),
-          empty: l10n.t('The file holds no diagram.'),
+          gone: l10n.t('The selected diagram is no longer in this file. Select another diagram from the list.'),
+          choose: l10n.t('Select a diagram from the list.'),
+          empty: l10n.t('No diagrams found in this file.'),
           remoteReference: l10n.t(
-            'URL-based external references (!include, !theme) are not supported.'
+            'Loading files or themes from URLs (!include, !theme) is not supported. Use files in your workspace or bundled libraries and themes.'
           ),
           emojiUnavailable: l10n.t(
-            'Emoji (<:name:>) are not supported: the emoji images are not bundled.'
+            'Emoji syntax (<:name:>) is not supported because emoji images are not included with this extension.'
           ),
           pages: l10n.t(
-            'Pages after newpage cannot be drawn, so only the first page would be. Give each page a diagram of its own.'
+            'Multi-page diagrams (newpage) are not supported. Split the pages into separate diagrams, each with its own start and end lines.'
           ),
           engineError: (message, line) =>
             line === null
-              ? l10n.t('PlantUML reported an error: {0}', message)
-              : l10n.t('PlantUML reported an error at line {0}: {1}', String(line), message),
-          includeFailed: (path, reason) => l10n.t('Cannot include {0}: {1}', path, reason),
+              ? l10n.t('PlantUML error: {0}', errorMessage(message, l10n))
+              : l10n.t('PlantUML error on line {0}: {1}', String(line), errorMessage(message, l10n)),
           otherPalette: (dark) =>
             dark
-              ? l10n.t('Drawn in the dark palette: its colours are hard to read in the light one.')
-              : l10n.t('Drawn in the light palette: its colours are hard to read in the dark one.'),
+              ? l10n.t('Using a dark background to keep this diagram readable.')
+              : l10n.t('Using a light background to keep this diagram readable.'),
         },
       };
       const open = new Map<string, { viewer: DiagramViewer; document: vscode.TextDocument; reveal(): void }>();
       const media = vscode.Uri.joinPath(vscode.Uri.file(__dirname), '..', 'media', 'viewer');
       const toolbar: ToolbarLabels = {
-        toolbar: l10n.t('Zoom'),
+        selectDiagram: l10n.t('Select a diagram'),
+        toolbar: l10n.t('Diagram zoom'),
         zoomOut: l10n.t('Zoom Out'),
         zoomIn: l10n.t('Zoom In'),
-        fit: l10n.t('Fit'),
+        fit: l10n.t('Fit to Window'),
         actualSize: l10n.t('Actual Size'),
         exportPng: l10n.t('Export Diagram as PNG'),
       };
@@ -1346,7 +1494,7 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
           }
           const panel = vscode.window.createWebviewPanel(
             VIEWER_TYPE,
-            l10n.t('Preview {0}', fileNameOf(document)),
+            l10n.t('Preview: {0}', fileNameOf(document)),
             column
           );
           // Drawn once the page asks, as it does each time it is created.
@@ -1417,7 +1565,7 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
       renders.clear();
       plugin.clearCache();
       viewers.updateAll();
-      context.logger.info('Render cache cleared');
+      context.logger.info(context.l10n.t('PlantUML render cache cleared.'));
       await context.notify.info(context.l10n.t('PlantUML render cache cleared.'));
     },
   });
@@ -1460,7 +1608,7 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
     async (context: OperationContext, _args: readonly [], { viewers }: { viewers: ViewerSet }): Promise<void> => {
       const editor = vscode.window.activeTextEditor;
       if (editor?.document.languageId !== 'plantuml') {
-        await context.notify.warn(context.l10n.t('Open a PlantUML file first.'));
+        await context.notify.warn(context.l10n.t('Open a PlantUML file to preview its diagrams.'));
         return;
       }
       viewers.open(editor.document, editor.selection.active.line, column);
@@ -1576,8 +1724,8 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
       if (block === null) {
         await context.notify.warn(
           document.textDocument.languageId === 'plantuml'
-            ? context.l10n.t('Put the cursor inside a diagram first.')
-            : context.l10n.t('Put the cursor inside a ```plantuml block first.')
+            ? context.l10n.t('Place the cursor in the source code of the diagram you want to export.')
+            : context.l10n.t('Place the cursor inside the PlantUML code block you want to export.')
         );
         return;
       }
@@ -1598,25 +1746,48 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
       }
 
       const deps = exporterDeps(context, renderer, palettes, settings, exportRecords, workspace, document.textDocument.uri);
-      const result =
+      // How the export went; a failure comes with the way on that suits it.
+      const report = async (result: ExportResult | null, as: ExportFormat): Promise<void> => {
+        if (result === null) {
+          return;
+        }
+        if (result.error === null) {
+          context.logger.info(context.l10n.t('Exported to {0}', String(result.path)));
+          // The file as the Explorer names it, rather than its encoded URI.
+          const written = workspace.relativePath(vscode.Uri.parse(String(result.path)));
+          await announceExport(context, context.l10n.t('Exported to {0}', written), false, result.path ?? undefined);
+          return;
+        }
+        const message = context.l10n.t('Could not export the diagram: {0}', result.error);
+        context.logger.warn(message);
+        const actions: NoticeAction[] = [];
+        if (result.cause === 'source') {
+          // The diagnostics list the same problem, unless they are turned off.
+          const listed = settings.read({ resource: document.textDocument.uri }).values[CONFIG.DIAGNOSTICS_ENABLED] !== false;
+          actions.push(listed ? problemsButton(context) : outputButton(context));
+        } else if (result.cause === 'png') {
+          if (result.fitsAt !== undefined) {
+            actions.push(settingsButton(context, CONFIG.EXPORT_PNG_SCALE));
+          }
+          actions.push({
+            title: context.l10n.t('Export as SVG'),
+            run: async () => report(await exportOne(deps, document.path, directory, block, name), 'svg'),
+          });
+        } else if (result.cause === 'file') {
+          actions.push(explorerButton(context, vscode.Uri.parse(deps.resolve(document.path, `${directory}/${name}.${as}`)), true));
+        } else {
+          actions.push(outputButton(context));
+        }
+        await notifyWith(context, 'error', message, actions);
+      };
+      await report(
         format === 'svg'
           ? await exportOne(deps, document.path, directory, block, name)
           : await context.progress.run({ title: context.l10n.t('Exporting PNG…') }, () =>
               exportOne(deps, document.path, directory, block, name, 'png')
-            );
-
-      if (result === null) {
-        return;
-      }
-      if (result.error !== null) {
-        context.logger.warn(`Export failed: ${result.error}`);
-        await context.notify.error(context.l10n.t('Could not export the diagram: {0}', result.error));
-        return;
-      }
-      context.logger.info(`Exported ${String(result.path)}`);
-      // The file as the Explorer names it, rather than its encoded URI.
-      const written = workspace.relativePath(vscode.Uri.parse(String(result.path)));
-      await announceExport(context, context.l10n.t('Exported {0}', written), false, result.path ?? undefined);
+            ),
+        format
+      );
     };
 
   module.commands.handle(ExportSvg, {
@@ -1673,7 +1844,8 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         outcome,
         [],
         false,
-        document.textDocument.languageId === 'plantuml' ? outcome.unnamed : 0
+        document.textDocument.languageId === 'plantuml' ? outcome.unnamed : 0,
+        document.textDocument.uri
       );
     },
   });
@@ -1713,8 +1885,10 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         await reportOutcome(
           context,
           outcome,
-          [context.l10n.t('The document changed during the export, so the references were not updated')],
-          true
+          [context.l10n.t('Image links were not updated because the Markdown file changed during export. Export again to update them.')],
+          true,
+          0,
+          document.textDocument.uri
         );
         return;
       }
@@ -1730,24 +1904,24 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
       let reported = outcome;
       if (edits.length === 0) {
         if (outcome.written.length > 0) {
-          extra.push(context.l10n.t('References are up to date'));
+          extra.push(context.l10n.t('Image links are up to date'));
         }
       } else if (await applyReferenceEdits(document.textDocument, edits)) {
         const inserted = edits.filter((edit) => edit.kind === 'insert-after').length;
         const updated = edits.length - inserted;
         if (inserted > 0) {
-          extra.push(context.l10n.t('{0} reference(s) inserted', String(inserted)));
+          extra.push(context.l10n.t('Image links added: {0}', String(inserted)));
         }
         if (updated > 0) {
-          extra.push(context.l10n.t('{0} reference(s) updated', String(updated)));
+          extra.push(context.l10n.t('Image links updated: {0}', String(updated)));
         }
         reported = relocateEngineErrors(context, outcome, edits);
       } else {
         applyFailed = true;
-        extra.push(context.l10n.t('Could not update the references'));
+        extra.push(context.l10n.t('Could not update the image links'));
       }
 
-      await reportOutcome(context, reported, extra, applyFailed);
+      await reportOutcome(context, reported, extra, applyFailed, 0, document.textDocument.uri);
     },
   });
 
@@ -1774,9 +1948,7 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
       // It reads files and writes them, so like the other exports it does
       // not run in an untrusted workspace.
       if (!vscode.workspace.isTrusted) {
-        void context.notify.warn(
-          context.l10n.t('Exporting needs a trusted workspace. The preview works either way.')
-        );
+        void refuseUntrusted(context);
         return;
       }
       const folder = await folderToExport(context, workspace, args[0]);
@@ -1792,27 +1964,43 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
       if (sources === undefined) {
         return;
       }
-      // Part of a folder is never exported as if it were the whole.
+      // Part of a folder is never exported as if it were the whole. Without a
+      // folder, the command asks for one.
+      const chooseFolder: NoticeAction = {
+        title: context.l10n.t('Choose Folder…'),
+        run: () => context.commands.execute(format === 'png' ? COMMANDS.EXPORT_FOLDER_PNG : COMMANDS.EXPORT_FOLDER_SVG),
+      };
       if (sources === null) {
-        void context.notify.warn(
-          context.l10n.t('{0} holds more than {1} documents. Export a folder inside it.', where, String(MAX_DOCUMENTS))
+        void notifyWith(
+          context,
+          'warn',
+          context.l10n.t(
+            '{0} has more than {1} Markdown and PlantUML files, too many to export at once. Choose a smaller folder.',
+            where,
+            String(MAX_DOCUMENTS)
+          ),
+          [chooseFolder]
         );
         return;
       }
       const named = sources.reduce((sum, source) => sum + source.blocks.filter((block) => block.name !== null).length, 0);
       if (named > MAX_FOLDER_DIAGRAMS) {
-        void context.notify.warn(
+        void notifyWith(
+          context,
+          'warn',
           context.l10n.t(
-            '{0} holds more than {1} named diagrams. Export a folder inside it.',
+            '{0} has more than {1} named diagrams, too many to export at once. Choose a smaller folder.',
             where,
             String(MAX_FOLDER_DIAGRAMS)
-          )
+          ),
+          [chooseFolder]
         );
         return;
       }
+      const unnamedIn = sources.find((source) => source.blocks.some((block) => block.name === null))?.uri;
       if (named === 0) {
         const unnamed = sources.reduce((sum, source) => sum + source.blocks.length, 0);
-        await reportOutcome(context, { written: [], failed: [], unnamed, kept: 0 }, [], false, unnamedDiagrams(sources));
+        await reportOutcome(context, { written: [], failed: [], unnamed, kept: 0 }, [], false, unnamedDiagrams(sources), unnamedIn);
         return;
       }
 
@@ -1832,15 +2020,12 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         listed.push(context.l10n.t('…and {0} more', String(documents.length - listed.length)));
       }
       const answer = await context.notify.info(
-        context.l10n.t(
-          'Export {0} named diagram(s) from {1} document(s) in {2}?',
-          String(named),
-          String(planned.length),
-          where
-        ),
+        named === 1
+          ? context.l10n.t('Export the named diagram in {0}?', where)
+          : context.l10n.t('Export {0} named diagrams in {1}?', String(named), where),
         {
           modal: true,
-          detail: listed.join('\n'),
+          detail: [context.l10n.t('Source files: {0}', String(documents.length)), ...listed].join('\n'),
           actions: [{ title: context.l10n.t('Export'), value: 'export' as const }],
         }
       );
@@ -1853,7 +2038,7 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         async (report, signal) => {
           const drawn: DrawnDocument[] = [];
           // One panel draws every PNG: opened at the first, closed after the last.
-          const pngs = lazyPngPanel(context.l10n, context.l10n.t('Drawing PNGs…'));
+          const pngs = lazyPngPanel(context.l10n, context.l10n.t('Creating PNG images…'));
           try {
             for (const [index, source] of planned.entries()) {
               if (signal.aborted) {
@@ -1892,7 +2077,7 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
       if (outcome === undefined || outcome === null) {
         return;
       }
-      await reportOutcome(context, outcome, [], false, unnamedDiagrams(sources));
+      await reportOutcome(context, outcome, [], false, unnamedDiagrams(sources), unnamedIn);
     };
 
   module.commands.handle(ExportFolderSvg, {
@@ -1919,14 +2104,14 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
 
   module.raw.register({
     id: 'plantuml.preview',
-    inject: { plugin: Plugin, requestRefresh: RequestRefresh, settings: Settings.token },
-    bind: ({ registrations, logger }, { plugin, requestRefresh, settings }): undefined => {
+    inject: { plugin: Plugin, requestRefresh: RequestRefresh, settings: Settings.token, l10n: Localization },
+    bind: ({ registrations, logger }, { plugin, requestRefresh, settings, l10n }): undefined => {
       // A colour-theme flip and a `theme` change both invalidate every cached
       // SVG: the palette is baked into the rendered output rather than applied
       // by CSS afterwards.
       registrations.own(
         vscode.window.onDidChangeActiveColorTheme(() => {
-          logger.debug('Colour theme changed; re-rendering diagrams');
+          logger.debug(l10n.t('VS Code colour theme changed. Refreshing diagram previews.'));
           plugin.clearCache();
         })
       );
@@ -1983,23 +2168,21 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
       // with the preview, so a document shown in both is drawn once.
       const collection = registrations.own(vscode.languages.createDiagnosticCollection(EXTENSION_ID));
       const labels: ProblemLabels = {
-        remoteReference: l10n.t('URL-based external references (!include, !theme) are not supported.'),
+        errorMessage: (message) => errorMessage(message, l10n),
+        remoteReference: l10n.t('Loading files or themes from URLs (!include, !theme) is not supported. Use files in your workspace or bundled libraries and themes.'),
         severalDiagrams: l10n.t(
-          'This block holds more than one diagram, and only the first would be drawn. Give each diagram a block of its own.'
+          'Each PlantUML code block can contain only one diagram. Move each diagram into a separate code block.'
         ),
         pages: l10n.t(
-          'Pages after newpage cannot be drawn, so only the first page would be. Give each page a block of its own.'
+          'Multi-page diagrams (newpage) are not supported. Split the pages into separate diagrams, each in its own code block.'
         ),
         missingEnd: (end) =>
-          l10n.t('This diagram has no {0} line; it is drawn as if the block ended with one.', end),
-        beforeStart: (start) => l10n.t('The lines above {0} are not drawn.', start),
-        localFile: l10n.t('the bundled engine reads no files.'),
-        includeFailed: (path, reason) => l10n.t('Cannot include {0}: {1}', path, reason),
-        themeFrom: l10n.t('only bundled themes and themes from a folder of the workspace can be loaded.'),
+          l10n.t('The closing {0} line is missing. It has been added for rendering; the source is unchanged.', end),
+        beforeStart: (start) => l10n.t('Lines before {0} are ignored when rendering this diagram.', start),
+        themeFrom: l10n.t('Use a bundled theme or a theme file in your workspace.'),
         libraryNotBundled: (library) =>
-          l10n.t('The {0} standard library is not bundled; only azure is.', library),
-        emojiUnavailable: l10n.t('Emoji (<:name:>) are not supported: the emoji images are not bundled.'),
-        tooLarge: l10n.t('The diagram is larger than the engine draws.'),
+          l10n.t('The {0} standard library is not included with this extension. Only the azure library is available.', library),
+        emojiUnavailable: l10n.t('Emoji syntax (<:name:>) is not supported because emoji images are not included with this extension.'),
       };
       const timers = new Map<string, NodeJS.Timeout>();
       // Bumped on every change, so a check that finishes after the text moved
@@ -2072,7 +2255,7 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
           setTimeout(() => {
             timers.delete(key);
             diagnose(document, generation).catch((error: unknown) => {
-              logger.warn(`Checking ${key} failed: ${String(error)}`);
+              logger.warn(l10n.t('Could not check the diagrams in {0}: {1}', key, errorMessage(error instanceof Error ? error.message : String(error), l10n)));
             });
           }, delay)
         );
@@ -2423,7 +2606,7 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
     const editor = vscode.window.activeTextEditor;
     const languageId = editor?.document.languageId;
     if (editor === undefined || (languageId !== 'markdown' && languageId !== 'plantuml')) {
-      void context.notify.warn(context.l10n.t('Open a Markdown or PlantUML file to insert a template into.'));
+      void context.notify.warn(context.l10n.t('Open a Markdown or PlantUML file to insert a template.'));
       return;
     }
     const names = templateNames(context.l10n);
@@ -2446,19 +2629,18 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
       picked.template.diagram
     );
     if (place.kind === 'refused') {
+      // Short enough for the one line a notification without a button shows.
       void context.notify.warn(
         place.reason === 'diagram'
-          ? context.l10n.t('The cursor is in a diagram. A template is a whole diagram: put the cursor outside one.')
-          : context.l10n.t(
-              'A diagram cannot start here: put the cursor in the text of the document, not in a comment or in a block of another language.'
-            )
+          ? context.l10n.t('Templates cannot be inserted inside an existing diagram.')
+          : context.l10n.t('Templates cannot be inserted in comments or other code blocks.')
       );
       return;
     }
     if (place.kind === 'after') {
       const answer = await context.notify.info(
-        context.l10n.t('This block already holds a diagram. Insert the template as a new block after it?'),
-        { modal: true, actions: [{ title: context.l10n.t('Insert After It'), value: 'after' as const }] }
+        context.l10n.t('This code block already contains a diagram. Insert the template in a new code block below it?'),
+        { modal: true, actions: [{ title: context.l10n.t('Insert Below'), value: 'after' as const }] }
       );
       if (answer !== 'after') {
         return;
@@ -2483,7 +2665,7 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
     const unchanged = (): boolean => document.version === version;
     const plantUml = document.languageId === 'plantuml';
     const stale = (): void => {
-      void context.notify.warn(context.l10n.t('The document changed. Name the diagram again from its line.'));
+      void context.notify.warn(context.l10n.t('The file has changed. Name the diagram again.'));
     };
     const target = unchanged()
       ? unnamedAt(document.getText(), line, plantUml, withoutExtension(fileNameOf(document)))
@@ -2496,14 +2678,14 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
     const name = await context.ask.text({
       prompt:
         target.current === null
-          ? context.l10n.t('Name for the diagram, which its exported files take')
-          : context.l10n.t('Name for the diagram, in place of {0}', target.current),
+          ? context.l10n.t('Diagram name (used as the exported file name)')
+          : context.l10n.t('New diagram name (replaces {0} and is used as the exported file name)', target.current),
       placeHolder: 'my-diagram',
       validate: (value: string) =>
         isValidBlockName(value)
           ? undefined
           : context.l10n.t(
-              'Use up to 128 ASCII letters, digits, hyphens and underscores. Windows device names such as CON cannot be used.'
+              'Use 1–128 letters (A–Z, a–z), digits, hyphens, or underscores. Reserved file names such as CON are not allowed.'
             ),
     });
     if (name === undefined) {

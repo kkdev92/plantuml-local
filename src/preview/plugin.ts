@@ -14,6 +14,7 @@ import type { DiagramRender, IncludedStyle, RenderLog } from '../core/types';
 import { hasLocalInclude } from '../includes/describe';
 import { changeTo } from '../includes/tracking';
 import { drawReadable } from '../render/palette';
+import { recognizeEngineError, recognizeEngineWarnings } from '../render/engine-error';
 
 /**
  * The markdown-it side of the extension.
@@ -43,6 +44,9 @@ import { drawReadable } from '../render/palette';
 
 /** User-visible strings, localised by the caller (vscode.l10n). */
 export interface PluginLabels {
+  errorMessage(message: string): string;
+  rendered(bytes: number): string;
+  renderFailed(message: string): string;
   /** Placeholder shown while a diagram renders for the first time. */
   loading: string;
   /** Heading of the error box. */
@@ -331,7 +335,15 @@ export function createPlantUmlPlugin(deps: PluginDeps): PlantUmlPlugin {
       (palette) => deps.render(source, palette, document)
     ).then(
         ({ result, palette }) => {
-          rendered.set(key, includeNotes(result.failedIncludes) + diagramHtml(result.svg, palette));
+          const failure = recognizeEngineError(result.svg);
+          const messages = failure === null
+            ? recognizeEngineWarnings(result.svg)
+            : result.failedIncludes.size === 0 ? [failure.message] : [];
+          const notices = messages.flatMap((message) => {
+            const translated = deps.labels.errorMessage(message);
+            return translated === message ? [] : [`<div class="plantuml-notice">${deps.escapeHtml(translated)}</div>`];
+          }).join('');
+          rendered.set(key, notices + includeNotes(result.failedIncludes) + diagramHtml(result.svg, palette));
           failed.delete(key);
           stale.delete(key);
           if (result.dependencies.length > 0) {
@@ -345,12 +357,12 @@ export function createPlantUmlPlugin(deps: PluginDeps): PlantUmlPlugin {
           } else {
             dependents.delete(key);
           }
-          deps.log.debug(`Rendered diagram (${String(result.svg.length)} bytes)`);
+          deps.log.debug(deps.labels.rendered(Buffer.byteLength(result.svg, 'utf8')));
         },
         (error: unknown) => {
           const message = error instanceof Error ? error.message : String(error);
-          failed.set(key, EMOJI_UNAVAILABLE.test(message) ? deps.labels.emojiUnavailable : message);
-          deps.log.warn(`Render failed: ${message}`);
+          failed.set(key, EMOJI_UNAVAILABLE.test(message) ? deps.labels.emojiUnavailable : deps.labels.errorMessage(message));
+          deps.log.warn(deps.labels.renderFailed(deps.labels.errorMessage(message)));
         }
       )
       .finally(() => {
@@ -480,8 +492,8 @@ export function createPlantUmlPlugin(deps: PluginDeps): PlantUmlPlugin {
           return errorBlock(deps.labels.remoteReference);
         }
 
-        // The engine would draw only the first diagram or page and drop the
-        // rest without a word, so say so instead of drawing part of it.
+        // The engine would draw only the first diagram or page, so say so
+        // instead of drawing part of it.
         const shape = diagramShape(source);
         if (shape.kind === 'several') {
           return errorBlock(deps.labels.severalDiagrams);

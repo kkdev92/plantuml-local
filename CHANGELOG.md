@@ -15,12 +15,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   of `!theme name from folder`, the theme's file there, as for `!include`.
   After `!includesub ` the path completes as after `!include `; after the
   `from ` of a `!theme`, the folders do.
+- **Notifications offer the next step.** A message about something that went
+  wrong comes with a button that leads on from it: *Show Problems* for a
+  diagram with an error, *Export as SVG* for a PNG that cannot be made (and
+  *Open Settings* when a smaller PNG scale would fit), *Show in Explorer* for a
+  file in the way, *Show Output* for the reasons a bulk export lists there,
+  *Name Diagram…* when blocks without a name were left out and nothing was
+  exported, *Choose Folder…* for a folder with too many files, *Open Settings*
+  for an export folder that cannot be used, and *Manage Workspace Trust* in
+  Restricted Mode. With a button, VS Code shows the whole message rather than
+  one line of it.
+
+### Changed
+
+- **Messages are rewritten in English and Japanese** to say what happened and
+  what to do, without assuming knowledge of the extension: notifications, the
+  notes and error boxes of the previews, the Problems panel and the output
+  channel. Export messages point to a setting with *Open Settings* instead of
+  naming its ID.
+- **Engine errors are explained** in both languages where the engine's own
+  English message used to be shown: among them a syntax error, an include that
+  failed, a diagram type the bundled engine does not support, a loop stopped
+  after too many repetitions, and a diagram with more than 20 included files,
+  which the bundled `@plantuml/core` 1.2026.9 stops loading after 20 rounds
+  ([plantuml/plantuml#2943](https://github.com/plantuml/plantuml/issues/2943);
+  the README lists it under Known Limitations). An error not recognised is
+  still shown as written.
+- Two commands are renamed: *Export All Diagrams as SVG* is now *Export All
+  Diagrams in File as SVG*, and *Export All Diagrams and Update References* is
+  now *Export All Diagrams as SVG and Update Image Links*. The extension's
+  description and the setting descriptions are rewritten, and the descriptions
+  VS Code shows for Restricted Mode and virtual workspaces now have Japanese
+  translations too.
 
 ### Fixed
 
+- In a narrow `.puml` preview, the toolbar wraps instead of breaking a button's
+  label and pushing *100%* out of view.
 - A local include that fails is worded the same everywhere. The Problems
   panel, the `.puml` preview and a failed export now say
-  `Cannot include <path>: <why>`, translated, as the Markdown preview's note
+  `Could not include <path>: <why>`, translated, as the Markdown preview's note
   does, instead of the engine's untranslated `cannot include <path>` with the
   reason after it. The path is the file the engine asked for: for
   `!includesub`, without its section; for `!theme … from`, the theme's file.
@@ -30,7 +64,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   as `participant Alice #DDEEFF`, kept the dark palette's white text on it.
   A diagram drawn in the dark palette is now looked at once drawn, in the
   preview, the `.puml` preview and a dark export alike, and drawn again in the
-  light palette when that reads better. The `.puml` preview's note says its
+  light palette when that reads better. The `.puml` preview says so when its
   colours, rather than its theme, are hard to read.
 - Links (`[[…]]`) are drawn in a light blue in the dark palette. The bundled
   engine uses the same link colour in both palettes, which can give low
@@ -48,9 +82,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `.plantuml`, `.pu`, `.iuml`, `.wsd`, `.inc` or `.txt` are read, from the
   document's workspace folder, through no symbolic link or junction, in a
   trusted workspace. A repeated `!include` of a file is skipped, as the
-  engine does, although PlantUML's migration notes say it may be included
-  again; `!include_many` includes it again. An include that is refused says
-  why in the preview and in the Problems panel (`PLLOCAL-INC001`).
+  bundled engine does; `!include_many` includes it again. An include that is
+  refused says why in the preview and in the Problems panel (`PLLOCAL-INC001`).
 - **Included files are followed.** A diagram is drawn again when a file it
   includes is edited, saved, or changed, created or deleted on disk — at once
   with the update mode `onChange`, once the file is saved with `onSave` and
@@ -212,8 +245,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   without a preview, and their problems are listed on the line they are on:
   the engine's errors and warnings, what the bundled engine cannot do
   (including files, libraries other than azure, themes from a folder, URLs,
-  emoji), what it would drop without a word (a second diagram, the pages
-  after `newpage`, `!includesub`) and a missing `@enduml`. The preview and
+  emoji), content it would not render (a second diagram, the pages after
+  `newpage`, `!includesub`) and a missing `@enduml`. The preview and
   the checks share renders, so a diagram both need is drawn once.
   `plantumlLocal.diagnostics.enabled` turns them off.
 - **` ```puml ` blocks are diagrams too.** The preview draws them, the
@@ -225,11 +258,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **A block with two diagrams, or with `newpage`, says so instead of
   showing part of it.** The engine draws only the first diagram of a block
-  and only the first page of a diagram, and dropped the rest without a word.
+  and only the first page of a diagram, and the rest was left out without a
+  message.
   The preview now explains that each diagram or page needs a block of its
   own, and export refuses the block rather than writing part of it.
 - **Export asks before replacing a file that holds something else.** A file
-  already at the target was overwritten without a word, even one put there by
+  already at the target was overwritten without asking, even one put there by
   hand. The export commands now leave a file that already holds the diagram as
   it is, replace one they wrote from the same document if it has not changed
   since, and ask before replacing any other: once for all of them, with the
@@ -343,8 +377,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **` ```plantuml ` blocks are highlighted in the editor**, including ones
   inside block quotes and list items, and also when another extension's
-  grammar claims every fence first. The grammar follows the parser of the
-  bundled engine rather than PlantUML's documentation: every command of every
+  grammar claims every fence first. The grammar follows the syntax supported
+  by the bundled engine: every command of every
   diagram type the engine renders has a test case, and CI renders each case
   with the engine, so the grammar is tested on syntax the engine actually
   accepts. The JSON and YAML inside `@startjson` / `@startyaml` are coloured by
@@ -538,8 +572,9 @@ updates.
 ### Added
 
 - **Diagrams can be exported as SVG.** The preview was the only place a
-  ` ```plantuml ` block became a diagram, so a document was unreadable anywhere
-  that does not render PlantUML itself — GitHub shows the block as source.
+  ` ```plantuml ` block became a diagram, so a document's diagrams could not
+  be seen anywhere that does not render PlantUML itself — GitHub shows the
+  block as source.
   `PlantUML Local: Export Diagram as SVG` writes the block under the cursor and
   `PlantUML Local: Export All Diagrams as SVG` writes every named block, both
   producing the same sanitised SVG the preview receives — plus an `xmlns:xlink`

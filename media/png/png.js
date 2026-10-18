@@ -20,7 +20,7 @@
       context.drawImage(image, 0, 0, canvas.width, canvas.height);
       const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
       if (blob === null) {
-        throw new Error('the canvas gave no PNG');
+        throw new Error('PNG encoding failed');
       }
       return new Uint8Array(await blob.arrayBuffer());
     } finally {

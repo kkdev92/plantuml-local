@@ -1,4 +1,6 @@
 import type MarkdownIt from 'markdown-it';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 
 import { MAX_CACHE_ENTRIES, MAX_DOCUMENTS_IN_VIEW } from '../../src/core/constants';
@@ -12,6 +14,9 @@ import { createPlantUmlPlugin, type PluginDeps, type UpdateMode } from '../../sr
  */
 
 const LABELS = {
+  errorMessage: (message: string): string => message,
+  rendered: (bytes: number): string => `rendered ${String(bytes)} bytes`,
+  renderFailed: (message: string): string => `render failed: ${message}`,
   loading: 'loading…',
   failedTitle: 'failed',
   emptySource: 'source is empty',
@@ -171,6 +176,15 @@ describe('createPlantUmlPlugin', () => {
     expect(h.fence('puml name', SOURCE)).toContain(`<svg>${SOURCE}</svg>`);
   });
 
+  it('reports the UTF-8 size of rendered SVG in the localised log message', async () => {
+    const svg = '<svg><text>日本語の図</text></svg>';
+    const h = makeHarness({ render: () => Promise.resolve(svg) });
+    h.fence('plantuml', SOURCE);
+    await h.settle();
+    expect(h.deps.log.debug).toHaveBeenCalledWith(`rendered ${String(Buffer.byteLength(svg, 'utf8'))} bytes`);
+    expect(Buffer.byteLength(svg, 'utf8')).toBeGreaterThan(svg.length);
+  });
+
   it('falls back to renderToken when no previous fence rule exists', () => {
     const h = makeHarness();
     const md = {
@@ -251,6 +265,17 @@ describe('createPlantUmlPlugin', () => {
     expect(html).toContain(LABELS.failedTitle);
     expect(html).toContain('Syntax Error line 2');
     expect(html).toContain('plantuml-source');
+  });
+
+  it('shows an escaped, localised warning above the engine drawing', async () => {
+    const svg = readFileSync(join(__dirname, 'fixtures/engine-output/warning.svg'), 'utf8');
+    const h = makeHarness({ render: () => Promise.resolve(svg) });
+    h.deps.labels = { ...LABELS, errorMessage: () => '行末に <<#pink>> を追加してください。' };
+    h.fence('plantuml', SOURCE);
+    await h.settle();
+    const html = h.fence('plantuml', SOURCE);
+    expect(html).toContain('<div class="plantuml-notice">行末に &lt;&lt;#pink&gt;&gt; を追加してください。</div>');
+    expect(html).toContain(svg);
   });
 
   it('explains a diagram that uses an emoji instead of showing the engine error', async () => {
