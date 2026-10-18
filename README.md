@@ -40,7 +40,7 @@ Your diagram source is processed locally and is not sent to a rendering service.
 
 - **Built-in Preview**: Diagrams appear in the same Markdown preview you already use
 - **`.puml` Files**: PlantUML files open as their own language, with folding, an outline and a preview beside the editor that zooms and exports PNG
-- **Local Includes**: `!include` reads shared definitions and styles from the files of your workspace folder, in a trusted workspace; its path completes, and Ctrl+Click opens the file
+- **Local Includes**: `!include`, `!includesub` and `!theme … from` read shared definitions, sections and themes from the files of your workspace folder, in a trusted workspace; their paths complete, and Ctrl+Click opens the file
 - **Syntax Highlighting**: ```` ```plantuml ```` blocks and `.puml` files are coloured in the editor, following the syntax the bundled engine accepts
 - **Offline Rendering**: No Java, no PlantUML server, no network connection required — nothing to install besides the extension
 - **Fault-Tolerant**: A syntax error shows up inline at the broken diagram; the rest of the page stays intact
