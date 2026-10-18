@@ -44,6 +44,7 @@ function makeDeps(
       emojiUnavailable: 'emoji',
       pages: 'pages',
       engineError: (message, line) => `engine: ${message} @ ${String(line)}`,
+      includeFailed: (path, reason) => `no ${path} (${reason})`,
       otherPalette: (dark) => `other palette ${String(dark)}`,
     },
     ...overrides,
@@ -243,6 +244,23 @@ describe('DiagramViewer', () => {
     expect(panel.sent.at(-1)).toEqual({
       type: 'status',
       text: 'engine: Syntax Error? (Assumed diagram type: sequence) @ 7',
+      error: true,
+      clear: false,
+    });
+  });
+
+  it('says why an include failed as the Markdown preview does', async () => {
+    const svg = readFileSync(join(__dirname, 'fixtures/engine-output/include-failure.svg'), 'utf8');
+    const failedIncludes = new Map([['shared.puml', 'not found']]);
+    const panel = makePanel();
+    const deps = makeDeps({ render: vi.fn(() => Promise.resolve({ svg, failedIncludes, dependencies: [] })) });
+    const viewer = new DiagramViewer(panel, deps, 'one', 'file:///one.puml');
+
+    await viewer.show(['@startuml', '!include shared.puml', 'Alice -> Bob', '@enduml'].join('\n'), 0);
+
+    expect(panel.sent.at(-1)).toEqual({
+      type: 'status',
+      text: 'engine: no shared.puml (not found) @ 2',
       error: true,
       clear: false,
     });

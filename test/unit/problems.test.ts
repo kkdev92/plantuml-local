@@ -12,6 +12,7 @@ const LABELS: ProblemLabels = {
   missingEnd: (end) => `no ${end}`,
   beforeStart: (start) => `above ${start}`,
   localFile: 'no files',
+  includeFailed: (path, reason) => `no ${path} (${reason})`,
   themeFrom: 'bundled themes only',
   libraryNotBundled: (library) => `${library} not bundled`,
   emojiUnavailable: 'emoji',
@@ -109,7 +110,8 @@ describe('renderProblems', () => {
         line: 4,
         severity: 'error',
         code: PROBLEM_CODES.INC001,
-        message: 'cannot include shared.puml: not found next to the including file',
+        // As the preview's note says it, not the engine's words with the reason after them.
+        message: 'no shared.puml (not found next to the including file)',
       },
     ]);
   });
@@ -154,7 +156,8 @@ describe('renderProblems', () => {
       line: 4,
       severity: 'error',
       code: PROBLEM_CODES.INC001,
-      message: 'Cannot load theme foo in themes: missing',
+      // The file the loader was asked for, as the preview's note names it.
+      message: 'no themes/puml-theme-foo.puml (missing)',
     });
   });
 

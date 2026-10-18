@@ -45,6 +45,8 @@ export interface ViewerLabels {
   emojiUnavailable: string;
   pages: string;
   engineError(message: string, line: number | null): string;
+  /** A local include that failed, as the Markdown preview's note says it: the path it asked for, and why. */
+  includeFailed(path: string, reason: string): string;
   /** The diagram is drawn in the palette `dark` names, as its theme is hard to read in the one asked for. */
   otherPalette(dark: boolean): string;
 }
@@ -264,7 +266,10 @@ export class DiagramViewer {
         await this.status(why, false, false);
       } else {
         const line = failure.line === null ? null : diagram.sourceLine + failure.line;
-        await this.status(labels.engineError(withIncludeReason(failure.message, failedIncludes), line), true, false);
+        const message = withIncludeReason(failure.message, failedIncludes, (path, reason) =>
+          labels.includeFailed(path, reason)
+        );
+        await this.status(labels.engineError(message, line), true, false);
       }
     } catch (error: unknown) {
       if (generation !== this.generation) {

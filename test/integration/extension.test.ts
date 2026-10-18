@@ -551,11 +551,12 @@ describe('export (dist)', () => {
         expect(found[0]?.message).toContain('Syntax Error?');
         // In the quote, past the marker; and an explanation, not the engine's bare words.
         expect(found[1]?.character).toBe(2);
+        // Worded as the preview's note words it, for the file the engine asked for.
         expect(found[1]?.message).toBe(
-          "cannot include shared.puml: Only files in the document's workspace folder are read. Open the folder that holds it."
+          "Cannot include shared.puml: Only files in the document's workspace folder are read. Open the folder that holds it."
         );
         expect(found[3]?.message).toBe(
-          "cannot include shared.puml!PART: Only files in the document's workspace folder are read. Open the folder that holds it."
+          "Cannot include shared.puml: Only files in the document's workspace folder are read. Open the folder that holds it."
         );
         expect(found[found.length - 2]?.message).toContain('@enduml');
         expect(found[found.length - 1]?.message).toContain('deprecated');

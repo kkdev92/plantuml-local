@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- A local include that fails is worded the same everywhere. The Problems
+  panel, the `.puml` preview and a failed export now say
+  `Cannot include <path>: <why>`, translated, as the Markdown preview's note
+  does, instead of the engine's untranslated `cannot include <path>` with the
+  reason after it. The path is the file the engine asked for: for
+  `!includesub`, without its section; for `!theme … from`, the theme's file.
+
 ## [0.13.0] - 2026-10-17
 
 ### Added
