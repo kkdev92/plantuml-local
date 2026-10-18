@@ -48,6 +48,7 @@ function render(source: string): Promise<string> {
 
 /** Writes to real files, resolving relative paths against the document. */
 const deps: ExporterDeps = {
+  errorMessage: (message) => message,
   render: async (source) => ({ svg: await render(source), failedIncludes: new Map(), dependencies: [] }),
   isDark: () => false,
   resolvePalette: (_source, dark) => Promise.resolve(dark),
@@ -58,11 +59,10 @@ const deps: ExporterDeps = {
   pagesMessage: 'Pages after newpage cannot be drawn.',
   engineErrorMessage: (message, line) =>
     line === null ? `PlantUML reported an error: ${message}` : `PlantUML reported an error at line ${String(line)}: ${message}`,
-  includeFailedMessage: (path, reason) => `Cannot include ${path}: ${reason}`,
   pngTooLargeMessage: (width, height) => `The PNG would be ${String(width)}×${String(height)} pixels.`,
-  pngFailedMessage: 'The PNG could not be made as asked.',
-  sameFileMessage: 'Another diagram is exported to the same file.',
-  changedMessage: 'The file changed while the export was running, so it was left as it is.',
+  pngFailedMessage: 'Could not create a valid PNG image. Try exporting as SVG.',
+  sameFileMessage: 'Multiple diagrams would be saved to the same file. Give each diagram a unique name or use separate export folders.',
+  changedMessage: 'The destination file changed during export and was not overwritten. Check its contents before exporting again.',
   pngScale: () => 2,
   // No canvas here: these tests export SVG.
   toPng: () => Promise.reject(new Error('no canvas')),

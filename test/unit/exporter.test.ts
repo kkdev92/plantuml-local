@@ -47,6 +47,7 @@ function makeDeps(
   // What the export wrote, kept as the extension keeps it.
   let records: ExportRecords = {};
   const deps = {
+    errorMessage: (message: string): string => message,
     render: vi.fn((source: string) => Promise.resolve(rendered(`<svg>${source}</svg>`))),
     isDark: (): boolean => false,
     resolvePalette: (_source: string, dark: boolean): Promise<boolean> => Promise.resolve(dark),
@@ -78,7 +79,6 @@ function makeDeps(
     pagesMessage: 'no pages',
     engineErrorMessage: (message: string, line: number | null): string =>
       `engine: ${message} @ ${String(line)}`,
-    includeFailedMessage: (path: string, reason: string): string => `no ${path} (${reason})`,
     pngTooLargeMessage: (width: number, height: number, fits: number | null): string =>
       `too large: ${String(width)}×${String(height)}, fits ${String(fits)}`,
     pngFailedMessage: 'no PNG',
@@ -200,7 +200,7 @@ describe('exportOne', () => {
 
     const result = await exportOne(deps, DOC, 'images', block!, 'orders');
 
-    expect(result).toEqual({ name: 'orders', path: null, error: 'changed meanwhile' });
+    expect(result).toEqual({ name: 'orders', path: null, error: 'changed meanwhile', cause: 'file' });
     expect(deps.writeFile).toHaveBeenCalledOnce();
     const now = await deps.readExisting('/repo/docs/images/orders.svg');
     expect(new TextDecoder().decode(now!)).toBe('<svg>changed meanwhile</svg>');
@@ -357,6 +357,8 @@ describe('exportOne', () => {
       message: 'Syntax Error? (Assumed diagram type: sequence)',
       line: 7,
     });
+    // A problem of the source, which the Problems panel lists too.
+    expect(result?.cause).toBe('source');
     expect(result?.path).toBeNull();
     expect(deps.writeFile).not.toHaveBeenCalled();
   });
@@ -495,10 +497,13 @@ describe('exportOne as a PNG', () => {
     expect(await exportOne(deps, DOC, 'images', block!, 'orders', 'png')).toMatchObject({
       path: null,
       error: 'too large: 12000×8000, fits 1',
+      cause: 'png',
+      fitsAt: 1,
     });
-    expect((await exportOne(wide, DOC, 'images', block!, 'orders', 'png'))?.error).toBe(
-      'too large: 9000×10, fits null'
-    );
+    const tooWide = await exportOne(wide, DOC, 'images', block!, 'orders', 'png');
+    expect(tooWide?.error).toBe('too large: 9000×10, fits null');
+    expect(tooWide).toMatchObject({ cause: 'png' });
+    expect(tooWide).not.toHaveProperty('fitsAt');
     expect(deps.toPng).not.toHaveBeenCalled();
     expect(wide.toPng).not.toHaveBeenCalled();
     expect(deps.writeFile).not.toHaveBeenCalled();
@@ -544,9 +549,11 @@ describe('exportOne as a PNG', () => {
 
     expect((await exportOne(unsized, DOC, 'images', block!, 'orders', 'png'))?.error).toBe('no PNG');
     expect(unsized.toPng).not.toHaveBeenCalled();
-    expect((await exportOne(failing, DOC, 'images', block!, 'orders', 'png'))?.error).toBe(
-      'The PNG could not be drawn: x'
-    );
+    // A failure of the PNG, which an SVG may not share.
+    expect(await exportOne(failing, DOC, 'images', block!, 'orders', 'png')).toMatchObject({
+      error: 'The PNG could not be drawn: x',
+      cause: 'png',
+    });
     expect(failing.writeFile).not.toHaveBeenCalled();
   });
 
@@ -594,7 +601,7 @@ describe('writeDocuments', () => {
     const outcome = await writeDocuments(deps, drawn);
 
     expect(outcome?.written.map((r) => r.path)).toEqual(['/repo/docs/images/orders.svg']);
-    expect(outcome?.failed).toEqual([{ name: 'Orders', path: null, error: 'same file' }]);
+    expect(outcome?.failed).toEqual([{ name: 'Orders', path: null, error: 'same file', cause: 'source' }]);
     expect(deps.writeFile).toHaveBeenCalledOnce();
   });
 
@@ -672,7 +679,7 @@ describe('exportAll', () => {
     expect(deps.writeFile).toHaveBeenCalledOnce();
   });
 
-  it('says why an include failed as the preview does', async () => {
+  it('says why an include failed, for the file the engine asked for', async () => {
     const deps = makeDeps({
       render: vi.fn((source: string) =>
         Promise.resolve(
@@ -685,8 +692,8 @@ describe('exportAll', () => {
 
     const outcome = await exportMarkdown(deps, DOC, 'images', document);
 
-    expect(outcome?.failed[0]?.error).toBe('engine: no shared.puml (not found) @ 3');
-    expect(outcome?.failed[0]?.engineError).toEqual({ message: 'no shared.puml (not found)', line: 3 });
+    expect(outcome?.failed[0]?.error).toBe('engine: cannot include shared.puml: not found @ 3');
+    expect(outcome?.failed[0]?.engineError).toEqual({ message: 'cannot include shared.puml: not found', line: 3 });
   });
 
   it('reports progress for each diagram', async () => {
@@ -794,7 +801,7 @@ describe('exportAll', () => {
     const outcome = await exportMarkdown(deps, DOC, 'images', changed);
 
     expect(outcome?.written).toEqual([]);
-    expect(outcome?.failed).toEqual([{ name: 'one', path: null, error: 'changed meanwhile' }]);
+    expect(outcome?.failed).toEqual([{ name: 'one', path: null, error: 'changed meanwhile', cause: 'file' }]);
     expect(outcome?.kept).toBe(1);
     const now = await deps.readExisting('/repo/docs/images/one.svg');
     expect(new TextDecoder().decode(now!)).toBe('edited meanwhile');

@@ -156,9 +156,9 @@ it, and a note above the diagram says so too.
 
 ` ```plantuml ` and ` ```puml ` blocks are also coloured in the editor, including
 ones inside block quotes and list items. As with the preview, only these two
-languages count, exactly — ` ```PlantUML ` and ` ```uml ` stay plain. The grammar follows the parser of
-the bundled engine rather than PlantUML's documentation, and covers every
-diagram type that engine renders:
+languages count, exactly — ` ```PlantUML ` and ` ```uml ` stay plain. The grammar follows the syntax supported by
+the bundled PlantUML engine, and covers every diagram type that engine
+renders:
 
 - the JSON and YAML inside `@startjson` / `@startyaml` are coloured by VS
   Code's own JSON and YAML grammars
@@ -260,8 +260,8 @@ it is on:
 - an included file that is not read, and why (see
   [Including files](#including-files));
 - what the bundled engine cannot do: a library other than `azure`, a URL, emoji;
-- what it would drop without a word: a second diagram in a block, the pages
-  after `newpage`;
+- content the bundled engine does not render: a second diagram in a block,
+  the pages after `newpage`;
 - a diagram with no `@enduml` line, which is drawn anyway, and lines above
   `@startuml`, which the drawing leaves out.
 
@@ -293,9 +293,9 @@ the Markdown file. One starting with `./` or `../` is looked for there only; a
 bare name such as `common.puml` or `styles/common.puml` is then looked for in
 the folders of `plantumlLocal.includePaths`, in order. Includes may nest and
 take their path from a variable, and a file on a branch the diagram does not
-take is never read. As the engine does, a repeated `!include` of a file is
-skipped (PlantUML's migration notes say otherwise), `!include_many` includes
-it again and `!include_once` reports the second one as an error. A file holding a whole `@startuml` … `@enduml` diagram
+take is never read. With the bundled engine, a repeated `!include` of a file
+is skipped, `!include_many` includes it again and `!include_once` reports the
+second one as an error. A file holding a whole `@startuml` … `@enduml` diagram
 contributes the inside of it. With several diagrams in the included file,
 `!include file.puml!1` chooses the second diagram and `!include file.puml!ID`
 chooses an `@startuml(id=ID)` diagram. Without a selector the first diagram
@@ -391,17 +391,17 @@ Alice -> Bob : Hello
 ```
 ````
 
-*Export All Diagrams and Update References* then writes
+*Export All Diagrams as SVG and Update Image Links* then writes
 `images/orders-api.svg` and, directly below the block, a Markdown image
 reference whose target is `images/orders-api.svg#plantuml-local`.
 
-![Export All Diagrams and Update References writes images/checkout-flow.svg and inserts a reference to it below the block](images/export-references.gif)
+![Export All Diagrams as SVG and Update Image Links writes images/checkout-flow.svg and inserts a reference to it below the block](images/export-references.gif)
 
 | Command | What it does |
 | --- | --- |
 | `PlantUML Local: Export Diagram as SVG` | Writes the block under the cursor, or the only block in the file |
-| `PlantUML Local: Export All Diagrams as SVG` | Writes every **named** block in the file |
-| `PlantUML Local: Export All Diagrams and Update References` | The above, then inserts or updates the image line after each block |
+| `PlantUML Local: Export All Diagrams in File as SVG` | Writes every **named** block in the file |
+| `PlantUML Local: Export All Diagrams as SVG and Update Image Links` | The above, then inserts or updates the image line after each block |
 | `PlantUML Local: Export Diagram as PNG` | Writes the block under the cursor, or the only block in the file, as a PNG (below) |
 | `PlantUML Local: Export All Diagrams in Folder as SVG` | Writes every **named** block of the Markdown and PlantUML files in a folder (below) |
 | `PlantUML Local: Export All Diagrams in Folder as PNG` | The same, as PNGs |
@@ -411,8 +411,12 @@ with the cursor inside a block, the other two whenever the file contains a
 diagram — so the menu of an ordinary Markdown file stays untouched. Run from
 the command palette while the preview has focus, they use the only open
 Markdown document, or ask which one when several are open. The message each
-export ends with offers *Reveal in Explorer View*, which selects the file it
-wrote, or the first of them, in the Explorer.
+export ends with offers *Show in Explorer*, which selects the file it
+wrote, or the first of them, in the Explorer. One that reports a problem
+offers a way on instead: *Show Problems* for a diagram with an error, *Export
+as SVG* for a PNG that cannot be made, *Open Settings* for a setting to change,
+*Show Output* for the reasons a bulk export lists there, and *Name Diagram…*
+when blocks were left out for want of a name.
 
 The word after the language — `orders-api` above — names the output file. It is
 what ties a block to its SVG across edits, which a position could not: inserting
@@ -498,7 +502,7 @@ with those of whoever views it. The PNG export covers one diagram at a time and
 inserts no reference.
 
 *Export All Diagrams in Folder as SVG*, also on a folder's right-click menu in
-the Explorer, does what *Export All Diagrams as SVG* does for every Markdown and
+the Explorer, does what *Export All Diagrams in File as SVG* does for every Markdown and
 PlantUML file under a folder, each into its own export directory, with the
 unsaved edits of open files. It skips `.git`, `.hg`, `.svn`, `node_modules`,
 `dist` and `build` folders, follows no symbolic link or junction, and leaves out
@@ -555,6 +559,11 @@ and would show the referenced image as a second copy.
 - Text is measured with approximate metrics (Node has no Canvas), so element
   widths, line wrapping and placement can differ slightly from plantuml.com
 - A render that exceeds 30 seconds is terminated
+- With the bundled PlantUML 1.2026.9, a diagram that includes more than 20
+  files, nested includes counted, shows an error instead: the engine draws
+  the diagram once more for each included file it has not loaded yet and
+  stops after 20 rounds
+  ([plantuml/plantuml#2943](https://github.com/plantuml/plantuml/issues/2943))
 - Highlighting cannot tell which diagram type a `@startuml` block will turn
   into, so it colours the syntax of all of them: a line the engine rejects in
   one diagram type can still be coloured. Nor can it tell which names

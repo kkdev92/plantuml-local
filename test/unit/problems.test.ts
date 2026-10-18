@@ -6,17 +6,15 @@ import { checkSource, PROBLEM_CODES, renderProblems, type ProblemLabels } from '
 import { findPlantUmlBlocks, type PlantUmlBlock } from '../../src/export/blocks';
 
 const LABELS: ProblemLabels = {
+  errorMessage: (message) => message,
   remoteReference: 'remote',
   severalDiagrams: 'several',
   pages: 'pages',
   missingEnd: (end) => `no ${end}`,
   beforeStart: (start) => `above ${start}`,
-  localFile: 'no files',
-  includeFailed: (path, reason) => `no ${path} (${reason})`,
   themeFrom: 'bundled themes only',
   libraryNotBundled: (library) => `${library} not bundled`,
   emojiUnavailable: 'emoji',
-  tooLarge: 'too large',
 };
 
 /** The only block of a document whose block starts on line 2 (after a title and a blank line). */
@@ -110,16 +108,16 @@ describe('renderProblems', () => {
         line: 4,
         severity: 'error',
         code: PROBLEM_CODES.INC001,
-        // As the preview's note says it, not the engine's words with the reason after them.
-        message: 'no shared.puml (not found next to the including file)',
+        message: 'cannot include shared.puml: not found next to the including file',
       },
     ]);
   });
 
   it('explains an include, an import or a theme the engine cannot read', () => {
     const { block, check } = at('@startuml', '!include shared.puml', 'Alice -> Bob', '@enduml');
+    // errorMessage says what to use instead (see localization.test.ts).
     expect(renderProblems(block, check, { svg: engineOutput('include-failure') }, LABELS)).toEqual([
-      { line: 4, severity: 'error', code: PROBLEM_CODES.CAP001, message: 'cannot include shared.puml: no files' },
+      { line: 4, severity: 'error', code: PROBLEM_CODES.CAP001, message: 'cannot include shared.puml' },
     ]);
     expect(renderProblems(block, check, { svg: errorImage(2, 'Cannot import') }, LABELS)[0]?.code).toBe(
       PROBLEM_CODES.CAP001
@@ -157,7 +155,7 @@ describe('renderProblems', () => {
       severity: 'error',
       code: PROBLEM_CODES.INC001,
       // The file the loader was asked for, as the preview's note names it.
-      message: 'no themes/puml-theme-foo.puml (missing)',
+      message: 'cannot include themes/puml-theme-foo.puml: missing',
     });
   });
 
@@ -194,7 +192,7 @@ describe('renderProblems', () => {
       problem(
         'java.lang.RuntimeException: Diagram too large for browser rendering: 155x10886 (max 8192; override via the maxSvgSize option, or set it to 0 to disable this check)'
       )
-    ).toMatchObject({ code: PROBLEM_CODES.LIM001, message: 'too large (155x10886, max 8192)' });
+    ).toMatchObject({ code: PROBLEM_CODES.LIM001, message: expect.stringContaining('155x10886') });
     expect(problem('Rendering timed out')).toMatchObject({ code: PROBLEM_CODES.RUN001 });
     expect(problem('Worker exited')).toMatchObject({ code: PROBLEM_CODES.RUN002, message: 'Worker exited' });
   });
@@ -206,5 +204,24 @@ describe('renderProblems', () => {
     expect(found[0]).toMatchObject({ line: 3, severity: 'warning', code: PROBLEM_CODES.WRN001 });
     expect(found[0]?.message).toContain('deprecated');
     expect(renderProblems(block, check, { svg: engineOutput('sequence') }, LABELS)).toEqual([]);
+  });
+
+  it('localises timeout details without changing the diagnostic code', () => {
+    const { block, check } = at('@startuml', 'A -> B', '@enduml');
+    const labels = { ...LABELS, errorMessage: () => '描画が制限時間内に完了しませんでした。' };
+    expect(renderProblems(block, check, { error: 'Rendering timed out' }, labels)[0]).toMatchObject({
+      code: PROBLEM_CODES.RUN001,
+      message: '描画が制限時間内に完了しませんでした。',
+    });
+  });
+
+  it('localises a warning while preserving its severity and code', () => {
+    const { block, check } = at('@startuml', 'start', '#pink:label;', 'stop', '@enduml');
+    const labels = { ...LABELS, errorMessage: () => '行末に <<#pink>> を追加してください。' };
+    expect(renderProblems(block, check, { svg: engineOutput('warning') }, labels)[0]).toMatchObject({
+      code: PROBLEM_CODES.WRN001,
+      severity: 'warning',
+      message: '行末に <<#pink>> を追加してください。',
+    });
   });
 });

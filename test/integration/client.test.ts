@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -31,6 +31,16 @@ describe('RendererClient', () => {
       'Rendering timed out'
     );
     expect(log.warn).toHaveBeenCalledWith(expect.stringContaining('timed out'));
+  });
+
+  it('logs timeouts in Japanese without changing the renderer error used by callers', async () => {
+    const japanese = JSON.parse(readFileSync(join(__dirname, '../../l10n/bundle.l10n.ja.json'), 'utf8')) as Record<string, string>;
+    client = new RendererClient(hangWorkerPath, log, 250, undefined, {
+      t: (message, ...args) => (japanese[message] ?? message).replace(/\{(\d+)\}/g,
+        (placeholder, index: string) => args[Number(index)] ?? placeholder),
+    });
+    await expect(client.render('@startuml\nA -> B\n@enduml', false)).rejects.toThrow('Rendering timed out');
+    expect(log.warn).toHaveBeenCalledWith('描画が 250 ミリ秒以内に完了しなかったため、描画用ワーカーを再起動します。');
   });
 
   it('sends the renders queued behind a hung one to a fresh worker', async () => {
@@ -80,7 +90,7 @@ describe('RendererClient', () => {
 
       await vi.waitFor(
         () => {
-          expect(log.debug).toHaveBeenCalledWith(expect.stringContaining('idle'));
+          expect(log.debug).toHaveBeenCalledWith(expect.stringContaining('inactivity'));
         },
         { timeout: 5_000 }
       );

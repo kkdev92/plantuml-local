@@ -34,6 +34,7 @@ function makeDeps(
     isDark: () => false,
     exportPng: vi.fn(() => Promise.resolve()),
     labels: {
+      errorMessage: (message) => message,
       diagram: (position) => `Diagram ${String(position)}`,
       entry: (name, line) => `${name} (line ${String(line)})`,
       rendering: 'rendering',
@@ -44,7 +45,6 @@ function makeDeps(
       emojiUnavailable: 'emoji',
       pages: 'pages',
       engineError: (message, line) => `engine: ${message} @ ${String(line)}`,
-      includeFailed: (path, reason) => `no ${path} (${reason})`,
       otherPalette: (dark) => `other palette ${String(dark)}`,
     },
     ...overrides,
@@ -249,7 +249,7 @@ describe('DiagramViewer', () => {
     });
   });
 
-  it('says why an include failed as the Markdown preview does', async () => {
+  it('says why an include failed, for the file the engine asked for', async () => {
     const svg = readFileSync(join(__dirname, 'fixtures/engine-output/include-failure.svg'), 'utf8');
     const failedIncludes = new Map([['shared.puml', 'not found']]);
     const panel = makePanel();
@@ -260,8 +260,25 @@ describe('DiagramViewer', () => {
 
     expect(panel.sent.at(-1)).toEqual({
       type: 'status',
-      text: 'engine: no shared.puml (not found) @ 2',
+      text: 'engine: cannot include shared.puml: not found @ 2',
       error: true,
+      clear: false,
+    });
+  });
+
+  it('shows a translated warning alongside the palette notice', async () => {
+    const svg = readFileSync(join(__dirname, 'fixtures/engine-output/warning.svg'), 'utf8');
+    const panel = makePanel();
+    const deps = makeDeps({
+      render: () => Promise.resolve(svg),
+      resolvePalette: () => Promise.resolve(true),
+    });
+    deps.labels.errorMessage = () => '行末に <<#pink>> を追加してください。';
+    await new DiagramViewer(panel, deps, 'one', 'file:///one.puml').show('@startuml\nA -> B\n@enduml', 0);
+    expect(panel.sent.at(-1)).toMatchObject({
+      type: 'status',
+      text: '行末に <<#pink>> を追加してください。 other palette true',
+      error: false,
       clear: false,
     });
   });
@@ -331,21 +348,23 @@ describe('viewerBody', () => {
   it('has a toolbar whose buttons name what they do and the key that does it too', () => {
     const body = viewerBody(
       {
-        toolbar: 'Zoom',
+        selectDiagram: 'Select a diagram',
+        toolbar: 'Diagram zoom',
         zoomOut: 'Zoom Out',
         zoomIn: 'Zoom In',
-        fit: 'Fit',
+        fit: 'Fit to Window',
         actualSize: 'Actual Size',
         exportPng: 'Export Diagram as PNG',
       },
       escape
     );
 
-    expect(body).toContain('<div id="tools" role="toolbar" aria-label="Zoom">');
+    expect(body).toContain('<div id="tools" role="toolbar" aria-label="Diagram zoom">');
     expect(body).toContain('<button id="zoom-out" type="button" aria-label="Zoom Out" title="Zoom Out (-)">−</button>');
     expect(body).toContain('<button id="zoom-in" type="button" aria-label="Zoom In" title="Zoom In (+)">+</button>');
     // Fit is a toggle, pressed while the diagram is fitted.
-    expect(body).toContain('<button id="fit" type="button" aria-label="Fit" title="Fit (0)" aria-pressed="true">Fit</button>');
+    expect(body).toContain('<select id="diagrams" aria-label="Select a diagram" hidden>');
+    expect(body).toContain('<button id="fit" type="button" aria-label="Fit to Window" title="Fit to Window (0)" aria-pressed="true">Fit to Window</button>');
     expect(body).toContain('<button id="actual" type="button" aria-label="Actual Size" title="Actual Size (1)">100%</button>');
     // Beside the zoom, not in it: the PNG button.
     expect(body).toContain(
@@ -356,7 +375,7 @@ describe('viewerBody', () => {
 
   it('escapes the labels it is given', () => {
     const body = viewerBody(
-      { toolbar: '"><script>', zoomOut: 'a&b', zoomIn: 'in', fit: '<b>', actualSize: 'x', exportPng: '<i>' },
+      { selectDiagram: 'a"&b', toolbar: '"><script>', zoomOut: 'a&b', zoomIn: 'in', fit: '<b>', actualSize: 'x', exportPng: '<i>' },
       escape
     );
 
@@ -365,6 +384,7 @@ describe('viewerBody', () => {
     expect(body).not.toContain('<i>');
     expect(body).toContain('aria-label="&quot;&gt;&lt;script&gt;"');
     expect(body).toContain('aria-label="a&amp;b"');
+    expect(body).toContain('<select id="diagrams" aria-label="a&quot;&amp;b"');
   });
 });
 

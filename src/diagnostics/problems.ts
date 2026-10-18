@@ -5,8 +5,8 @@
  * drawing that names the line (src/render/engine-error.ts), a warning as a
  * banner drawn above the diagram that names no line, and a few failures as
  * exceptions; the engine stops at the first error, so a block yields at most
- * one. What the engine drops or ignores without a word is found in the
- * source instead (src/core/shape.ts).
+ * one. What the engine leaves out or ignores without reporting it is found
+ * in the source instead (src/core/shape.ts).
  *
  * Lines are document lines, counting from 0. A problem the engine places
  * nowhere (a warning, an exception, an error inside an included library, or
@@ -59,20 +59,16 @@ export interface BlockProblem {
 
 /** User-visible explanations, localised by the caller (vscode.l10n). */
 export interface ProblemLabels {
+  errorMessage(message: string): string;
   remoteReference: string;
   severalDiagrams: string;
   pages: string;
   missingEnd(end: string): string;
   beforeStart(start: string): string;
-  /** Follows the engine's "cannot include …" or "Cannot import". */
-  localFile: string;
-  /** A local include that failed, as the preview's note says it: the path it asked for, and why. */
-  includeFailed(path: string, reason: string): string;
   /** Follows the engine's "Cannot load theme … in …" for a theme no file was asked for: from a library or a URL. */
   themeFrom: string;
   libraryNotBundled(library: string): string;
   emojiUnavailable: string;
-  tooLarge: string;
 }
 
 /** What a block's source says before it is rendered. */
@@ -145,16 +141,12 @@ export function renderProblems(
     if (/Diagram too large for browser rendering/.test(message)) {
       // The engine's own wording goes on about an option of its API that
       // nobody using the extension can set; the size is what matters.
-      const size = /(\d+x\d+) \(max (\d+)/.exec(message);
-      return atStart(
-        PROBLEM_CODES.LIM001,
-        size === null ? labels.tooLarge : `${labels.tooLarge} (${size[1] ?? ''}, max ${size[2] ?? ''})`
-      );
+      return atStart(PROBLEM_CODES.LIM001, labels.errorMessage(message));
     }
     if (message === 'Rendering timed out') {
-      return atStart(PROBLEM_CODES.RUN001, message);
+      return atStart(PROBLEM_CODES.RUN001, labels.errorMessage(message));
     }
-    return atStart(PROBLEM_CODES.RUN002, message);
+    return atStart(PROBLEM_CODES.RUN002, labels.errorMessage(message));
   }
 
   const failure = recognizeEngineError(outcome.svg);
@@ -163,7 +155,7 @@ export function renderProblems(
       line: check.startLine,
       severity: 'warning',
       code: PROBLEM_CODES.WRN001,
-      message,
+      message: labels.errorMessage(message),
     }));
   }
 
@@ -173,7 +165,7 @@ export function renderProblems(
   const located = failure.line !== null && failure.line <= lines.length ? failure.line : null;
   const line = located === null ? check.startLine : block.sourceLine + located - 1;
   const { code, message } = classify(failure.message, labels, outcome.failedIncludes);
-  return [{ line, severity: 'error', code, message }];
+  return [{ line, severity: 'error', code, message: labels.errorMessage(message) }];
 }
 
 /** Tells an unsupported feature from a syntax error, by the engine's message. */
@@ -182,7 +174,6 @@ function classify(
   labels: ProblemLabels,
   failedIncludes: ReadonlyMap<string, string> = new Map()
 ): { code: string; message: string } {
-  const told = (path: string, reason: string): string => labels.includeFailed(path, reason);
   // A standard library the engine cannot read is one that is not bundled.
   // Azure is: there, the entry does not exist, as the engine says.
   const library = /^cannot include <([^/>]+)/.exec(message)?.[1];
@@ -191,20 +182,24 @@ function classify(
       ? { code: PROBLEM_CODES.SYN001, message }
       : { code: PROBLEM_CODES.CAP001, message: labels.libraryNotBundled(library) };
   }
-  if (/^cannot include /.test(message) || message === 'Cannot import') {
-    const explained = withIncludeReason(message, failedIncludes, told);
+  if (message === 'Cannot import') {
+    return { code: PROBLEM_CODES.CAP001, message };
+  }
+  if (/^cannot include /.test(message)) {
+    const explained = withIncludeReason(message, failedIncludes);
     if (explained !== message) {
       return { code: PROBLEM_CODES.INC001, message: explained };
     }
     // Unless the file was refused, a name after its `!` is a diagram or a
-    // sub the file does not have: the engine's own error.
+    // sub the file does not have: the engine's own error. Without one, the
+    // engine never asked for the file (errorMessage says what to use).
     if (!/^cannot include [^!]*!/.test(message)) {
-      return { code: PROBLEM_CODES.CAP001, message: `${message}: ${labels.localFile}` };
+      return { code: PROBLEM_CODES.CAP001, message };
     }
   }
   if (/^Cannot load theme \S+ in /.test(message)) {
     // A theme from a folder is asked of the loader, which says why it failed.
-    const explained = withIncludeReason(message, failedIncludes, told);
+    const explained = withIncludeReason(message, failedIncludes);
     return explained !== message
       ? { code: PROBLEM_CODES.INC001, message: explained }
       : { code: PROBLEM_CODES.CAP001, message: `${message}: ${labels.themeFrom}` };

@@ -51,14 +51,14 @@
   "capabilities": {
     "untrustedWorkspaces": {
       "supported": "limited",
-      "description": "Diagrams are rendered locally in a worker thread, and the extension makes no network requests. Here a local !include reads no files, and the export commands, the only actions that write files, are disabled; naming a diagram and inserting a template edit the document only when asked.",
+      "description": "%capability.untrustedWorkspaces.description%",
       "restrictedConfigurations": [
         "plantumlLocal.includePaths"
       ]
     },
     "virtualWorkspaces": {
       "supported": "limited",
-      "description": "A local !include reads files on disk only, so in a virtual workspace a diagram that includes one reports that it cannot."
+      "description": "%capability.virtualWorkspaces.description%"
     }
   },
   "contributes": {

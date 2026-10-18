@@ -8,6 +8,9 @@ export const EXTENSION_ID = 'plantumlLocal';
 /** Display name shown in the Output panel and user-facing messages. */
 export const EXTENSION_NAME = 'PlantUML Local';
 
+/** The extension as VS Code identifies it: `publisher.name` in package.json. */
+export const PACKAGE_ID = 'kkdev92.plantuml-local';
+
 /** Command identifiers contributed in package.json. */
 export const COMMANDS = {
   CLEAR_CACHE: `${EXTENSION_ID}.clearCache`,

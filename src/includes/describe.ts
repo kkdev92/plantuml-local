@@ -1,5 +1,6 @@
 import { MAX_SEARCH_FOLDERS, type SearchFoldersProblem } from './resolver';
 import type { IncludeFailure, IncludeFailureReason } from './session';
+import { splitErrorLocation } from '../core/messages';
 
 /**
  * Says why a local include failed, in words the caller localised
@@ -163,19 +164,22 @@ export function describeIncludeFailure(
 }
 
 /**
- * The engine's message for a failed include, told as the preview's note
- * tells it (`includeFailed`, given the path the engine asked for and why)
- * when why it failed is known: "cannot include x" says nothing more.
+ * The engine's message for a failed include, with why it failed when that is
+ * known ("cannot include x" says nothing more), for the path the engine asked
+ * the loader for: the file of an `!includesub` without its sub, the file of a
+ * `!theme … from`. Translated (errorMessage), it reads as the preview's note
+ * for the same failure does.
  */
-export function withIncludeReason(
-  message: string,
-  failedIncludes: ReadonlyMap<string, string>,
-  includeFailed: (path: string, reason: string) => string
-): string {
-  for (const path of askedPaths(message)) {
+export function withIncludeReason(message: string, failedIncludes: ReadonlyMap<string, string>): string {
+  // recognizeEngineError adds a location when a directive in another file
+  // fails. Look up the requested path without that suffix, then retain it.
+  const location = splitErrorLocation(message);
+  const detail = location?.detail ?? message;
+  const suffix = location === null ? '' : ` (${location.origin}, line ${location.line})`;
+  for (const path of askedPaths(detail)) {
     const reason = failedIncludes.get(path);
     if (reason !== undefined) {
-      return includeFailed(path, reason);
+      return `cannot include ${path}: ${reason}${suffix}`;
     }
   }
   return message;

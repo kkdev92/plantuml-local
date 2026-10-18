@@ -288,14 +288,11 @@ describe('describing a failed include', () => {
     ]);
   });
 
-  /** Words of the note, other than the engine's, to tell them apart. */
-  const note = (path: string, reason: string): string => `no ${path} (${reason})`;
-
-  it("tells a failed include as the note does, for the path the engine's words name", () => {
+  it("adds the reason to the engine's own words, for the path it names", () => {
     const failed = new Map([['a.puml', 'missing']]);
-    expect(withIncludeReason('cannot include a.puml', failed, note)).toBe('no a.puml (missing)');
-    expect(withIncludeReason('cannot include b.puml', failed, note)).toBe('cannot include b.puml');
-    expect(withIncludeReason('Syntax Error?', failed, note)).toBe('Syntax Error?');
+    expect(withIncludeReason('cannot include a.puml', failed)).toBe('cannot include a.puml: missing');
+    expect(withIncludeReason('cannot include b.puml', failed)).toBe('cannot include b.puml');
+    expect(withIncludeReason('Syntax Error?', failed)).toBe('Syntax Error?');
   });
 
   it('finds the file of an !includesub, named with its sub, and of a theme from a folder', () => {
@@ -304,14 +301,15 @@ describe('describing a failed include', () => {
       ['themes/puml-theme-local.puml', 'missing'],
       ['puml-theme-root.puml', 'link'],
     ]);
-    expect(withIncludeReason('cannot include parts.puml!PART', failed, note)).toBe('no parts.puml (no sub PART)');
-    expect(withIncludeReason('Cannot load theme local in themes', failed, note)).toBe(
-      'no themes/puml-theme-local.puml (missing)'
+    // Named by the file the loader was asked for, as the preview's note names it.
+    expect(withIncludeReason('cannot include parts.puml!PART', failed)).toBe('cannot include parts.puml: no sub PART');
+    expect(withIncludeReason('Cannot load theme local in themes', failed)).toBe(
+      'cannot include themes/puml-theme-local.puml: missing'
     );
-    expect(withIncludeReason('Cannot load theme local in themes/', failed, note)).toBe(
-      'no themes/puml-theme-local.puml (missing)'
+    expect(withIncludeReason('Cannot load theme local in themes/', failed)).toBe(
+      'cannot include themes/puml-theme-local.puml: missing'
     );
-    expect(withIncludeReason('Cannot load theme other in themes', failed, note)).toBe('Cannot load theme other in themes');
+    expect(withIncludeReason('Cannot load theme other in themes', failed)).toBe('Cannot load theme other in themes');
   });
 });
 

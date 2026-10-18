@@ -22,6 +22,7 @@ import { isValidBlockName, type PlantUmlBlock } from './blocks';
  */
 
 export interface ExporterDeps {
+  errorMessage(message: string): string;
   /**
    * Renders PlantUML source to sanitised SVG (the worker round-trip), its
    * local includes looked for next to the document being exported.
@@ -88,13 +89,11 @@ export interface ExporterDeps {
   pagesMessage: string;
   /**
    * Localised reason given for a diagram the engine drew as an error:
-   * `message` is the engine's own text, or why a local include failed
-   * ({@link includeFailedMessage}), `line` the document line it blames
-   * (counting from 1), or null when it names none.
+   * `message` is the engine's own text, or for a local include that failed,
+   * the file it asked for and why (withIncludeReason), `line` the document
+   * line it blames (counting from 1), or null when it names none.
    */
   engineErrorMessage(message: string, line: number | null): string;
-  /** Localised account of a local include that failed, as the preview's note gives it: the path it asked for, and why. */
-  includeFailedMessage(path: string, reason: string): string;
   /**
    * Localised reason given for a PNG past the size one can have: its
    * size, and the largest scale it fits at, or null when none does.
@@ -129,6 +128,14 @@ export interface ExportResult {
    * where the problem is now.
    */
   engineError?: { message: string; line: number | null };
+  /**
+   * What a failure is about, so that a caller can offer the way out: the
+   * diagram's source, whose problems the Problems panel lists too; the PNG
+   * drawn from it, where an SVG may still do; or the file written.
+   */
+  cause?: 'source' | 'png' | 'file';
+  /** For a PNG too large at the scale set, the largest scale it fits at. */
+  fitsAt?: number;
 }
 
 export interface ExportOutcome {
@@ -248,14 +255,14 @@ async function drawBlock(
   // the block asked. Checked here rather than only at the call sites so
   // that no future caller can route around it.
   if (!isValidBlockName(name)) {
-    return { name, path: null, error: deps.invalidNameMessage };
+    return { name, path: null, error: deps.invalidNameMessage, cause: 'source' };
   }
 
   // The preview refuses these before the engine sees them; export has to
   // refuse them too, or the same block that shows an explanation on screen
   // would write out the engine's "cannot include" error diagram instead.
   if (hasRemoteReference(block.source)) {
-    return { name, path: null, error: deps.remoteReferenceMessage };
+    return { name, path: null, error: deps.remoteReferenceMessage, cause: 'source' };
   }
 
   // The engine would draw only the first diagram or page; written out, that
@@ -263,10 +270,10 @@ async function drawBlock(
   // as the preview does, since nothing is lost by it.
   const shape = diagramShape(block.source);
   if (shape.kind === 'several') {
-    return { name, path: null, error: deps.severalDiagramsMessage };
+    return { name, path: null, error: deps.severalDiagramsMessage, cause: 'source' };
   }
   if (shape.kind === 'pages') {
-    return { name, path: null, error: deps.pagesMessage };
+    return { name, path: null, error: deps.pagesMessage, cause: 'source' };
   }
 
   try {
@@ -288,14 +295,13 @@ async function drawBlock(
       // sourceLine counts from 0 and the engine's line from 1, so the sum
       // is the document line counting from 1, as an editor shows it.
       const line = failure.line === null ? null : block.sourceLine + failure.line;
-      const message = withIncludeReason(failure.message, failedIncludes, (path, reason) =>
-        deps.includeFailedMessage(path, reason)
-      );
+      const message = withIncludeReason(failure.message, failedIncludes);
       return {
         name,
         path: null,
         error: deps.engineErrorMessage(message, line),
         engineError: { message, line },
+        cause: 'source',
       };
     }
 
@@ -309,7 +315,7 @@ async function drawBlock(
     // and refused rather than shrunk or cut when it would be too large.
     const size = svgSize(svg);
     if (size === null) {
-      return { name, path: null, error: deps.pngFailedMessage };
+      return { name, path: null, error: deps.pngFailedMessage, cause: 'png' };
     }
     const scale = deps.pngScale();
     const width = Math.ceil(size.width * scale);
@@ -318,12 +324,23 @@ async function drawBlock(
       const fits = [...PNG_SCALES]
         .reverse()
         .find((smaller) => fitsPng(Math.ceil(size.width * smaller), Math.ceil(size.height * smaller)));
-      return { name, path: null, error: deps.pngTooLargeMessage(width, height, fits ?? null) };
+      return {
+        name,
+        path: null,
+        error: deps.pngTooLargeMessage(width, height, fits ?? null),
+        cause: 'png',
+        ...(fits === undefined ? {} : { fitsAt: fits }),
+      };
     }
     const backdrop = dark ? DIAGRAM_BACKDROP.dark : DIAGRAM_BACKDROP.light;
-    const png = await deps.toPng(svg, width, height, backdrop);
+    let png: Uint8Array;
+    try {
+      png = await deps.toPng(svg, width, height, backdrop);
+    } catch (error: unknown) {
+      return { name, path: null, error: deps.errorMessage(messageOf(error)), cause: 'png' };
+    }
     if (!isPngOfSize(png, width, height) || png.byteLength > PNG_LIMITS.bytes) {
-      return { name, path: null, error: deps.pngFailedMessage };
+      return { name, path: null, error: deps.pngFailedMessage, cause: 'png' };
     }
     return { name, path, document: documentPath, content: png };
   } catch (error: unknown) {
@@ -331,7 +348,8 @@ async function drawBlock(
     return {
       name,
       path: null,
-      error: EMOJI_UNAVAILABLE.test(message) ? deps.emojiUnavailableMessage : message,
+      error: EMOJI_UNAVAILABLE.test(message) ? deps.emojiUnavailableMessage : deps.errorMessage(message),
+      cause: 'source',
     };
   }
 }
@@ -358,7 +376,7 @@ async function writeDrawings(
       const own = existing !== null && deps.wroteLast(drawing.path, drawing.document, existing);
       checked.push({ drawing, existing, own });
     } catch (error: unknown) {
-      failed.push({ name: drawing.name, path: null, error: messageOf(error) });
+      failed.push({ name: drawing.name, path: null, error: messageOf(error), cause: 'file' });
     }
   }
 
@@ -390,14 +408,14 @@ async function writeDrawings(
       try {
         const now = existing === null ? null : await deps.readExisting(drawing.path);
         if (existing !== null && now !== null && !holds(now, existing)) {
-          failed.push({ name: drawing.name, path: null, error: deps.changedMessage });
+          failed.push({ name: drawing.name, path: null, error: deps.changedMessage, cause: 'file' });
           continue;
         }
         await deps.writeFile(drawing.path, drawing.content, now !== null);
         await deps.noteWritten(drawing.path, drawing.document, bytesOf(drawing.content));
         written.push(result);
       } catch (error: unknown) {
-        failed.push({ name: drawing.name, path: null, error: messageOf(error) });
+        failed.push({ name: drawing.name, path: null, error: messageOf(error), cause: 'file' });
       }
     }
   }
@@ -488,7 +506,7 @@ export async function writeDocuments(
   for (const drawing of documents.flatMap((document) => document.drawings)) {
     const file = drawing.path.toLowerCase();
     if (taken.has(file)) {
-      failed.push({ name: drawing.name, path: null, error: deps.sameFileMessage });
+      failed.push({ name: drawing.name, path: null, error: deps.sameFileMessage, cause: 'source' });
     } else {
       taken.add(file);
       drawings.push(drawing);

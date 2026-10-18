@@ -2,6 +2,7 @@ import { join } from 'node:path';
 import { Worker } from 'node:worker_threads';
 
 import { RENDER_TIMEOUT_MS, WORKER_IDLE_TIMEOUT_MS } from '../core/constants';
+import { englishMessages, type MessageLocalizer } from '../core/messages';
 import type {
   IncludeLoader,
   IncludeRequestMessage,
@@ -48,7 +49,8 @@ export class RendererClient {
     private readonly workerPath: string,
     private readonly log: RenderLog,
     private readonly timeoutMs: number = RENDER_TIMEOUT_MS,
-    private readonly idleTimeoutMs: number = WORKER_IDLE_TIMEOUT_MS
+    private readonly idleTimeoutMs: number = WORKER_IDLE_TIMEOUT_MS,
+    private readonly l10n: MessageLocalizer = englishMessages
   ) {}
 
   /** Renders `source`; `load` answers its local includes, which fail without one. */
@@ -96,7 +98,7 @@ export class RendererClient {
       if (this.worker === null || this.pending.size > 0) {
         return;
       }
-      this.log.debug(`Render worker idle for ${String(this.idleTimeoutMs)} ms; shutting it down`);
+      this.log.debug(this.l10n.t('Stopping the render worker after {0} ms of inactivity.', String(this.idleTimeoutMs)));
       const idle = this.worker;
       // Clear first: the 'exit' handler must not read this as a crash.
       this.worker = null;
@@ -127,7 +129,7 @@ export class RendererClient {
     if (!this.pending.has(id)) {
       return;
     }
-    this.log.warn(`Render timed out after ${String(this.timeoutMs)} ms; restarting the worker`);
+    this.log.warn(this.l10n.t('Rendering timed out after {0} ms. Restarting the render worker.', String(this.timeoutMs)));
     this.settle(id)?.reject(new Error('Rendering timed out'));
 
     // The serial queue behind the hung render is wedged — replace the
@@ -149,7 +151,7 @@ export class RendererClient {
       return this.worker;
     }
 
-    this.log.debug('Starting render worker');
+    this.log.debug(this.l10n.t('Starting the render worker.'));
     const created = new Worker(this.workerPath);
 
     created.on('message', (message: RenderResponseMessage | IncludeRequestMessage) => {
@@ -177,7 +179,7 @@ export class RendererClient {
     });
 
     created.on('exit', (code) => {
-      this.log.debug(`Render worker exited (code=${String(code)})`);
+      this.log.debug(this.l10n.t('Render worker stopped (exit code: {0}).', String(code)));
       if (this.worker === created) {
         this.worker = null;
         this.failAll('Render worker exited');

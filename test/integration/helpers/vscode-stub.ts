@@ -369,6 +369,11 @@ export interface VscodeStub {
     showInformationMessage: (...args: unknown[]) => Promise<unknown>;
     showWarningMessage: (...args: unknown[]) => Promise<unknown>;
     showErrorMessage: (...args: unknown[]) => Promise<unknown>;
+    /** Records the document shown and the line selected (see `_test.shownDocuments`). */
+    showTextDocument: (
+      document: TextEditorStub['document'],
+      options?: { selection?: { start: PositionStub } }
+    ) => Promise<undefined>;
     /** Picks nothing, as when the dialog is dismissed. */
     showOpenDialog: (options: unknown) => Promise<UriStub[] | undefined>;
     onDidChangeActiveColorTheme: (listener: () => void) => { dispose(): void };
@@ -525,6 +530,8 @@ export interface VscodeStub {
     quickPickReply: string | null;
     /** Quick picks shown, with their titles and item labels. */
     quickPicksShown: { title: string | undefined; labels: string[] }[];
+    /** Documents `window.showTextDocument` showed, with the line selected. */
+    shownDocuments: { uri: string; line: number | undefined }[];
     /** What `workspace.textDocuments` returns; empty unless a test fills it. */
     openDocuments: TextEditorStub['document'][];
     /** Editors reported visible besides the active one. */
@@ -679,6 +686,7 @@ export function createVscodeStub(): VscodeStub {
     inputBoxPrompts: [] as string[],
     quickPickReply: null as string | null,
     quickPicksShown: [] as { title: string | undefined; labels: string[] }[],
+    shownDocuments: [] as { uri: string; line: number | undefined }[],
     openDocuments: [] as TextEditorStub['document'][],
     visibleEditors: [] as TextEditorStub[],
     messageReply: null as string | null,
@@ -979,6 +987,10 @@ export function createVscodeStub(): VscodeStub {
       showErrorMessage: async (...args) => {
         notifications.error.push(String(args[0]));
         return answer(args);
+      },
+      showTextDocument: async (document, options) => {
+        hooks.shownDocuments.push({ uri: document.uri.toString(), line: options?.selection?.start.line });
+        return undefined;
       },
       showOpenDialog: async () => undefined,
       onDidChangeActiveColorTheme: (listener) => {
@@ -1290,6 +1302,7 @@ export function createVscodeStub(): VscodeStub {
         hooks.quickPickReply = value;
       },
       quickPicksShown: hooks.quickPicksShown,
+      shownDocuments: hooks.shownDocuments,
       get messageReply() {
         return hooks.messageReply;
       },
