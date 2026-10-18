@@ -2,14 +2,17 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   choosePalette,
+  DARK_LINK,
   drawReadable,
   contrast,
   labelContrast,
+  lightenLinks,
   MIN_TEXT_CONTRAST,
   paletteLines,
   probeSource,
   themeLines,
   ThemePalettes,
+  weakestTextContrast,
 } from '../../src/render/palette';
 
 /** What the engine draws for a probe: its label, and a background if the theme paints one. */
@@ -322,5 +325,131 @@ describe('drawReadable', () => {
     const resolve = vi.fn((_source: string, dark: boolean) => Promise.resolve(dark));
     expect(await drawReadable('src', false, resolve, draw)).toMatchObject({ palette: false });
     expect(draw).toHaveBeenCalledTimes(1);
+  });
+
+  /** A participant the diagram paints light, with the palette's text on it. */
+  const lightBox = (palette: boolean): string =>
+    '<svg viewBox="0 0 100 50"><rect x="7" y="7" width="50" height="30" fill="#DDEEFF"/>' +
+    `<text x="12" y="23" font-size="14" fill="${palette ? '#FFFFFF' : '#000000'}">Alice</text></svg>`;
+  const asAsked = (_source: string, dark: boolean): Promise<boolean> => Promise.resolve(dark);
+
+  it('takes the light drawing when the colours the diagram sets are hard to read in the dark one', async () => {
+    const draw = vi.fn((palette: boolean) => Promise.resolve({ ...drawn(palette), svg: lightBox(palette) }));
+    expect(await drawReadable('src', true, asAsked, draw)).toMatchObject({ palette: false, result: { svg: lightBox(false) } });
+    expect(draw.mock.calls.map((call) => call[0])).toEqual([true, false]);
+  });
+
+  it('keeps the dark drawing when the light one reads no better', async () => {
+    const svg = '<svg><text x="1" y="20" font-size="14" fill="#777777">Header</text></svg>';
+    const draw = vi.fn((palette: boolean) => Promise.resolve({ ...drawn(palette), svg }));
+    // #777777 is 3.9 on the dark backdrop: readable enough not to try the light one.
+    expect(await drawReadable('src', true, asAsked, draw)).toMatchObject({ palette: true });
+    expect(draw).toHaveBeenCalledTimes(1);
+
+    const grey = '<svg><text x="1" y="20" font-size="14" fill="#333333">Faint</text></svg>';
+    const both = vi.fn((palette: boolean) =>
+      Promise.resolve({ ...drawn(palette), svg: palette ? grey : grey.replace('#333333', '#EEEEEE') })
+    );
+    expect(await drawReadable('src', true, asAsked, both)).toMatchObject({ palette: true, result: { svg: grey } });
+    expect(both.mock.calls.map((call) => call[0])).toEqual([true, false]);
+  });
+
+  it('does not look at a drawing in the light palette', async () => {
+    const draw = vi.fn((palette: boolean) => Promise.resolve({ ...drawn(palette), svg: lightBox(!palette) }));
+    expect(await drawReadable('src', false, asAsked, draw)).toMatchObject({ palette: false });
+    expect(draw).toHaveBeenCalledTimes(1);
+  });
+
+  it("lightens the links of a dark drawing, and leaves the light one's", async () => {
+    const link = '<svg><text x="1" y="20" fill="#0000FF" text-decoration="underline">docs</text></svg>';
+    const draw = (palette: boolean): Promise<ReturnType<typeof drawn>> => Promise.resolve({ ...drawn(palette), svg: link });
+    expect((await drawReadable('src', true, asAsked, draw)).result.svg).toBe(link.replace('#0000FF', DARK_LINK));
+    expect((await drawReadable('src', false, asAsked, draw)).result.svg).toBe(link);
+  });
+});
+
+describe('lightenLinks', () => {
+  it('recolours the text the engine underlines in its link blue, and nothing else', () => {
+    const svg =
+      '<svg><text x="1" y="2" font-size="13" fill="#0000FF" text-decoration="underline">link</text>' +
+      '<text x="1" y="4" fill="#0000FF">blue</text>' +
+      '<text x="1" y="6" fill="#FF0000" text-decoration="underline">red link</text>' +
+      '<rect fill="#0000FF" text-decoration="underline"/></svg>';
+    expect(lightenLinks(svg)).toBe(svg.replace('fill="#0000FF" text-decoration', `fill="${DARK_LINK}" text-decoration`));
+  });
+
+  it('chooses a colour that reads on the dark fills the engine gives elements, notes and warnings', () => {
+    for (const fill of ['#1B1B1B', '#222222', '#313139', '#714137', '#774400']) {
+      expect(contrast(DARK_LINK, fill), fill).toBeGreaterThanOrEqual(MIN_TEXT_CONTRAST);
+    }
+  });
+});
+
+describe('weakestTextContrast', () => {
+  const text = (fill: string, x = 12, y = 23, extra = ''): string =>
+    `<text x="${String(x)}" y="${String(y)}" font-size="14" fill="${fill}"${extra}>Alice</text>`;
+
+  it('measures a text against the last shape painted under it', () => {
+    const svg = `<svg><rect x="0" y="0" width="100" height="50" fill="#DDEEFF"/>${text('#FFFFFF')}</svg>`;
+    expect(weakestTextContrast(svg, true)).toBeCloseTo(contrast('#FFFFFF', '#DDEEFF'));
+    const over = `<svg><rect x="0" y="0" width="100" height="50" fill="#DDEEFF"/><rect x="5" y="5" width="60" height="30" fill="#222222"/>${text('#FFFFFF')}</svg>`;
+    expect(weakestTextContrast(over, true)).toBeCloseTo(contrast('#FFFFFF', '#222222'));
+  });
+
+  it('measures a text no shape is under against what the drawing sits on', () => {
+    const elsewhere = '<rect x="200" y="200" width="10" height="10" fill="#FFFFFF"/>';
+    expect(weakestTextContrast(`<svg>${elsewhere}${text('#FFFFFF')}</svg>`, true)).toBeCloseTo(
+      contrast('#FFFFFF', '#1b1b1b')
+    );
+    expect(weakestTextContrast(`<svg>${text('#000000')}</svg>`, false)).toBeCloseTo(21);
+    const painted = `<svg style="background-color:#000000;">${text('#FFFFFF')}</svg>`;
+    expect(weakestTextContrast(painted, false)).toBeCloseTo(21);
+  });
+
+  it('looks through shapes that paint nothing', () => {
+    const clear = '<rect x="0" y="0" width="100" height="50" fill="#00000000"/><rect x="0" y="0" width="100" height="50" fill="none"/>';
+    expect(weakestTextContrast(`<svg>${clear}${text('#FFFFFF')}</svg>`, true)).toBeCloseTo(contrast('#FFFFFF', '#1b1b1b'));
+  });
+
+  it('finds the shape under a text whatever its kind', () => {
+    const shapes = [
+      '<ellipse cx="30" cy="20" rx="30" ry="15" fill="#ADD8E6"/>',
+      '<circle cx="30" cy="20" r="25" fill="#ADD8E6"/>',
+      '<polygon points="0,0 100,0 100,50 0,50 0,0" fill="#ADD8E6"/>',
+      '<path d="M0,10 C0,0 50,0 50,0 L100,0 L100,50 A2.5,2.5 0 0 1 97.5,52.5 L0,50 Z" fill="#ADD8E6"/>',
+    ];
+    for (const shape of shapes) {
+      expect(weakestTextContrast(`<svg>${shape}${text('#FFFFFF', 12, 23)}</svg>`, true), shape).toBeCloseTo(
+        contrast('#FFFFFF', '#ADD8E6')
+      );
+    }
+  });
+
+  it('finds a text by its middle, whichever way it is anchored', () => {
+    const box = '<rect x="40" y="0" width="60" height="50" fill="#DDEEFF"/>';
+    // Starting left of the box, but mostly in it.
+    expect(weakestTextContrast(`<svg>${box}${text('#FFFFFF', 30, 23)}</svg>`, true)).toBeCloseTo(
+      contrast('#FFFFFF', '#DDEEFF')
+    );
+    expect(
+      weakestTextContrast(`<svg>${box}${text('#FFFFFF', 70, 20, ' text-anchor="middle" dominant-baseline="central"')}</svg>`, true)
+    ).toBeCloseTo(contrast('#FFFFFF', '#DDEEFF'));
+    expect(weakestTextContrast(`<svg>${box}${text('#FFFFFF', 30, 23, ' text-anchor="end"')}</svg>`, true)).toBeCloseTo(
+      contrast('#FFFFFF', '#1b1b1b')
+    );
+  });
+
+  it('gives the weakest text, and nothing when no text can be measured', () => {
+    const svg = `<svg><rect x="0" y="0" width="100" height="50" fill="#DDEEFF"/>${text('#000000')}${text('#FFFFFF', 12, 40)}</svg>`;
+    expect(weakestTextContrast(svg, true)).toBeCloseTo(contrast('#FFFFFF', '#DDEEFF'));
+    expect(weakestTextContrast('<svg><rect x="0" y="0" width="9" height="9" fill="#FFFFFF"/></svg>', true)).toBeUndefined();
+    const gradient = `<svg><rect x="0" y="0" width="100" height="50" fill="url(#g)"/>${text('#FFFFFF')}</svg>`;
+    expect(weakestTextContrast(gradient, true)).toBeUndefined();
+    expect(weakestTextContrast(`<svg>${text('none')}</svg>`, true)).toBeUndefined();
+  });
+
+  it('skips a path with a command the engine does not write', () => {
+    const relative = '<path d="m0,0 l100,0 l0,50 z" fill="#DDEEFF"/>';
+    expect(weakestTextContrast(`<svg>${relative}${text('#FFFFFF')}</svg>`, true)).toBeCloseTo(contrast('#FFFFFF', '#1b1b1b'));
   });
 });

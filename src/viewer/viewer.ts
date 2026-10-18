@@ -47,7 +47,7 @@ export interface ViewerLabels {
   engineError(message: string, line: number | null): string;
   /** A local include that failed, as the Markdown preview's note says it: the path it asked for, and why. */
   includeFailed(path: string, reason: string): string;
-  /** The diagram is drawn in the palette `dark` names, as its theme is hard to read in the one asked for. */
+  /** The diagram is drawn in the palette `dark` names, as its colours are hard to read in the one asked for. */
   otherPalette(dark: boolean): string;
 }
 
