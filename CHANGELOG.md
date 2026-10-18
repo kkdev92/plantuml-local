@@ -15,6 +15,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   does, instead of the engine's untranslated `cannot include <path>` with the
   reason after it. The path is the file the engine asked for: for
   `!includesub`, without its section; for `!theme … from`, the theme's file.
+- In a dark editor, a diagram whose own colours leave its text hard to read
+  is drawn in the light palette, as one with a theme made for a white page
+  is. A light background set with `skinparam`, a style or on an element, such
+  as `participant Alice #DDEEFF`, kept the dark palette's white text on it.
+  A diagram drawn in the dark palette is now looked at once drawn, in the
+  preview, the `.puml` preview and a dark export alike, and drawn again in the
+  light palette when that reads better. The `.puml` preview's note says its
+  colours, rather than its theme, are hard to read.
+- Links (`[[…]]`) are drawn in a light blue in the dark palette. The bundled
+  engine uses the same link colour in both palettes, which can give low
+  contrast against dark backgrounds and note fills.
 
 ## [0.13.0] - 2026-10-17
 

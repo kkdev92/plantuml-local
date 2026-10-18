@@ -12,9 +12,12 @@ import { recognizeEngineError } from '../../src/render/engine-error';
 import {
   choosePalette,
   labelContrast,
+  lightenLinks,
+  MIN_DRAWN_CONTRAST,
   MIN_TEXT_CONTRAST,
   probeSource,
   ThemePalettes,
+  weakestTextContrast,
 } from '../../src/render/palette';
 
 /**
@@ -350,6 +353,51 @@ describe('render worker (dist)', () => {
       // The emoji images are not bundled; the preview and the export turn
       // this error into a message of their own.
       await expect(render('@startuml\nAlice -> Bob : <:smile:> hi\n@enduml')).rejects.toThrow(EMOJI_UNAVAILABLE);
+    });
+  });
+
+  describe('the colours a diagram sets itself (re-check on every engine update)', () => {
+    const diagram = (...lines: string[]): string => ['@startuml', ...lines, '@enduml'].join('\n');
+    const inDark = async (source: string): Promise<number | undefined> =>
+      weakestTextContrast(lightenLinks(await render(source, true)), true);
+
+    it.each([
+      ['a skinparam', ['skinparam participantBackgroundColor #DDEEFF', 'Alice -> Bob : hello']],
+      ['a style', ['<style>', 'participant {', '  BackgroundColor #DDEEFF', '}', '</style>', 'Alice -> Bob : hello']],
+      ['a colour on a participant', ['participant Alice #DDEEFF', 'Alice -> Bob : hello']],
+      ['a colour on a class', ['class Foo #pink', 'class Bar', 'Foo --> Bar']],
+      ['a colour on a use case', ['actor User', 'usecase (Do it) as UC #LightBlue', 'User --> UC']],
+    ])('finds %s made for a white page hard to read in the dark palette, and easier in the light one', async (_what, lines) => {
+      const source = diagram(...lines);
+      const dark = (await inDark(source)) ?? Infinity;
+      expect(dark).toBeLessThan(MIN_DRAWN_CONTRAST);
+      expect(weakestTextContrast(await render(source, false), false)).toBeGreaterThan(dark);
+    });
+
+    it.each([
+      ['a sequence', ['participant A', 'group Group', 'A -> B : message', 'ref over A, B : ref', 'end', '== Divider ==', 'note over A : note']],
+      ['a header, a footer and a legend', ['header Header', 'footer Footer', 'title Title', 'legend', 'Legend', 'endlegend', 'A -> B']],
+      ['a class', ['abstract class Abs', 'interface If', 'enum En {', 'ONE', '}', 'class Cls <<stereo>>', 'Abs <|-- Cls', 'note "note" as N']],
+      ['an activity', ['start', 'partition Part {', ':step;', '}', 'if (test?) then (yes)', ':yes;', 'else (no)', ':no;', 'endif', 'note right: note', 'stop']],
+      ['a component', ['package "Package" {', '[Component] as C', '}', 'node Node', 'database DB', 'cloud Cloud', 'C --> DB : uses', 'actor User', 'usecase (Use)']],
+      ['a timing', ['robust "Web" as WB', 'concise "User" as WU', '@0', 'WU is Idle', 'WB is Idle', '@100', 'WU is Waiting', 'WB is Processing']],
+    ])('leaves %s in the engine’s own colours in the dark palette, drawn once', async (_what, lines) => {
+      expect(await inDark(diagram(...lines))).toBeGreaterThanOrEqual(MIN_DRAWN_CONTRAST);
+    });
+
+    it('leaves a Gantt chart, whose closed days are the faintest, in the dark palette', async () => {
+      const gantt = '@startgantt\nProject starts 2026-01-01\n[Task] lasts 5 days\nsaturday are closed\n@endgantt';
+      expect(await inDark(gantt)).toBeGreaterThanOrEqual(MIN_DRAWN_CONTRAST);
+    });
+
+    it('draws links, which the engine keeps blue in the dark palette, in a colour that reads there', async () => {
+      const svg = await render(
+        diagram('Alice -> Bob : see [[https://example.com docs]]', 'note right of Bob', '[[https://example.com in a note]]', 'end note'),
+        true
+      );
+      expect(svg).toMatch(/fill="#0000FF"[^>]*text-decoration="underline"/);
+      expect(weakestTextContrast(svg, true)).toBeLessThan(MIN_DRAWN_CONTRAST);
+      expect(weakestTextContrast(lightenLinks(svg), true)).toBeGreaterThanOrEqual(MIN_TEXT_CONTRAST);
     });
   });
 

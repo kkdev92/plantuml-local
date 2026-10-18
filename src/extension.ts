@@ -1280,8 +1280,8 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
           includeFailed: (path, reason) => l10n.t('Cannot include {0}: {1}', path, reason),
           otherPalette: (dark) =>
             dark
-              ? l10n.t('Drawn in the dark palette: its theme is hard to read in the light one.')
-              : l10n.t('Drawn in the light palette: its theme is hard to read in the dark one.'),
+              ? l10n.t('Drawn in the dark palette: its colours are hard to read in the light one.')
+              : l10n.t('Drawn in the light palette: its colours are hard to read in the dark one.'),
         },
       };
       const open = new Map<string, { viewer: DiagramViewer; document: vscode.TextDocument; reveal(): void }>();

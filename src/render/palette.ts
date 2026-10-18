@@ -24,6 +24,16 @@ import { firstLocalIncludeLine } from '../includes/describe';
  * drawn in the palette its own lines choose; if what it included turns the
  * choice, it is drawn once more in the other palette, and that drawing is
  * taken as it is ({@link drawReadable}).
+ *
+ * Colours a diagram sets itself — with `skinparam`, a style or a colour on
+ * an element, in its own lines or in a file it includes — are plain
+ * colours as well. Set for a white page, a light box keeps the dark
+ * palette's white text on it. There are too many ways to set one to look
+ * for them in the source, so a diagram drawn in the dark palette is looked
+ * at once drawn: when a text of it is hard to read against the shape under
+ * it and the light palette reads better, the light drawing is taken. Links,
+ * which the engine draws blue in both palettes, are drawn lighter in the
+ * dark one.
  */
 
 /** The probe's message, found again in the rendered SVG. */
@@ -31,6 +41,24 @@ const PROBE_LABEL = 'plantumlLocalProbe';
 
 /** WCAG's minimum contrast for text (level AA). */
 export const MIN_TEXT_CONTRAST = 4.5;
+
+/**
+ * The weakest contrast a text of a dark drawing may have before the light
+ * palette is tried: WCAG's minimum for large text. The engine's own dark
+ * palette draws a header or a footer at 3.9 and the closed days of a Gantt
+ * chart at 3.1, no better in the light palette, which a higher bar would
+ * draw a second time to find out.
+ */
+export const MIN_DRAWN_CONTRAST = 3;
+
+/**
+ * The colour a dark drawing's links are drawn in. The engine underlines a
+ * link (`[[…]]`) in its hyperlink colour, which its dark palette keeps blue
+ * (#0000FF): 2.0 against the dark backdrop, and about 1 on a dark note.
+ * This one is 4.5 or more on the backdrop and on the fills the dark palette
+ * gives elements, notes and warnings.
+ */
+export const DARK_LINK = '#9ECBFF';
 
 /**
  * An include of the bundled Azure library. It paints its elements white and
@@ -91,7 +119,9 @@ export function paletteLines(source: string, included?: IncludedStyle): string[]
 /**
  * Draws a diagram in the palette its themes can be read in: the one chosen
  * from its own lines first, then — when the files it included turn that
- * choice — once more in the other, which is taken as it is.
+ * choice — once more in the other, which is taken as it is. A drawing in
+ * the dark palette has its links lightened, and gives way to the light one
+ * when that reads better (see the module comment).
  */
 export async function drawReadable(
   source: string,
@@ -99,13 +129,31 @@ export async function drawReadable(
   resolve: (source: string, dark: boolean, included?: IncludedStyle) => Promise<boolean>,
   draw: (palette: boolean) => Promise<DiagramRender>
 ): Promise<{ result: DiagramRender; palette: boolean }> {
+  const drawIn = async (palette: boolean): Promise<DiagramRender> => {
+    const result = await draw(palette);
+    return palette ? { ...result, svg: lightenLinks(result.svg) } : result;
+  };
   const palette = await resolve(source, dark);
-  const result = await draw(palette);
-  if (result.includedStyle === undefined) {
-    return { result, palette };
+  const first = await drawIn(palette);
+  const again = first.includedStyle === undefined ? palette : await resolve(source, dark, first.includedStyle);
+  const drawn = again === palette ? { result: first, palette } : { result: await drawIn(again), palette: again };
+  if (!drawn.palette) {
+    return drawn;
   }
-  const again = await resolve(source, dark, result.includedStyle);
-  return again === palette ? { result, palette } : { result: await draw(again), palette: again };
+  const weakest = weakestTextContrast(drawn.result.svg, true);
+  if (weakest === undefined || weakest >= MIN_DRAWN_CONTRAST) {
+    return drawn;
+  }
+  const light = await drawIn(false);
+  const lighter = weakestTextContrast(light.svg, false);
+  return lighter !== undefined && lighter > weakest ? { result: light, palette: false } : drawn;
+}
+
+/** A dark drawing, with its links — the engine's blue, underlined — in {@link DARK_LINK}. */
+export function lightenLinks(svg: string): string {
+  return svg.replace(/<text\b[^>]*>/g, (tag) =>
+    /\stext-decoration="underline"/.test(tag) ? tag.replace(/\sfill="#0000FF"/i, ` fill="${DARK_LINK}"`) : tag
+  );
 }
 
 /** A diagram that shows only what `lines` do to a message label. */
@@ -140,12 +188,149 @@ export function labelContrast(svg: string, dark: boolean): number | undefined {
   if (label === undefined) {
     return undefined;
   }
+  return contrast(label, backdropOf(svg, dark));
+}
+
+/** What a drawing sits on: the background it paints, or else the backdrop of the palette it was drawn in. */
+function backdropOf(svg: string, dark: boolean): string {
   const painted = /<svg\b[^>]*\bstyle="[^"]*background-color:\s*(#[0-9A-Fa-f]{6})([0-9A-Fa-f]{2})?/.exec(svg);
-  const behind =
-    painted?.[1] !== undefined && painted[2] !== '00'
-      ? painted[1]
-      : DIAGRAM_BACKDROP[dark ? 'dark' : 'light'];
-  return contrast(label, behind);
+  return painted?.[1] !== undefined && painted[2] !== '00' ? painted[1] : DIAGRAM_BACKDROP[dark ? 'dark' : 'light'];
+}
+
+/** What a drawing draws, in order: a shape, with its attributes, or a text, with its attributes and content. */
+const DRAWN = /<(rect|circle|ellipse|polygon|path)\b([^>]*)>|<text\b([^>]*)>([^<]*)<\/text>/g;
+
+/** Left, top, right and bottom. */
+type Box = readonly [number, number, number, number];
+
+/** A number attribute, NaN when it is missing. */
+function numberIn(attributes: string, name: string): number {
+  const at = attributes.indexOf(` ${name}="`);
+  return at === -1 ? NaN : parseFloat(attributes.slice(at + name.length + 3));
+}
+
+/** The plain colour an element is filled with as `#RRGGBB`, `none` for no fill, or null for anything else (a gradient). */
+function fillOf(attributes: string): string | null {
+  const fill = /\sfill="([^"]*)"/.exec(attributes)?.[1];
+  if (fill === 'none') {
+    return 'none';
+  }
+  const colour = /^(#[0-9A-Fa-f]{6})([0-9A-Fa-f]{2})?$/.exec(fill ?? '');
+  return colour === null ? null : colour[2] === '00' ? 'none' : (colour[1] ?? null);
+}
+
+function boxAround(values: readonly number[]): Box | null {
+  const xs = values.filter((_, index) => index % 2 === 0);
+  const ys = values.filter((_, index) => index % 2 === 1);
+  return xs.length === 0 || xs.length !== ys.length
+    ? null
+    : [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
+}
+
+/** How many numbers each command of a path takes, as the engine writes them: absolute. */
+const PATH_ARITY: Readonly<Record<string, number>> = { M: 2, L: 2, Q: 4, C: 6, A: 7, Z: 0 };
+
+/**
+ * The box around a path's points, control points included, which holds its
+ * curves; null for a command the engine does not write.
+ */
+function pathBox(data: string): Box | null {
+  const points: number[] = [];
+  const tokens = data.match(/[A-Za-z]|-?(?:\d+\.?\d*|\.\d+)(?:e[-+]?\d+)?/gi) ?? [];
+  let arity = 0;
+  let taken: number[] = [];
+  for (const token of tokens) {
+    if (/^[A-Za-z]$/.test(token)) {
+      const next = PATH_ARITY[token];
+      if (next === undefined || taken.length !== 0) {
+        return null;
+      }
+      arity = next;
+      continue;
+    }
+    taken.push(Number(token));
+    if (taken.length === arity) {
+      // An arc's radii, rotation and flags are not points.
+      points.push(...(arity === 7 ? taken.slice(5) : taken));
+      taken = [];
+    }
+  }
+  return taken.length === 0 ? boxAround(points) : null;
+}
+
+function shapeBox(shape: string, attributes: string): Box | null {
+  const at = (name: string): number => numberIn(attributes, name);
+  switch (shape) {
+    case 'rect':
+      return [at('x'), at('y'), at('x') + at('width'), at('y') + at('height')];
+    case 'circle':
+      return [at('cx') - at('r'), at('cy') - at('r'), at('cx') + at('r'), at('cy') + at('r')];
+    case 'ellipse':
+      return [at('cx') - at('rx'), at('cy') - at('ry'), at('cx') + at('rx'), at('cy') + at('ry')];
+    case 'polygon':
+      return boxAround((/\spoints="([^"]*)"/.exec(attributes)?.[1]?.match(/-?[\d.]+/g) ?? []).map(Number));
+    default:
+      return pathBox(/\sd="([^"]*)"/.exec(attributes)?.[1] ?? '');
+  }
+}
+
+/** About the middle of a text: half an em a character lands inside the shape it is written in. */
+function middleOf(attributes: string, content: string): [number, number] {
+  const size = numberIn(attributes, 'font-size') || 14;
+  const x = numberIn(attributes, 'x');
+  const y = numberIn(attributes, 'y');
+  const half = (content.length * size) / 4;
+  const anchor = /\stext-anchor="(middle|end)"/.exec(attributes)?.[1];
+  const across = anchor === 'middle' ? x : anchor === 'end' ? x - half : x + half;
+  return [across, /\sdominant-baseline="central"/.test(attributes) ? y : y - size * 0.3];
+}
+
+/** A shape a drawing paints: where, and its fill (null for a gradient). */
+interface Painted {
+  box: Box;
+  fill: string | null;
+}
+
+/** The fill of the last shape painted over a point, or `backdrop` when none is. */
+function fillUnder(painted: readonly Painted[], [x, y]: [number, number], backdrop: string): string | null {
+  for (let index = painted.length - 1; index >= 0; index--) {
+    const shape = painted[index];
+    if (shape !== undefined && shape.box[0] <= x && x <= shape.box[2] && shape.box[1] <= y && y <= shape.box[3]) {
+      return shape.fill;
+    }
+  }
+  return backdrop;
+}
+
+/**
+ * The contrast of the text hardest to read in a drawing, against the last
+ * shape painted under it, or else what the drawing sits on. A text on a
+ * gradient is not measured. Undefined when no text is.
+ */
+export function weakestTextContrast(svg: string, dark: boolean): number | undefined {
+  const backdrop = backdropOf(svg, dark);
+  const painted: Painted[] = [];
+  let weakest: number | undefined;
+  for (const [, shape, shapeAttributes = '', attributes = '', content = ''] of svg.matchAll(DRAWN)) {
+    if (shape !== undefined) {
+      const fill = fillOf(shapeAttributes);
+      const box = fill === 'none' ? null : shapeBox(shape, shapeAttributes);
+      if (box !== null) {
+        painted.push({ box, fill });
+      }
+      continue;
+    }
+    const fill = fillOf(attributes);
+    if (fill === null || fill === 'none' || content.trim() === '') {
+      continue;
+    }
+    const behind = fillUnder(painted, middleOf(attributes, content), backdrop);
+    if (behind !== null) {
+      const measured = contrast(fill, behind);
+      weakest = weakest === undefined ? measured : Math.min(weakest, measured);
+    }
+  }
+  return weakest;
 }
 
 /**
