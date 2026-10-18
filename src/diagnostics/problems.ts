@@ -66,6 +66,8 @@ export interface ProblemLabels {
   beforeStart(start: string): string;
   /** Follows the engine's "cannot include …" or "Cannot import". */
   localFile: string;
+  /** A local include that failed, as the preview's note says it: the path it asked for, and why. */
+  includeFailed(path: string, reason: string): string;
   /** Follows the engine's "Cannot load theme … in …" for a theme no file was asked for: from a library or a URL. */
   themeFrom: string;
   libraryNotBundled(library: string): string;
@@ -180,6 +182,7 @@ function classify(
   labels: ProblemLabels,
   failedIncludes: ReadonlyMap<string, string> = new Map()
 ): { code: string; message: string } {
+  const told = (path: string, reason: string): string => labels.includeFailed(path, reason);
   // A standard library the engine cannot read is one that is not bundled.
   // Azure is: there, the entry does not exist, as the engine says.
   const library = /^cannot include <([^/>]+)/.exec(message)?.[1];
@@ -189,7 +192,7 @@ function classify(
       : { code: PROBLEM_CODES.CAP001, message: labels.libraryNotBundled(library) };
   }
   if (/^cannot include /.test(message) || message === 'Cannot import') {
-    const explained = withIncludeReason(message, failedIncludes);
+    const explained = withIncludeReason(message, failedIncludes, told);
     if (explained !== message) {
       return { code: PROBLEM_CODES.INC001, message: explained };
     }
@@ -201,7 +204,7 @@ function classify(
   }
   if (/^Cannot load theme \S+ in /.test(message)) {
     // A theme from a folder is asked of the loader, which says why it failed.
-    const explained = withIncludeReason(message, failedIncludes);
+    const explained = withIncludeReason(message, failedIncludes, told);
     return explained !== message
       ? { code: PROBLEM_CODES.INC001, message: explained }
       : { code: PROBLEM_CODES.CAP001, message: `${message}: ${labels.themeFrom}` };

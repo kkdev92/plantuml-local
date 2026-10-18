@@ -78,6 +78,7 @@ function makeDeps(
     pagesMessage: 'no pages',
     engineErrorMessage: (message: string, line: number | null): string =>
       `engine: ${message} @ ${String(line)}`,
+    includeFailedMessage: (path: string, reason: string): string => `no ${path} (${reason})`,
     pngTooLargeMessage: (width: number, height: number, fits: number | null): string =>
       `too large: ${String(width)}×${String(height)}, fits ${String(fits)}`,
     pngFailedMessage: 'no PNG',
@@ -669,6 +670,23 @@ describe('exportAll', () => {
     expect(outcome?.failed[0]?.error).toBe('engine: cannot include shared.puml @ 3');
     expect(outcome?.written.map((r) => r.name)).toEqual(['two']);
     expect(deps.writeFile).toHaveBeenCalledOnce();
+  });
+
+  it('says why an include failed as the preview does', async () => {
+    const deps = makeDeps({
+      render: vi.fn((source: string) =>
+        Promise.resolve(
+          source === 'a'
+            ? { ...rendered(engineOutput('include-failure')), failedIncludes: new Map([['shared.puml', 'not found']]) }
+            : rendered(engineOutput('sequence'))
+        )
+      ),
+    });
+
+    const outcome = await exportMarkdown(deps, DOC, 'images', document);
+
+    expect(outcome?.failed[0]?.error).toBe('engine: no shared.puml (not found) @ 3');
+    expect(outcome?.failed[0]?.engineError).toEqual({ message: 'no shared.puml (not found)', line: 3 });
   });
 
   it('reports progress for each diagram', async () => {

@@ -814,6 +814,7 @@ function exporterDeps(
       'Pages after newpage cannot be drawn, so only the first page would be. Give each page a block of its own.'
     ),
     engineErrorMessage: (message, line) => engineErrorMessage(context, message, line),
+    includeFailedMessage: (path, reason) => context.l10n.t('Cannot include {0}: {1}', path, reason),
     pngTooLargeMessage: (width, height, fits) =>
       fits === null
         ? context.l10n.t(
@@ -1276,6 +1277,7 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
             line === null
               ? l10n.t('PlantUML reported an error: {0}', message)
               : l10n.t('PlantUML reported an error at line {0}: {1}', String(line), message),
+          includeFailed: (path, reason) => l10n.t('Cannot include {0}: {1}', path, reason),
           otherPalette: (dark) =>
             dark
               ? l10n.t('Drawn in the dark palette: its theme is hard to read in the light one.')
@@ -1992,6 +1994,7 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
           l10n.t('This diagram has no {0} line; it is drawn as if the block ended with one.', end),
         beforeStart: (start) => l10n.t('The lines above {0} are not drawn.', start),
         localFile: l10n.t('the bundled engine reads no files.'),
+        includeFailed: (path, reason) => l10n.t('Cannot include {0}: {1}', path, reason),
         themeFrom: l10n.t('only bundled themes and themes from a folder of the workspace can be loaded.'),
         libraryNotBundled: (library) =>
           l10n.t('The {0} standard library is not bundled; only azure is.', library),

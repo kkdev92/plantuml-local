@@ -58,6 +58,7 @@ const deps: ExporterDeps = {
   pagesMessage: 'Pages after newpage cannot be drawn.',
   engineErrorMessage: (message, line) =>
     line === null ? `PlantUML reported an error: ${message}` : `PlantUML reported an error at line ${String(line)}: ${message}`,
+  includeFailedMessage: (path, reason) => `Cannot include ${path}: ${reason}`,
   pngTooLargeMessage: (width, height) => `The PNG would be ${String(width)}×${String(height)} pixels.`,
   pngFailedMessage: 'The PNG could not be made as asked.',
   sameFileMessage: 'Another diagram is exported to the same file.',

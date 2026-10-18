@@ -88,10 +88,13 @@ export interface ExporterDeps {
   pagesMessage: string;
   /**
    * Localised reason given for a diagram the engine drew as an error:
-   * `message` is the engine's own text, `line` the document line it
-   * blames (counting from 1), or null when it names none.
+   * `message` is the engine's own text, or why a local include failed
+   * ({@link includeFailedMessage}), `line` the document line it blames
+   * (counting from 1), or null when it names none.
    */
   engineErrorMessage(message: string, line: number | null): string;
+  /** Localised account of a local include that failed, as the preview's note gives it: the path it asked for, and why. */
+  includeFailedMessage(path: string, reason: string): string;
   /**
    * Localised reason given for a PNG past the size one can have: its
    * size, and the largest scale it fits at, or null when none does.
@@ -285,7 +288,9 @@ async function drawBlock(
       // sourceLine counts from 0 and the engine's line from 1, so the sum
       // is the document line counting from 1, as an editor shows it.
       const line = failure.line === null ? null : block.sourceLine + failure.line;
-      const message = withIncludeReason(failure.message, failedIncludes);
+      const message = withIncludeReason(failure.message, failedIncludes, (path, reason) =>
+        deps.includeFailedMessage(path, reason)
+      );
       return {
         name,
         path: null,

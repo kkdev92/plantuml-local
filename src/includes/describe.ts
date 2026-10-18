@@ -163,14 +163,22 @@ export function describeIncludeFailure(
 }
 
 /**
- * The engine's message for a failed include, with why it failed when that is
- * known: "cannot include x" says nothing more.
+ * The engine's message for a failed include, told as the preview's note
+ * tells it (`includeFailed`, given the path the engine asked for and why)
+ * when why it failed is known: "cannot include x" says nothing more.
  */
-export function withIncludeReason(message: string, failedIncludes: ReadonlyMap<string, string>): string {
-  const reason = askedPaths(message)
-    .map((path) => failedIncludes.get(path))
-    .find((found) => found !== undefined);
-  return reason === undefined ? message : `${message}: ${reason}`;
+export function withIncludeReason(
+  message: string,
+  failedIncludes: ReadonlyMap<string, string>,
+  includeFailed: (path: string, reason: string) => string
+): string {
+  for (const path of askedPaths(message)) {
+    const reason = failedIncludes.get(path);
+    if (reason !== undefined) {
+      return includeFailed(path, reason);
+    }
+  }
+  return message;
 }
 
 /** The failed includes of a render, by the path each named, with why: the first failure of each path. */
