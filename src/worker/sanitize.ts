@@ -14,6 +14,8 @@ import type { Window } from 'happy-dom';
  *   fragment references (`#…`) within the document, or an inline sprite
  *   PNG (see {@link isSpritePng})
  *
+ * whatever prefix their names are written with (see {@link localPart}).
+ *
  * The same SVG is what an export writes to disk, and a file is shared with
  * people who were never meant to see the source. So everything the engine
  * embeds without drawing it goes too:
@@ -38,8 +40,23 @@ import type { Window } from 'happy-dom';
  * Walking a tree parsed as `image/svg+xml` keeps the document intact.
  */
 
+/** Local names, the part after any prefix (see {@link localPart}). */
 const DANGEROUS_ELEMENTS = new Set(['script', 'foreignobject', 'iframe', 'embed', 'object']);
-const LINK_ATTRIBUTES = new Set(['href', 'xlink:href', 'src']);
+const LINK_ATTRIBUTES = new Set(['href', 'src']);
+
+/**
+ * The part of an element or attribute name after its prefix, in lower
+ * case. What markup is depends on its namespace, not on the prefix that
+ * spells it: with `xmlns:s` bound to SVG, `<s:script>` is a script, and so
+ * is `<h:script>` with `h` bound to XHTML; with `x` bound to xlink,
+ * `x:href` is a link. A browser that opens an exported SVG runs and
+ * follows them. happy-dom resolves the prefix of an element but of no
+ * attribute save `xlink:` and `xmlns:`, so names are judged by their local
+ * part, whatever the prefix and whatever it is bound to.
+ */
+function localPart(name: string): string {
+  return name.slice(name.lastIndexOf(':') + 1).toLowerCase();
+}
 
 /**
  * Base64 of the eight-byte PNG signature. Those bytes fix the first ten
@@ -73,7 +90,7 @@ const SPRITE_PNG = /^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/;
  */
 function isSpritePng(element: ElementLike, attributeName: string, value: string): boolean {
   return (
-    element.nodeName.toLowerCase() === 'image' &&
+    localPart(element.nodeName) === 'image' &&
     attributeName !== 'src' &&
     value.startsWith(`data:image/png;base64,${PNG_SIGNATURE_BASE64}`) &&
     SPRITE_PNG.test(value)
@@ -104,9 +121,9 @@ interface ElementLike extends NodeLike {
 /** An `<a>` leading out of the document (see the module comment). */
 function isOutboundLink(element: ElementLike): boolean {
   return (
-    element.nodeName.toLowerCase() === 'a' &&
+    localPart(element.nodeName) === 'a' &&
     Array.from(element.attributes).some(
-      (attribute) => LINK_ATTRIBUTES.has(attribute.name.toLowerCase()) && !attribute.value.startsWith('#')
+      (attribute) => LINK_ATTRIBUTES.has(localPart(attribute.name)) && !attribute.value.startsWith('#')
     )
   );
 }
@@ -119,12 +136,18 @@ interface StripState {
 function stripAttributes(element: ElementLike, state: StripState): void {
   for (const attribute of Array.from(element.attributes)) {
     const name = attribute.name.toLowerCase();
-    if (name.startsWith('on') || name.startsWith('data-')) {
+    // A namespace declaration is not judged by its prefix: removing one
+    // would leave the names that use it undeclared.
+    if (name === 'xmlns' || name.startsWith('xmlns:')) {
+      continue;
+    }
+    const local = localPart(name);
+    if (local.startsWith('on') || local.startsWith('data-')) {
       element.removeAttribute(attribute.name);
     } else if (
-      LINK_ATTRIBUTES.has(name) &&
+      LINK_ATTRIBUTES.has(local) &&
       !attribute.value.startsWith('#') &&
-      !isSpritePng(element, name, attribute.value)
+      !isSpritePng(element, local, attribute.value)
     ) {
       element.removeAttribute(attribute.name);
     } else if (name.startsWith('xlink:')) {
@@ -145,7 +168,7 @@ function walk(element: ElementLike, state: StripState): void {
       continue;
     }
     const child = node as ElementLike;
-    if (DANGEROUS_ELEMENTS.has(child.nodeName.toLowerCase())) {
+    if (DANGEROUS_ELEMENTS.has(localPart(child.nodeName))) {
       child.remove();
       continue;
     }
