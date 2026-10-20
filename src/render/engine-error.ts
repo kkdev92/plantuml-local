@@ -139,6 +139,22 @@ export function recognizeEngineError(svg: string): EngineError | null {
   return locatedError(texts) ?? notSupported(texts) ?? loneMessage(svg, texts);
 }
 
+/** The first line of the report the engine draws when it crashes. */
+const CRASH_HEADLINE = 'An error has occurred!';
+
+/** The line of that report that blames Graphviz (GraphvizCrash upstream). */
+const GRAPHVIZ_CRASHED = 'For some reason, dot/GraphViz has crashed.';
+
+/**
+ * Whether `svg` is the report the engine draws when Graphviz crashed while
+ * laying out the diagram. The WebAssembly Graphviz does not recover from a
+ * crash: every later layout in the same worker fails with the same report.
+ */
+export function recognizeGraphvizCrash(svg: string): boolean {
+  const texts = textElements(svg);
+  return texts[0]?.content === CRASH_HEADLINE && texts.some((text) => text.content.trim() === GRAPHVIZ_CRASHED);
+}
+
 /**
  * The banner the engine draws above a diagram it accepted with warnings
  * (DiagramChromeFactory upstream), in the light and in the dark palette.

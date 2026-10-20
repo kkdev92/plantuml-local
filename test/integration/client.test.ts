@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { RendererClient } from '../../src/render/client';
+import { recognizeGraphvizCrash } from '../../src/render/engine-error';
 
 /**
  * Exercises the extension-host worker client directly (it has no vscode
@@ -12,6 +13,7 @@ import { RendererClient } from '../../src/render/client';
 
 const hangWorkerPath = join(__dirname, 'helpers/hang-worker.cjs');
 const wedgeWorkerPath = join(__dirname, 'helpers/wedge-worker.cjs');
+const graphvizCrashWorkerPath = join(__dirname, 'helpers/graphviz-crash-worker.cjs');
 const realWorkerPath = join(__dirname, '../../dist/worker.js');
 
 const log = { debug: vi.fn(), warn: vi.fn(), error: vi.fn() };
@@ -68,6 +70,58 @@ describe('RendererClient', () => {
     const svg = await client.render('@startuml\nAlice -> Bob : Hello\n@enduml', false);
     expect(svg).toMatch(/<svg/);
     expect(svg).toContain('Hello');
+  });
+
+  describe('after Graphviz crashes', () => {
+    // The bundled Graphviz (WebAssembly) runs out of bounds of its memory
+    // laying out 100 nested packages, and then fails every later layout in
+    // the same worker with the same report.
+    const crashing = [
+      '@startuml',
+      ...Array.from({ length: 100 }, (_, i) => `package p${String(i)} {`),
+      'class Leaf',
+      ...Array.from({ length: 100 }, () => '}'),
+      '@enduml',
+    ].join('\n');
+    const classes = '@startuml\nclass Alpha\nclass Beta\nAlpha --> Beta\n@enduml';
+
+    it('lays out the next diagram with a fresh Graphviz', async () => {
+      client = new RendererClient(realWorkerPath, log);
+
+      // The diagram must still crash the bundled Graphviz for this to test
+      // anything. If an engine update stops that, find one that does.
+      expect(recognizeGraphvizCrash(await client.render(crashing, false))).toBe(true);
+
+      const next = await client.render(classes, false);
+      expect(recognizeGraphvizCrash(next)).toBe(false);
+      expect(next).toContain('Alpha');
+      expect(log.warn).toHaveBeenCalledWith(expect.stringContaining('Graphviz crashed'));
+    });
+
+    it('sends the renders queued behind the crash to a fresh worker', async () => {
+      client = new RendererClient(realWorkerPath, log);
+
+      const crashed = client.render(crashing, false);
+      const queued = client.render(classes, false);
+
+      expect(recognizeGraphvizCrash(await crashed)).toBe(true);
+      const drawn = await queued;
+      expect(recognizeGraphvizCrash(drawn)).toBe(false);
+      expect(drawn).toContain('Alpha');
+    });
+
+    it('ignores what the replaced worker drew after the crash', async () => {
+      // This worker answers the request queued behind the crash at once,
+      // with the crash report, before the client has replaced it. That
+      // answer must not settle the request; the new worker's does.
+      client = new RendererClient(graphvizCrashWorkerPath, log);
+
+      const crashed = client.render('CRASH', false);
+      const queued = client.render('A -> B', false);
+
+      expect(recognizeGraphvizCrash(await crashed)).toBe(true);
+      await expect(queued).resolves.toBe('<svg>A -> B</svg>');
+    });
   });
 
   it('rejects everything outstanding on dispose', async () => {

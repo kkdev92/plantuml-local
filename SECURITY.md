@@ -114,6 +114,8 @@ Exporting is the one path that writes files: the export commands write SVG and P
 
 Rendering pathological input is CPU-bound inside the worker, and renders are serialised, so a hung render would wedge the queue. Each render has a 30-second ceiling; on timeout the request fails, the worker is terminated and a fresh one serves the next request. The preview and the extension host stay responsive throughout.
 
+Input can also make Graphviz crash, and the WebAssembly Graphviz then fails every later layout in the same worker. A diagram that crashes it gets the engine's crash report, and the worker is replaced the same way, so the diagrams after it — in any document — are laid out by a fresh Graphviz.
+
 ## Known Limitations
 
 - The engine itself is a large compiled artifact (TeaVM output); we treat it as trusted upstream code and constrain its version range.

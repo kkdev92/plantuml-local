@@ -3,6 +3,7 @@ import { Worker } from 'node:worker_threads';
 
 import { RENDER_TIMEOUT_MS, WORKER_IDLE_TIMEOUT_MS } from '../core/constants';
 import { englishMessages, type MessageLocalizer } from '../core/messages';
+import { recognizeGraphvizCrash } from './engine-error';
 import type {
   IncludeLoader,
   IncludeRequestMessage,
@@ -19,7 +20,9 @@ import type {
  * engine loading quirks stay inside src/worker/. The worker is started
  * lazily on the first render and restarted transparently if it dies —
  * or if a render exceeds {@link RENDER_TIMEOUT_MS}, since renders are
- * serialised inside the worker and a hung one would wedge the queue.
+ * serialised inside the worker and a hung one would wedge the queue, or
+ * if Graphviz crashes, since the WebAssembly Graphviz does not recover
+ * and would fail every later layout in that worker.
  *
  * It is also shut down once it has been idle for
  * {@link WORKER_IDLE_TIMEOUT_MS}, which returns the engine and any
@@ -134,8 +137,16 @@ export class RendererClient {
 
     // The serial queue behind the hung render is wedged — replace the
     // worker. Requests still pending were queued behind the hung one and
-    // never started: they go to the new worker, each with a time limit of
-    // its own.
+    // never started.
+    this.replaceWorker();
+  }
+
+  /**
+   * Terminates the worker and sends the requests still pending to a new
+   * one, each with a time limit of its own. Whatever the old worker drew
+   * for them is ignored (see the 'message' handler).
+   */
+  private replaceWorker(): void {
     void this.worker?.terminate();
     this.worker = null;
     this.stopIdleTimer();
@@ -159,14 +170,26 @@ export class RendererClient {
         this.answerInclude(created, message);
         return;
       }
+      // A replaced worker can still deliver what it drew before it was
+      // terminated; the requests it held have gone to its successor.
+      if (this.worker !== created) {
+        return;
+      }
       const entry = this.settle(message.id);
       if (entry === undefined) {
         return;
       }
       if (message.error !== undefined) {
         entry.reject(new Error(message.error));
-      } else {
-        entry.resolve(message.svg ?? '');
+        return;
+      }
+      const svg = message.svg ?? '';
+      entry.resolve(svg);
+      if (recognizeGraphvizCrash(svg)) {
+        // The diagram keeps the engine's report; the renders queued behind
+        // it would get the same one, so they go to a fresh Graphviz.
+        this.log.warn(this.l10n.t('Graphviz crashed while laying out a diagram. Restarting the render worker.'));
+        this.replaceWorker();
       }
     });
 
