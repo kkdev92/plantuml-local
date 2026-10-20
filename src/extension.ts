@@ -1762,8 +1762,11 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         context.logger.warn(message);
         const actions: NoticeAction[] = [];
         if (result.cause === 'source') {
-          // The diagnostics list the same problem, unless they are turned off.
-          const listed = settings.read({ resource: document.textDocument.uri }).values[CONFIG.DIAGNOSTICS_ENABLED] !== false;
+          // The diagnostics list the same problem for a Markdown file, unless
+          // they are turned off. They check no other file: the output has it.
+          const listed =
+            isMarkdownFile(document.textDocument) &&
+            settings.read({ resource: document.textDocument.uri }).values[CONFIG.DIAGNOSTICS_ENABLED] !== false;
           actions.push(listed ? problemsButton(context) : outputButton(context));
         } else if (result.cause === 'png') {
           if (result.fitsAt !== undefined) {

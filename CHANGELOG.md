@@ -31,6 +31,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the PNG export failed ("The source image cannot be decoded"), and the
   `.puml` preview showed nothing. Each is now drawn as U+FFFD, the
   replacement character, with room made for it.
+- When exporting a diagram in a `.puml` file was refused for a mistake in
+  it, the notice offered *Show Problems*, which opened a Problems panel
+  without it: the panel lists the diagrams of Markdown files only. It now
+  offers *Show Output*, as it does when the Problems checks are turned off.
 
 ## [0.14.0] - 2026-10-19
 
