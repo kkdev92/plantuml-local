@@ -162,6 +162,16 @@ function walk(element: ElementLike, state: StripState): void {
 const XLINK_NAMESPACE = 'http://www.w3.org/1999/xlink';
 
 /**
+ * The characters XML 1.0 does not allow: the C0 controls other than tab,
+ * line feed and carriage return, U+FFFE, U+FFFF and, with the `u` flag, a
+ * surrogate without its pair. The engine draws the characters of a label
+ * as they are, in its text or in a tooltip's attributes, and the
+ * serialiser writes them out as they are.
+ */
+// eslint-disable-next-line no-control-regex -- the control characters are what it finds.
+const NOT_IN_XML = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\ud800-\udfff\ufffe\uffff]/gu;
+
+/**
  * Parses `svg` as an SVG document, strips dangerous content and returns
  * the serialised result. Throws if the input is not an SVG document.
  */
@@ -192,5 +202,11 @@ export function sanitizeSvg(window: Window, svg: string): string {
     rootElement.setAttribute('xmlns:xlink', XLINK_NAMESPACE);
   }
 
-  return new window.XMLSerializer().serializeToString(root);
+  // One such character makes the whole file unreadable as XML: a browser
+  // shows a broken image for it, and the PNG export and the .puml preview,
+  // which load the SVG as an image, fail on it. Each becomes U+FFFD, the
+  // replacement character, as an unpaired surrogate already does when the
+  // SVG is written out as UTF-8. The layout made room for it (see
+  // measureTextWidth), and the mark shows where the character was.
+  return new window.XMLSerializer().serializeToString(root).replace(NOT_IN_XML, '\ufffd');
 }
