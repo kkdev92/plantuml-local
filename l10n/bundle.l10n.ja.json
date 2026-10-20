@@ -143,6 +143,7 @@
   "Invalid {0} data. Check the data syntax.": "{0} データの書式に誤りがあります。内容を確認してください。",
   "This diagram type is not supported by the bundled version of PlantUML.": "この種類の図は、同梱の PlantUML では表示できません。",
   "A !while or !foreach loop repeated too many times and was stopped. Check the loop condition.": "!while または !foreach のループの繰り返しが多すぎるため、処理を止めました。ループの条件を確認してください。",
+  "Graphviz crashed while laying out this diagram. Simplify it, or add !pragma layout smetana to lay it out without Graphviz.": "この図のレイアウト中に Graphviz がクラッシュしました。図を簡略化するか、!pragma layout smetana を書いて Graphviz を使わずにレイアウトしてください。",
   "The bundled PlantUML loads the files a diagram includes one at a time and stops after {0}. This diagram includes more files than that, counting nested includes. Reduce the number of included files.": "同梱の PlantUML は、include されたファイルを 1 つずつ読み込み、{0} 個で読み込みを止めます。この図は、入れ子の include も含めて、それより多くのファイルを読み込もうとしています。読み込むファイルを減らしてください。",
   "The bundled version of PlantUML does not support {0}.": "同梱の PlantUML は {0} に対応していません。",
   "Could not include {0}. Check the file path or library name.": "{0} を読み込めません。ファイルのパスやライブラリ名を確認してください。",

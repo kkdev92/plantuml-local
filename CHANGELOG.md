@@ -17,6 +17,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   diagrams waiting behind the one that crashed it are drawn by the new one.
   That diagram still shows the report; *Troubleshooting* in the README says
   what to do about it.
+- The diagram that makes Graphviz crash is an error, as a syntax error is. The
+  engine's crash report was taken for a diagram: the previews showed it with no
+  word of explanation, the Problems panel listed nothing, and exporting the
+  diagram wrote the report to the image file, which *Export All Diagrams as
+  SVG and Update Image Links* then linked from the document. Now both previews
+  say what to do, the Problems panel lists it (`PLLOCAL-RUN002`), and its
+  export is refused.
 
 ## [0.14.0] - 2026-10-19
 

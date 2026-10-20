@@ -20,7 +20,7 @@ import { EMOJI_UNAVAILABLE, remoteReferenceLine } from '../core/constants';
 import { diagramShape } from '../core/shape';
 import type { PlantUmlBlock } from '../export/blocks';
 import { withIncludeReason } from '../includes/describe';
-import { recognizeEngineError, recognizeEngineWarnings } from '../render/engine-error';
+import { GRAPHVIZ_CRASHED, recognizeEngineError, recognizeEngineWarnings } from '../render/engine-error';
 
 /**
  * The code each kind of problem carries in the Problems panel. They stay the
@@ -174,6 +174,10 @@ function classify(
   labels: ProblemLabels,
   failedIncludes: ReadonlyMap<string, string> = new Map()
 ): { code: string; message: string } {
+  // Not a mistake in the source: Graphviz itself failed to lay it out.
+  if (message === GRAPHVIZ_CRASHED) {
+    return { code: PROBLEM_CODES.RUN002, message };
+  }
   // A standard library the engine cannot read is one that is not bundled.
   // Azure is: there, the entry does not exist, as the engine says.
   const library = /^cannot include <([^/>]+)/.exec(message)?.[1];

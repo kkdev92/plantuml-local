@@ -95,6 +95,21 @@ describe('recognizeEngineError', () => {
     });
   });
 
+  describe('the Graphviz crash report', () => {
+    it('recognises it, naming no line', () => {
+      // 100 nested packages (see recognizeGraphvizCrash below).
+      expect(recognizeEngineError(fixture('graphviz-crash'))).toEqual({
+        message: 'For some reason, dot/GraphViz has crashed.',
+        line: null,
+      });
+    });
+
+    it('needs the report\'s headline, not just the sentence about Graphviz', () => {
+      const quoted = fixture('graphviz-crash').replace('An error has occurred!', 'Release notes');
+      expect(recognizeEngineError(quoted)).toBeNull();
+    });
+  });
+
   describe('diagrams', () => {
     it('leaves an ordinary diagram alone', () => {
       expect(recognizeEngineError(fixture('sequence'))).toBeNull();

@@ -197,6 +197,20 @@ describe('renderProblems', () => {
     expect(problem('Worker exited')).toMatchObject({ code: PROBLEM_CODES.RUN002, message: 'Worker exited' });
   });
 
+  it('reports the report of a Graphviz crash as a failure of the engine, on the start line', () => {
+    // The engine draws it through the success path, like a syntax error, but
+    // nothing in the source is wrong as written: Graphviz failed to lay it out.
+    const { block, check } = at('@startuml', 'package p0 {', 'class Leaf', '}', '@enduml');
+    expect(renderProblems(block, check, { svg: engineOutput('graphviz-crash') }, LABELS)).toEqual([
+      {
+        line: 3,
+        severity: 'error',
+        code: PROBLEM_CODES.RUN002,
+        message: 'For some reason, dot/GraphViz has crashed.',
+      },
+    ]);
+  });
+
   it('reports the engine’s warnings on the start line, and nothing for a clean diagram', () => {
     const { block, check } = at('@startuml', 'start', '#pink:deprecated colour', 'second line;', 'stop', '@enduml');
     const found = renderProblems(block, check, { svg: engineOutput('warning') }, LABELS);
