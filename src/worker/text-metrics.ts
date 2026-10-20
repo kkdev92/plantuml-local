@@ -32,12 +32,23 @@ const FULL_WIDTH_THRESHOLD = 0x2e80;
 /** Fallback for Latin/asciiish characters missing from the table. */
 const DEFAULT_ADVANCE = 0.556;
 
+/**
+ * The control characters an SVG cannot hold: all below U+0020 but tab,
+ * line feed and carriage return. sanitizeSvg draws each as U+FFFD, so each
+ * is measured as U+FFFD is, past the threshold: one em. The other
+ * characters it replaces (U+FFFE, U+FFFF, unpaired surrogates) are past it
+ * already.
+ */
+function isReplacedControl(codePoint: number): boolean {
+  return codePoint < 0x20 && codePoint !== 0x09 && codePoint !== 0x0a && codePoint !== 0x0d;
+}
+
 /** Measures the width of `text` at the given font size, in pixels. */
 export function measureTextWidth(text: string, fontSize: number): number {
   let width = 0;
   for (const ch of text) {
     const codePoint = ch.codePointAt(0) ?? 0;
-    const advance = codePoint > FULL_WIDTH_THRESHOLD ? 1 : (ADVANCE[ch] ?? DEFAULT_ADVANCE);
+    const advance = codePoint > FULL_WIDTH_THRESHOLD || isReplacedControl(codePoint) ? 1 : (ADVANCE[ch] ?? DEFAULT_ADVANCE);
     width += advance * fontSize;
   }
   return width;

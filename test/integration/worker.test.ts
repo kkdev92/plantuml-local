@@ -253,6 +253,21 @@ describe('render worker (dist)', () => {
     expect(svg).not.toMatch(/<a\b/);
   });
 
+  it('writes the characters XML does not allow as U+FFFD, in labels and in tooltips', async () => {
+    // One of them makes the whole file unreadable as XML (see sanitizeSvg).
+    const svg = await render(
+      ['@startuml', 'Alice -> Bob : [[#target{TIP(\u0001)} LNK(\u000b)]]', 'Bob -> Alice : NON[\uffff]', 'note right: NUL[\u0000]', '@enduml'].join(
+        '\n'
+      )
+    );
+
+    expect(svg).toContain('title="TIP(\ufffd)"');
+    expect(svg).toContain('LNK(\ufffd)');
+    expect(svg).toContain('NON[\ufffd]');
+    expect(svg).toContain('NUL[\ufffd]');
+    expect(svg).not.toMatch(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\ud800-\udfff\ufffe\uffff]/u);
+  });
+
   it('produces different output in dark mode', async () => {
     const light = await render('@startuml\nAlice -> Bob : Hello\n@enduml', false);
     const dark = await render('@startuml\nAlice -> Bob : Hello\n@enduml', true);

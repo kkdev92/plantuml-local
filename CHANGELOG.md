@@ -24,6 +24,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   SVG and Update Image Links* then linked from the document. Now both previews
   say what to do, the Problems panel lists it (`PLLOCAL-RUN002`), and its
   export is refused.
+- A diagram whose text held a control character (U+0000 to U+001F, other
+  than a tab or a line break), U+FFFE or U+FFFF could not be used outside
+  the Markdown preview. XML does not allow these characters, and they
+  reached the SVG as they were, so an exported SVG was refused by browsers,
+  the PNG export failed ("The source image cannot be decoded"), and the
+  `.puml` preview showed nothing. Each is now drawn as U+FFFD, the
+  replacement character, with room made for it.
 
 ## [0.14.0] - 2026-10-19
 

@@ -202,6 +202,31 @@ describe('sanitizeSvg', () => {
     });
   });
 
+  describe('characters XML does not allow', () => {
+    // One of them makes the whole file unreadable as XML: an exported SVG
+    // shows as a broken image, and the PNG export and the .puml preview,
+    // which load the SVG as an image, fail on it.
+    it('replaces each with U+FFFD, in text and in attribute values', () => {
+      const out = sanitizeSvg(
+        window,
+        WRAP('<a href="#a" title="T[\u0001]"><text x="1" y="1">C0[\u0000\u0008\u000b\u000c\u000e\u001f]NON[\ufffe\uffff]</text></a>')
+      );
+
+      expect(out).toContain('title="T[\ufffd]"');
+      expect(out).toContain('C0[\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd]NON[\ufffd\ufffd]');
+    });
+
+    it('replaces a surrogate without its pair and keeps a pair', () => {
+      const out = sanitizeSvg(window, WRAP('<text x="1" y="1">[\ud800][\udc00][😀]</text>'));
+      expect(out).toContain('[\ufffd][\ufffd][😀]');
+    });
+
+    it('keeps the characters XML allows: tab, line feed, DEL, C1 controls, other noncharacters', () => {
+      const text = 'OK[\t][\n][\u007f][\u0080][\u0085][\u009f][\ufdd0][\ufffd]';
+      expect(sanitizeSvg(window, WRAP(`<text x="1" y="1">${text}</text>`))).toContain(text);
+    });
+  });
+
   it('rejects input whose root is not <svg>', () => {
     expect(() => sanitizeSvg(window, '<html><body>nope</body></html>')).toThrow(
       'did not return an SVG document'

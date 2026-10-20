@@ -19,6 +19,16 @@ describe('measureTextWidth', () => {
     expect(measureTextWidth('i', 14)).toBeLessThan(measureTextWidth('W', 14));
   });
 
+  it('measures a control character the SVG cannot hold as the U+FFFD drawn in its place', () => {
+    // sanitizeSvg replaces it, after the layout made room for it.
+    expect(measureTextWidth('\ufffd', 14)).toBe(14);
+    for (const control of ['\u0000', '\u0001', '\u000b', '\u000c', '\u001f']) {
+      expect(measureTextWidth(control, 14)).toBe(14);
+    }
+    // Tab and the line breaks are left to the engine, and stay as they were.
+    expect(measureTextWidth('\t', 14)).toBe(measureTextWidth('x', 14));
+  });
+
   it('measures the empty string as zero', () => {
     expect(measureTextWidth('', 14)).toBe(0);
   });
