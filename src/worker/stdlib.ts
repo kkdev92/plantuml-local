@@ -23,6 +23,8 @@ import { join } from 'node:path';
  * - `window.PLANTUML_STDLIB_INFO[library]` is read for library metadata.
  * - `window.__pl_script_state[<library>.min.js]` marked as `loaded` stops
  *   the script-injection path from running at all.
+ * - `window.PLANTUML_STDLIB_LOADER` answers for every other script the
+ *   engine asks for: it failed to load (see {@link refuseScript}).
  *
  * Libraries are read from disk lazily, on the first include that needs
  * one, so a diagram without sprites pays nothing.
@@ -103,20 +105,39 @@ export function installStdlib(stdlibDir: string): void {
   globals.PLANTUML_STDLIB_INFO = info;
   globals.PLANTUML_STDLIB_JSON = {};
   globals.__pl_script_state = scriptState;
+  globals.PLANTUML_STDLIB_LOADER = refuseScript;
 }
 
 /**
- * Makes a `<script>` element report failure instead of loading.
+ * The engine's loader for a script it is not given: a library that is
+ * not bundled (`!include <aws/…>`), or `emoji.js`. The engine documents
+ * this callback for hosts that cannot load scripts. Without it, the
+ * engine appends a `<script>` to `document.head` for each include of such
+ * a library, and nothing ever takes one out. The failure is reported on
+ * the next tick, as a script's error event would be, in the words the
+ * engine uses for a script that failed to load. Returning anything but
+ * `false` tells the engine the script is taken care of.
+ */
+function refuseScript(name: string, _loaded: () => void, failed: (message: string) => void): void {
+  setTimeout(() => {
+    failed(`Failed to load ${name}`);
+  }, 0);
+}
+
+/**
+ * Makes a `<script>` element report failure instead of loading, and then
+ * takes it out of the document.
  *
- * A library that is *not* bundled — `!include <aws/…>` — still reaches
- * the script-injection path. happy-dom would either try to fetch the URL
- * or simply never fire an event, and an engine waiting on an `onerror`
- * that never arrives hangs the render until the timeout kills the worker.
+ * The engine loads every script through {@link refuseScript}, and as of
+ * 1.2026.9 creates a `<script>` nowhere else; this covers one it might
+ * create another way. happy-dom would either try to fetch the URL or
+ * simply never fire an event, and an engine waiting on an `onerror` that
+ * never arrives hangs the render until the timeout kills the worker.
  * Reporting the failure immediately turns that into a normal PlantUML
  * error message on the diagram instead.
  */
 export function rejectScriptLoad(element: object): void {
-  const script = element as { onerror?: ((message: string) => void) | null };
+  const script = element as { onerror?: ((message: string) => void) | null; remove?: () => void };
 
   Object.defineProperty(element, 'src', {
     configurable: true,
@@ -126,6 +147,7 @@ export function rejectScriptLoad(element: object): void {
       // handler in between; reject on the next tick so it is in place.
       setTimeout(() => {
         script.onerror?.(`Failed to load ${value}`);
+        script.remove?.();
       }, 0);
     },
   });

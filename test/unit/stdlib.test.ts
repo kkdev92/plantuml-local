@@ -1,6 +1,7 @@
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { Window } from 'happy-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { installStdlib, rejectScriptLoad } from '../../src/worker/stdlib';
@@ -28,6 +29,7 @@ afterEach(() => {
   delete globals.PLANTUML_STDLIB_INFO;
   delete globals.PLANTUML_STDLIB_JSON;
   delete globals.__pl_script_state;
+  delete globals.PLANTUML_STDLIB_LOADER;
   vi.useRealTimers();
 });
 
@@ -70,6 +72,24 @@ describe('installStdlib', () => {
     expect(azure['compute/nosuchthing']).toBeNull();
   });
 
+  it('answers for a script it does not have, on a later tick, so the engine appends none', () => {
+    // `!include <aws/…>` is not bundled. Given no loader, the engine
+    // appends a <script> to document.head for each such include.
+    vi.useFakeTimers();
+    installStdlib(fixtureDir());
+    const loader = globals.PLANTUML_STDLIB_LOADER as (name: string, loaded: () => void, failed: (message: string) => void) => unknown;
+    const loaded = vi.fn();
+    const failed = vi.fn();
+
+    // Anything but false: the engine takes the script as handled.
+    expect(loader('aws.min.js', loaded, failed)).not.toBe(false);
+    expect(failed).not.toHaveBeenCalled();
+
+    vi.runAllTimers();
+    expect(failed).toHaveBeenCalledWith('Failed to load aws.min.js');
+    expect(loaded).not.toHaveBeenCalled();
+  });
+
   it('does not read from disk until a library is actually used', () => {
     // A diagram without sprites should not pay for the 500 KB asset.
     installStdlib(join(tmpdir(), 'plantuml-stdlib-does-not-exist'));
@@ -98,5 +118,20 @@ describe('rejectScriptLoad', () => {
     element.src = 'aws.min.js';
 
     expect(element.src).toBe('');
+  });
+
+  it('takes the element out of the document once it has reported the failure', async () => {
+    const { document } = new Window();
+    const element = document.createElement('script') as unknown as { onerror: ((message: string) => void) | null; src: string };
+    rejectScriptLoad(element);
+    const failed = new Promise<string>((resolve) => {
+      element.onerror = resolve;
+    });
+
+    element.src = 'aws.min.js';
+    document.head.appendChild(element as unknown as Parameters<typeof document.head.appendChild>[0]);
+    await failed;
+
+    expect(document.head.childNodes.length).toBe(0);
   });
 });
