@@ -241,6 +241,43 @@ describe('export (dist worker)', () => {
     expect(existsSync(join(workspace, 'docs/images/remote.svg'))).toBe(false);
   });
 
+  it('refuses a diagram that makes Graphviz crash instead of writing the crash report', async () => {
+    // A worker of its own: once Graphviz has crashed, every later layout in
+    // the worker that drew it fails too (the client replaces such a worker).
+    const own = new Worker(workerPath);
+    const renderOwn = (source: string): Promise<string> =>
+      new Promise((res, rej) => {
+        own.on('message', (message: RenderResponseMessage) => {
+          if (message.id !== 1) return;
+          if (message.error !== undefined) rej(new Error(message.error));
+          else res(message.svg ?? '');
+        });
+        own.postMessage({ id: 1, source, dark: false });
+      });
+    try {
+      const nested = [
+        '@startuml',
+        ...Array.from({ length: 100 }, (_, i) => `package p${String(i)} {`),
+        'class Leaf',
+        ...Array.from({ length: 100 }, () => '}'),
+        '@enduml',
+      ].join('\n');
+      const document = join(workspace, 'docs/crash.md');
+      const ownDeps: ExporterDeps = {
+        ...deps,
+        render: async (source) => ({ svg: await renderOwn(source), failedIncludes: new Map(), dependencies: [] }),
+      };
+
+      const outcome = await exportAll(ownDeps, document, 'images', findPlantUmlBlocks('```plantuml nested\n' + nested + '\n```'));
+
+      expect(outcome?.written).toHaveLength(0);
+      expect(outcome?.failed[0]?.engineError).toEqual({ message: 'For some reason, dot/GraphViz has crashed.', line: null });
+      expect(existsSync(join(workspace, 'docs/images/nested.svg'))).toBe(false);
+    } finally {
+      await own.terminate();
+    }
+  });
+
   it('writes a diagram missing its end line', async () => {
     const document = join(workspace, 'docs/open.md');
     const outcome = await exportAll(deps, document, 'images', findPlantUmlBlocks('```plantuml open\n@startuml\nAlice -> Bob : unterminated\n```'));

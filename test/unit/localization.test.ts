@@ -118,6 +118,7 @@ describe('renderer error messages', () => {
     'Diagram not supported by this release of PlantUML: "@startdot" is not recognized',
     'java.lang.RuntimeException: Unsupported diagram type',
     'Infinite loop?',
+    'For some reason, dot/GraphViz has crashed.',
     'Rendering abandoned after 20 rounds of loading resources; still missing: s20.puml (from C:\\docs\\s19.puml)',
     'cannot include notes.puml',
   ])('explains %s in English and Japanese', (raw) => {

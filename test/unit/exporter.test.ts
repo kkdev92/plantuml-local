@@ -374,6 +374,18 @@ describe('exportOne', () => {
     expect(deps.writeFile).not.toHaveBeenCalled();
   });
 
+  it('refuses the report the engine draws when Graphviz crashed', async () => {
+    const deps = makeDeps({ render: vi.fn(() => Promise.resolve(rendered(engineOutput('graphviz-crash')))) });
+    const [block] = findPlantUmlBlocks('```plantuml nested\n@startuml\npackage p0 {\nclass Leaf\n}\n@enduml\n```');
+
+    const result = await exportOne(deps, DOC, 'images', block!, 'nested');
+
+    expect(result?.error).toBe('engine: For some reason, dot/GraphViz has crashed. @ null');
+    expect(result?.engineError).toEqual({ message: 'For some reason, dot/GraphViz has crashed.', line: null });
+    expect(result?.cause).toBe('source');
+    expect(deps.writeFile).not.toHaveBeenCalled();
+  });
+
   it('still writes a diagram the engine drew with a warning', async () => {
     const deps = makeDeps({ render: vi.fn(() => Promise.resolve(rendered(engineOutput('warning')))) });
     const [block] = findPlantUmlBlocks('```plantuml flow\nx\n```');

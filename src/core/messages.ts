@@ -79,6 +79,8 @@ function translateDetail(detail: string, l10n: MessageLocalizer): string {
       return l10n.t('This diagram type is not supported by the bundled version of PlantUML.');
     case 'Infinite loop?':
       return l10n.t('A !while or !foreach loop repeated too many times and was stopped. Check the loop condition.');
+    case 'For some reason, dot/GraphViz has crashed.':
+      return l10n.t('Graphviz crashed while laying out this diagram. Simplify it, or add !pragma layout smetana to lay it out without Graphviz.');
   }
 
   // The engine loads the files a drawing missed and draws again, at most so

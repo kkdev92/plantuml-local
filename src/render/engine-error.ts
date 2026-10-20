@@ -129,6 +129,28 @@ function loneMessage(svg: string, texts: readonly TextElement[]): EngineError | 
   return LONE_MESSAGES.some((pattern) => pattern.test(message)) ? { message, line: null } : null;
 }
 
+/** The first line of the report the engine draws when it crashes. */
+const CRASH_HEADLINE = 'An error has occurred!';
+
+/**
+ * The line of that report that blames Graphviz (GraphvizCrash upstream),
+ * and the message of the error it is recognised as.
+ */
+export const GRAPHVIZ_CRASHED = 'For some reason, dot/GraphViz has crashed.';
+
+function isGraphvizCrash(texts: readonly TextElement[]): boolean {
+  return texts[0]?.content === CRASH_HEADLINE && texts.some((text) => text.content.trim() === GRAPHVIZ_CRASHED);
+}
+
+/**
+ * The report the engine draws when Graphviz crashed while laying out the
+ * diagram: the headline, a quotation, and the line that blames Graphviz,
+ * with a stack trace. It names no line of the source.
+ */
+function graphvizCrash(texts: readonly TextElement[]): EngineError | null {
+  return isGraphvizCrash(texts) ? { message: GRAPHVIZ_CRASHED, line: null } : null;
+}
+
 /**
  * The error the engine drew instead of a diagram, or null when `svg` is a
  * diagram. Pass the engine's output as it came back, before anything is
@@ -136,14 +158,8 @@ function loneMessage(svg: string, texts: readonly TextElement[]): EngineError | 
  */
 export function recognizeEngineError(svg: string): EngineError | null {
   const texts = textElements(svg);
-  return locatedError(texts) ?? notSupported(texts) ?? loneMessage(svg, texts);
+  return locatedError(texts) ?? notSupported(texts) ?? loneMessage(svg, texts) ?? graphvizCrash(texts);
 }
-
-/** The first line of the report the engine draws when it crashes. */
-const CRASH_HEADLINE = 'An error has occurred!';
-
-/** The line of that report that blames Graphviz (GraphvizCrash upstream). */
-const GRAPHVIZ_CRASHED = 'For some reason, dot/GraphViz has crashed.';
 
 /**
  * Whether `svg` is the report the engine draws when Graphviz crashed while
@@ -151,8 +167,7 @@ const GRAPHVIZ_CRASHED = 'For some reason, dot/GraphViz has crashed.';
  * crash: every later layout in the same worker fails with the same report.
  */
 export function recognizeGraphvizCrash(svg: string): boolean {
-  const texts = textElements(svg);
-  return texts[0]?.content === CRASH_HEADLINE && texts.some((text) => text.content.trim() === GRAPHVIZ_CRASHED);
+  return isGraphvizCrash(textElements(svg));
 }
 
 /**
