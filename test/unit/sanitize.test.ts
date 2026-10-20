@@ -202,6 +202,55 @@ describe('sanitizeSvg', () => {
     });
   });
 
+  describe('names written with a prefix', () => {
+    // What markup is depends on its namespace, not on the prefix that spells
+    // it. A browser that opens the exported file runs these and follows them.
+    const SVG_NS = 'http://www.w3.org/2000/svg';
+    const XHTML_NS = 'http://www.w3.org/1999/xhtml';
+    const XLINK_NS = 'http://www.w3.org/1999/xlink';
+
+    it('removes a script or foreignObject whatever prefix spells it', () => {
+      const out = sanitizeSvg(
+        window,
+        WRAP(
+          `<s:script xmlns:s="${SVG_NS}">alert(1)</s:script><h:script xmlns:h="${XHTML_NS}">alert(2)</h:script>` +
+            `<s:foreignObject xmlns:s="${SVG_NS}"><p>x</p></s:foreignObject><circle r="3"/>`
+        )
+      );
+
+      expect(out).not.toMatch(/script|foreignObject|alert/i);
+      expect(out).toContain('<circle');
+    });
+
+    it('strips a link written with another prefix for xlink, and unwraps its <a>', () => {
+      const out = sanitizeSvg(
+        window,
+        WRAP(
+          `<a xmlns:x="${XLINK_NS}" x:href="https://zq.example/a"><text x="1" y="1">go</text></a>` +
+            `<image xmlns:x="${XLINK_NS}" x:href="https://zq.example/i.png" width="8" height="8"/>`
+        )
+      );
+
+      expect(out).not.toContain('zq.example');
+      expect(out).not.toMatch(/<a\b/);
+      expect(out).toContain('go</text>');
+      expect(out).toContain('<image');
+    });
+
+    it('keeps the prefixed attributes the engine writes, and namespace declarations', () => {
+      const input =
+        `<svg xmlns="${SVG_NS}" xmlns:xlink="${XLINK_NS}" xmlns:onx="urn:x" viewBox="0 0 10 10">` +
+        '<a href="#t" xlink:title="T" xlink:actuate="onRequest"><text xml:space="preserve">t</text></a></svg>';
+      const out = sanitizeSvg(window, input);
+
+      expect(out).toContain('xmlns:onx="urn:x"');
+      expect(out).toContain('href="#t"');
+      expect(out).toContain('xlink:title="T"');
+      expect(out).toContain('xlink:actuate="onRequest"');
+      expect(out).toContain('xml:space="preserve"');
+    });
+  });
+
   describe('characters XML does not allow', () => {
     // One of them makes the whole file unreadable as XML: an exported SVG
     // shows as a broken image, and the PNG export and the .puml preview,

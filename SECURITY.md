@@ -55,6 +55,8 @@ The Markdown preview webview runs none of this extension's code — no `previewS
 - `data-*` attributes, in which the engine records element names — aliases and elements hidden with `hide` among them — and the source line each element came from. Nothing draws them
 - the `<a>` element of a `[[url]]` link that leads out of the diagram, whose `title` repeats the target, which `[[url label]]` does not draw. What the link draws stays
 
+Element and attribute names are judged by the part after their prefix, whatever the prefix and whatever it is bound to, because that is how a browser opening an exported file reads them: with `s` bound to the SVG namespace, `<s:script>` is a script, and with `x` bound to xlink, `x:href` is a link.
+
 The export commands write this same sanitised SVG, which matters most there: an exported file is shared with people who never see the Markdown. What the diagram itself draws — labels, names, notes — is of course still in the file; this removes what the engine adds on top of the drawing, and is not a way to anonymise a diagram.
 
 Error messages and user source shown in error boxes are HTML-escaped.
