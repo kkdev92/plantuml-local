@@ -129,6 +129,29 @@ const happyDomCertStub = {
 };
 
 /**
+ * happy-dom 20.14.6 and later carry the Public Suffix List, about 170 KB
+ * of data, under a licence this extension does not ship (MPL-2.0). Only
+ * its cookie code reads the list, and only for a cookie that names a
+ * Domain; the worker never sets a cookie. Resolve the list to an empty
+ * one, and fail the build if anything else starts importing it.
+ */
+const happyDomPublicSuffixStub = {
+  name: 'happy-dom-public-suffix-stub',
+  setup(build) {
+    build.onResolve({ filter: /[/\\]PublicSuffixList(\.js)?$/ }, (args) => {
+      if (!/[/\\]cookie[/\\]urilities[/\\]CookieDomainUtility\.js$/.test(args.importer)) {
+        return { errors: [{ text: `Unexpected importer of happy-dom's PublicSuffixList: ${args.importer}` }] };
+      }
+      return { path: 'happy-dom-public-suffix-stub', namespace: 'happy-dom-public-suffix-stub' };
+    });
+    build.onLoad({ filter: /.*/, namespace: 'happy-dom-public-suffix-stub' }, () => ({
+      contents: 'export default { exact: new Set(), wildcard: new Set(), exception: new Set() };',
+      loader: 'js',
+    }));
+  },
+};
+
+/**
  * The syntax highlighting grammars are TypeScript modules (src/grammar/)
  * so that shared pieces are composed rather than copied. VS Code reads
  * JSON: the bundled module is evaluated here and each grammar it exports
@@ -164,7 +187,7 @@ const shared = {
   treeShaking: true,
   // vscode is provided by the extension host at runtime.
   external: ['vscode'],
-  plugins: [happyDomCertStub],
+  plugins: [happyDomCertStub, happyDomPublicSuffixStub],
   logLevel: 'info',
 };
 
