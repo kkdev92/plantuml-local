@@ -13,7 +13,7 @@ in [`third-party/`](third-party).
 | [Viz.js](https://github.com/mdaines/viz-js) | 3.24.0 | MIT | [viz-js-LICENSE.txt](third-party/viz-js-LICENSE.txt) |
 | [Graphviz](https://graphviz.org/) | (in Viz.js WebAssembly) | EPL-1.0 | [graphviz-LICENSE.txt](third-party/graphviz-LICENSE.txt) |
 | [Expat](https://libexpat.github.io/) | (in Viz.js WebAssembly) | MIT | [expat-LICENSE.txt](third-party/expat-LICENSE.txt) |
-| [happy-dom](https://github.com/capricorn86/happy-dom) | 20.14.5 | MIT | [happy-dom-LICENSE.txt](third-party/happy-dom-LICENSE.txt) |
+| [happy-dom](https://github.com/capricorn86/happy-dom) | 21.0.3 | MIT | [happy-dom-LICENSE.txt](third-party/happy-dom-LICENSE.txt) |
 | [entities](https://github.com/fb55/entities) | 4.5.0, 7.0.1 | BSD-2-Clause | [entities-LICENSE.txt](third-party/entities-LICENSE.txt) |
 | [whatwg-mimetype](https://github.com/jsdom/whatwg-mimetype) | 3.0.0 | MIT | [whatwg-mimetype-LICENSE.txt](third-party/whatwg-mimetype-LICENSE.txt) |
 | [ws](https://github.com/websockets/ws) | 8.21.3 | MIT | [ws-LICENSE.txt](third-party/ws-LICENSE.txt) |

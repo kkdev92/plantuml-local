@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.1] - 2026-10-20
+
+### Changed
+
+- happy-dom, the DOM the diagram engine runs on inside the render worker,
+  20.14.5 → 21.0.3. The diagrams it draws are the same.
+
 ### Fixed
 
 - After a diagram made Graphviz crash, every diagram Graphviz lays out — class,
@@ -15,8 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   worker was restarted, which happened only after five idle minutes or a
   timeout. The worker is now restarted as soon as Graphviz crashes, and the
   diagrams waiting behind the one that crashed it are drawn by the new one.
-  That diagram still shows the report; *Troubleshooting* in the README says
-  what to do about it.
+  That diagram still shows the report, which is now an error (next item).
 - The diagram that makes Graphviz crash is an error, as a syntax error is. The
   engine's crash report was taken for a diagram: the previews showed it with no
   word of explanation, the Problems panel listed nothing, and exporting the
@@ -809,7 +815,8 @@ First public release.
 - happy-dom's bundled self-signed TLS certificate (unused fetch machinery) is
   stripped from the worker bundle at build time.
 
-[Unreleased]: https://github.com/kkdev92/plantuml-local/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/kkdev92/plantuml-local/compare/v0.14.1...HEAD
+[0.14.1]: https://github.com/kkdev92/plantuml-local/compare/v0.14.0...v0.14.1
 [0.14.0]: https://github.com/kkdev92/plantuml-local/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/kkdev92/plantuml-local/compare/v0.12.1...v0.13.0
 [0.12.1]: https://github.com/kkdev92/plantuml-local/compare/v0.12.0...v0.12.1
