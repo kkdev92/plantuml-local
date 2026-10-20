@@ -49,6 +49,15 @@ function copyEngine() {
   // CommonJS first and reparsing (which logs MODULE_TYPELESS_PACKAGE_JSON).
   // viz-global.cjs is unaffected: the .cjs extension always wins.
   writeFileSync(join(engineDir, 'package.json'), '{ "type": "module" }\n');
+
+  // Copied rather than bundled, so checkLicences does not see these.
+  const core = dirname(require.resolve('@plantuml/core/package.json'));
+  for (const name of readdirSync(engineDir)) {
+    const problem = licenceProblem(core, join(engineDir, name));
+    if (problem !== undefined) {
+      throw new Error(`${problem}, a licence this extension does not ship`);
+    }
+  }
 }
 
 /** Licences a theme may declare in its header to ship; none means PlantUML's own. */
@@ -152,6 +161,74 @@ const happyDomPublicSuffixStub = {
 };
 
 /**
+ * The licences of what this extension ships, as a package declares them
+ * (THIRD_PARTY_NOTICES.md). Graphviz, the EPL-1.0 part, comes inside
+ * @plantuml/core, which declares MIT.
+ */
+const SHIPPED_LICENCES = ['MIT', 'BSD-2-Clause', 'BSD-3-Clause'];
+
+/**
+ * A notice of another licence. A package can bring in a file under
+ * another licence and still declare its own — happy-dom did, with the
+ * Public Suffix List — so what ships is read, not only what is declared.
+ * Notices wrap, so the words may be split by line breaks and comment
+ * markers.
+ */
+const OTHER_LICENCE_NOTICE = new RegExp(
+  [
+    'Mozilla Public License',
+    'GNU (Affero |Lesser |Library )?General Public License',
+    'Apache License',
+    'Creative Commons',
+    'Common Development and Distribution License',
+    'European Union Public Licence',
+    'Server Side Public License',
+    'Business Source License',
+  ]
+    .map((words) => words.replaceAll(' ', String.raw`[\s/*#]+`))
+    .concat(String.raw`SPDX-License-Identifier:\s*(?!(${SHIPPED_LICENCES.join('|')})\b)\S+`)
+    .join('|'),
+  'i'
+);
+
+/**
+ * Why a file of a package must not ship, or undefined: the package
+ * declares a licence this extension does not ship, or the file carries a
+ * notice of one.
+ */
+function licenceProblem(packageDir, file) {
+  const { license } = JSON.parse(readFileSync(join(packageDir, 'package.json'), 'utf8'));
+  if (!SHIPPED_LICENCES.includes(license)) {
+    return `${packageDir} declares ${JSON.stringify(license)}`;
+  }
+  const notice = OTHER_LICENCE_NOTICE.exec(readFileSync(file, 'utf8'))?.[0];
+  return notice === undefined ? undefined : `${file} carries a notice: ${notice.replace(/[\s/*#]+/g, ' ')}`;
+}
+
+/**
+ * Fails a bundle that takes code from node_modules under a licence this
+ * extension does not ship. A file tree-shaken out entirely does not count.
+ */
+const checkLicences = {
+  name: 'check-licences',
+  setup(build) {
+    build.onEnd((result) => {
+      const problems = new Set();
+      for (const { inputs } of Object.values(result.metafile?.outputs ?? {})) {
+        for (const [file, { bytesInOutput }] of Object.entries(inputs)) {
+          const packageDir = /^(?:.*\/)?node_modules\/(?:@[^/]+\/)?[^/]+/.exec(file)?.[0];
+          const problem = packageDir && bytesInOutput > 0 ? licenceProblem(packageDir, file) : undefined;
+          if (problem !== undefined) {
+            problems.add(problem);
+          }
+        }
+      }
+      return { errors: [...problems].map((problem) => ({ text: `${problem}, a licence this extension does not ship` })) };
+    });
+  },
+};
+
+/**
  * The syntax highlighting grammars are TypeScript modules (src/grammar/)
  * so that shared pieces are composed rather than copied. VS Code reads
  * JSON: the bundled module is evaluated here and each grammar it exports
@@ -187,7 +264,9 @@ const shared = {
   treeShaking: true,
   // vscode is provided by the extension host at runtime.
   external: ['vscode'],
-  plugins: [happyDomCertStub, happyDomPublicSuffixStub],
+  plugins: [happyDomCertStub, happyDomPublicSuffixStub, checkLicences],
+  // checkLicences reads the inputs that reach each bundle off the metafile.
+  metafile: true,
   logLevel: 'info',
 };
 

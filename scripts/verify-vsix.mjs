@@ -1,7 +1,7 @@
 /**
  * VSIX verification.
  *
- * Extracts the packaged VSIX and checks four things:
+ * Extracts the packaged VSIX and checks five things:
  *
  * 1. Everything the extension needs at runtime is present
  *    (bundles, engine files, stylesheet, l10n, manifest assets).
@@ -10,7 +10,9 @@
  *    source map, README image or anything else from the repository.
  * 3. Third-party licence notices ship with the bundled code — the MIT and
  *    EPL licences of what we bundle require it.
- * 4. The packaged worker actually renders — a Japanese sequence diagram
+ * 4. The bundles and the engine are no more than 5% over their recorded
+ *    sizes (RECORDED_SIZES).
+ * 5. The packaged worker actually renders — a Japanese sequence diagram
  *    is rendered from the extracted VSIX, which proves the engine files
  *    and the worker bundle fit together without Java or network access;
  *    so are an Azure sprite, a `!theme` and an OpenIconic icon, whose
@@ -20,7 +22,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Worker } from 'node:worker_threads';
@@ -60,6 +62,22 @@ const REQUIRED = [
 
 /** What vsce writes beside extension/, whatever the package holds. */
 const PACKAGING = ['extension.vsixmanifest', '[Content_Types].xml'];
+
+/**
+ * What the bundles and the engine weighed when last recorded. Every user
+ * downloads and loads all of it, and a dependency update can grow it
+ * without anyone deciding to, so a file more than 5% over its recorded
+ * size fails (check 4). When the growth is meant, record the new size in
+ * the same pull request.
+ */
+const RECORDED_SIZES = {
+  'extension/dist/extension.js': 342_218,
+  'extension/dist/worker.js': 889_547,
+  'extension/dist/engine/plantuml.js': 3_359_666,
+  'extension/dist/engine/viz-global.cjs': 1_445_436,
+  'extension/dist/engine/themes.cjs': 316_864,
+  'extension/dist/engine/openiconic.cjs': 51_251,
+};
 
 /** The licence texts in third-party/, each of which ships (check 3). */
 function licenceTexts() {
@@ -160,6 +178,21 @@ function checkThirdPartyNotices() {
     }
   }
   ok(`third-party licence texts ship and are referenced (${String(licences.length)} files)`);
+}
+
+function checkSizes() {
+  for (const [file, recorded] of Object.entries(RECORDED_SIZES)) {
+    const size = statSync(join(extractDir, file), { throwIfNoEntry: false })?.size;
+    if (size === undefined) {
+      continue; // reported by checkFiles
+    }
+    const change = `${size > recorded ? '+' : ''}${(((size - recorded) / recorded) * 100).toFixed(1)}%`;
+    if (size > recorded * 1.05) {
+      fail(`${file} is ${String(size)} bytes, ${change} over the ${String(recorded)} recorded`);
+    } else {
+      ok(`size: ${file} ${String(size)} bytes (${change} against the ${String(recorded)} recorded)`);
+    }
+  }
 }
 
 /**
@@ -302,6 +335,7 @@ console.log(`Verifying ${vsixPath}`);
 extract(vsixPath);
 checkFiles();
 checkThirdPartyNotices();
+checkSizes();
 checkNoOwnSvgImages();
 checkNoSecrets();
 checkNoExternalRenderers();
