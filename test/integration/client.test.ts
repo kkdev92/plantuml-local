@@ -23,6 +23,7 @@ let client: RendererClient | null = null;
 afterEach(() => {
   client?.dispose();
   client = null;
+  vi.useRealTimers();
 });
 
 describe('RendererClient', () => {
@@ -46,12 +47,18 @@ describe('RendererClient', () => {
   });
 
   it('sends the renders queued behind a hung one to a fresh worker', async () => {
+    // Only the client's time limits are faked. They then expire when the
+    // test moves the clock, never while the new worker is still starting,
+    // which on a busy machine can take longer than the limit itself.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     client = new RendererClient(wedgeWorkerPath, log, 250);
 
     const hung = client.render('@startuml\nHANG\n@enduml', false);
     const queued = client.render('@startuml\nA -> B\n@enduml', false);
 
-    await expect(hung).rejects.toThrow('Rendering timed out');
+    const timedOut = expect(hung).rejects.toThrow('Rendering timed out');
+    await vi.advanceTimersByTimeAsync(250);
+    await timedOut;
     // It never started, so it is not failed with the hung one: the new
     // worker draws it, within a time limit of its own.
     await expect(queued).resolves.toBe('<svg>@startuml\nA -> B\n@enduml</svg>');

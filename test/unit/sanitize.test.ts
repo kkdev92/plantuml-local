@@ -251,6 +251,59 @@ describe('sanitizeSvg', () => {
     });
   });
 
+  describe('markup and CSS that load or navigate without a link attribute', () => {
+    // Opened as a file, an SVG fetches what its CSS names and follows a
+    // meta refresh. The engine writes none of these.
+    const XHTML = 'http://www.w3.org/1999/xhtml';
+
+    it('removes style, meta, link and base, whatever prefix spells them', () => {
+      const out = sanitizeSvg(
+        window,
+        WRAP(
+          '<style>@import url(https://zq.example/a.css);</style>' +
+            `<h:meta xmlns:h="${XHTML}" http-equiv="refresh" content="0;url=https://zq.example/r"/>` +
+            `<h:link xmlns:h="${XHTML}" rel="stylesheet" href="https://zq.example/l.css"/>` +
+            `<h:base xmlns:h="${XHTML}" href="https://zq.example/"/>` +
+            `<s:style xmlns:s="http://www.w3.org/2000/svg">circle{fill:url(https://zq.example/s.svg#g)}</s:style>` +
+            '<circle r="3"/>'
+        )
+      );
+
+      expect(out).not.toMatch(/zq\.example|<([\w-]+:)?(style|meta|link|base)\b/);
+      expect(out).toContain('<circle');
+    });
+
+    it('drops CSS that calls a function other than url(#…), however it is written', () => {
+      const out = sanitizeSvg(
+        window,
+        WRAP(
+          '<rect width="1" height="1" style="fill:url(https://zq.example/1.svg#g)"/>' +
+            '<rect width="2" height="2" fill="url(https://zq.example/2.svg#g)"/>' +
+            '<rect width="3" height="3" style="fill:u\\72 l(https://zq.example/3.svg#g)"/>' +
+            '<rect width="4" height="4" style="background-image:image-set(\'https://zq.example/4.png\' 1x)"/>' +
+            '<rect width="5" height="5" cursor="url(https://zq.example/5.cur), auto"/>' +
+            '<rect width="6" height="6" mask="URL(https://zq.example/6.svg#m)"/>'
+        )
+      );
+
+      expect(out).not.toContain('zq.example');
+      expect(out.match(/<rect\b/g)).toHaveLength(6);
+    });
+
+    it('keeps the CSS the engine writes, references within the document and other parentheses', () => {
+      const kept = [
+        'style="white-space: pre"',
+        'style="background-color:#1B1B1B;"',
+        'fill="url(#gradient)"',
+        'filter="url(\'#shadow\')"',
+        'transform="translate(1,2)"',
+      ];
+      const out = sanitizeSvg(window, WRAP(kept.map((attribute) => `<g ${attribute}><text x="1" y="1">kept</text></g>`).join('')));
+
+      for (const attribute of kept) expect(out).toContain(attribute);
+    });
+  });
+
   describe('characters XML does not allow', () => {
     // One of them makes the whole file unreadable as XML: an exported SVG
     // shows as a broken image, and the PNG export and the .puml preview,

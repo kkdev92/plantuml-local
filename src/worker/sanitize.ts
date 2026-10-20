@@ -13,6 +13,9 @@ import type { Window } from 'happy-dom';
  * - link attributes (`href`, `xlink:href`, `src`) unless they are
  *   fragment references (`#…`) within the document, or an inline sprite
  *   PNG (see {@link isSpritePng})
+ * - markup that loads or navigates with no link attribute: `<style>`,
+ *   `<meta>` (a refresh), `<link>`, `<base>`, and CSS in an attribute that
+ *   calls any function but `url(#…)` (see {@link reachesOutside})
  *
  * whatever prefix their names are written with (see {@link localPart}).
  *
@@ -41,8 +44,34 @@ import type { Window } from 'happy-dom';
  */
 
 /** Local names, the part after any prefix (see {@link localPart}). */
-const DANGEROUS_ELEMENTS = new Set(['script', 'foreignobject', 'iframe', 'embed', 'object']);
+const DANGEROUS_ELEMENTS = new Set([
+  'script', 'foreignobject', 'iframe', 'embed', 'object',
+  'style', 'meta', 'link', 'base',
+]);
 const LINK_ATTRIBUTES = new Set(['href', 'src']);
+
+/**
+ * Attributes a browser reads as CSS that can take a URL: `style`, and the
+ * presentation attributes that accept one.
+ */
+const CSS_ATTRIBUTES = new Set([
+  'style', 'fill', 'stroke', 'filter', 'clip-path', 'mask',
+  'marker-start', 'marker-mid', 'marker-end', 'cursor',
+]);
+
+/** A reference to an element of the document itself: `url(#id)`. */
+const FRAGMENT_URL = /url\(\s*(['"]?)#[^'"()\\\s]*\1\s*\)/gi;
+
+/**
+ * Whether a CSS value can reach outside the document. CSS loads a resource
+ * only through a function — `url()`, `image-set()` and the like — and a
+ * function needs a `(` as written: an escaped one is part of a name. So a
+ * value with no `(` but those of fragment references reaches nothing,
+ * however the rest of it is escaped.
+ */
+function reachesOutside(value: string): boolean {
+  return value.replace(FRAGMENT_URL, '').includes('(');
+}
 
 /**
  * The part of an element or attribute name after its prefix, in lower
@@ -149,6 +178,8 @@ function stripAttributes(element: ElementLike, state: StripState): void {
       !attribute.value.startsWith('#') &&
       !isSpritePng(element, local, attribute.value)
     ) {
+      element.removeAttribute(attribute.name);
+    } else if (CSS_ATTRIBUTES.has(local) && reachesOutside(attribute.value)) {
       element.removeAttribute(attribute.name);
     } else if (name.startsWith('xlink:')) {
       state.xlink = true;
