@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- After a diagram made Graphviz crash, every diagram Graphviz lays out — class,
+  use case, component, deployment, state, object and old-style activity
+  diagrams — showed the same crash report, in every document, until the render
+  worker was restarted, which happened only after five idle minutes or a
+  timeout. The worker is now restarted as soon as Graphviz crashes, and the
+  diagrams waiting behind the one that crashed it are drawn by the new one.
+  That diagram still shows the report; *Troubleshooting* in the README says
+  what to do about it.
+
 ## [0.14.0] - 2026-10-19
 
 ### Added

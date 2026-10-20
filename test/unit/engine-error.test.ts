@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import { addBackground } from '../../src/export/exporter';
-import { recognizeEngineError, recognizeEngineWarnings } from '../../src/render/engine-error';
+import { recognizeEngineError, recognizeEngineWarnings, recognizeGraphvizCrash } from '../../src/render/engine-error';
 
 /**
  * The fixtures are what the bundled engine returned through the render
@@ -154,5 +154,24 @@ describe('recognizeEngineWarnings', () => {
   it('finds none in a diagram without the banner, or in an error', () => {
     expect(recognizeEngineWarnings(fixture('sequence'))).toEqual([]);
     expect(recognizeEngineWarnings(fixture('syntax-error'))).toEqual([]);
+  });
+});
+
+describe('recognizeGraphvizCrash', () => {
+  it('recognises the report the engine draws when Graphviz crashed', () => {
+    // 100 nested packages, captured with @plantuml/core 1.2026.9: Graphviz
+    // runs out of bounds of its memory laying them out.
+    expect(recognizeGraphvizCrash(fixture('graphviz-crash'))).toBe(true);
+  });
+
+  it('needs the report\'s headline, not just the sentence about Graphviz', () => {
+    const quoted = fixture('graphviz-crash').replace('An error has occurred!', 'Release notes');
+    expect(recognizeGraphvizCrash(quoted)).toBe(false);
+  });
+
+  it('leaves diagrams, warnings and the other errors alone', () => {
+    for (const name of ['sequence', 'warning', 'syntax-error', 'not-supported', 'json-error']) {
+      expect(recognizeGraphvizCrash(fixture(name)), name).toBe(false);
+    }
   });
 });

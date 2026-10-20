@@ -165,6 +165,7 @@
   "Could not check the diagrams in {0}: {1}": "{0} 内の図をチェックできませんでした: {1}",
   "Stopping the render worker after {0} ms of inactivity.": "描画要求が {0} ミリ秒間なかったため、描画用ワーカーを終了します。",
   "Rendering timed out after {0} ms. Restarting the render worker.": "描画が {0} ミリ秒以内に完了しなかったため、描画用ワーカーを再起動します。",
+  "Graphviz crashed while laying out a diagram. Restarting the render worker.": "図のレイアウト中に Graphviz がクラッシュしたため、描画用ワーカーを再起動します。",
   "Starting the render worker.": "描画用ワーカーを起動します。",
   "Render worker stopped (exit code: {0}).": "描画用ワーカーが終了しました（終了コード: {0}）。"
 }
