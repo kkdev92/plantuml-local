@@ -1123,6 +1123,26 @@ describe('export (dist)', () => {
       expect(vscodeStub._test.writtenFiles.has('file:///c/puml/images/orders.svg')).toBe(false);
     });
 
+    it('points a refused export to the output, as the Problems panel lists no .puml file', async () => {
+      vscodeStub._test.setActiveEditor(
+        pumlEditor('file:///c/pumlbroken/broken.puml', '@startuml\nthis is not valid ;;; [[[\n@enduml\n', 1)
+      );
+      const calls = vscodeStub._test.commandCalls.length;
+
+      vscodeStub._test.notificationReply = 'Show Output';
+      try {
+        await vscodeStub._test.registeredCommands.get('plantumlLocal.exportSvg')?.();
+      } finally {
+        vscodeStub._test.notificationReply = null;
+      }
+
+      expect(vscodeStub._test.notifications.error.at(-1)).toMatch(/^Could not export the diagram: PlantUML error on line 2: /);
+      const called = vscodeStub._test.commandCalls.slice(calls).map((call) => call.id);
+      expect(called.some((id) => id.startsWith('workbench.action.output.show.'))).toBe(true);
+      expect(called).not.toContain('workbench.actions.view.problems');
+      expect(vscodeStub._test.writtenFiles.has('file:///c/pumlbroken/images/broken.svg')).toBe(false);
+    });
+
     it('export names the only diagram of a file after the file', async () => {
       vscodeStub._test.setActiveEditor(
         pumlEditor('file:///c/puml/sequence.puml', '@startuml\nAlice -> Bob : single\n@enduml\n', 5)
