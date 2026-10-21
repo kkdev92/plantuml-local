@@ -2,7 +2,7 @@
   "name": "plantuml-local",
   "displayName": "PlantUML Local",
   "description": "%extension.description%",
-  "version": "0.14.1",
+  "version": "0.14.2",
   "publisher": "kkdev92",
   "author": {
     "name": "kkdev92",
@@ -365,7 +365,7 @@
     "@kkdev92/vscode-ext-kit": "^7.1.0",
     "@plantuml/core": "1.2026.9",
     "happy-dom": "^21.0.3",
-    "markdown-it": "^14.3.2"
+    "markdown-it": "^14.3.3"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.0",
