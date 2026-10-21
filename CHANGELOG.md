@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.2] - 2026-10-21
+
+### Security
+
+- **A crafted Markdown document no longer stalls the extension host for
+  seconds.** The extension reads Markdown documents with markdown-it to find
+  their diagram blocks: for the Problems panel as soon as a document opens and
+  again after each edit, and for export, completion and the quick fixes.
+  markdown-it 14.3.2 took time that grows with the square of the input on two
+  kinds of unfinished text — a link reference definition whose label or title
+  is never closed ([GHSA-gfr2-rv44-r23c](https://github.com/advisories/GHSA-gfr2-rv44-r23c)),
+  and, with HTML enabled as in VS Code's preview, comments, processing
+  instructions, declarations and CDATA sections left open inside a paragraph
+  ([GHSA-vfgh-jcmw-g37q](https://github.com/advisories/GHSA-vfgh-jcmw-g37q)).
+  The bundled markdown-it moves to 14.3.3, which fixes both.
+
 ## [0.14.1] - 2026-10-20
 
 ### Changed
@@ -815,7 +831,8 @@ First public release.
 - happy-dom's bundled self-signed TLS certificate (unused fetch machinery) is
   stripped from the worker bundle at build time.
 
-[Unreleased]: https://github.com/kkdev92/plantuml-local/compare/v0.14.1...HEAD
+[Unreleased]: https://github.com/kkdev92/plantuml-local/compare/v0.14.2...HEAD
+[0.14.2]: https://github.com/kkdev92/plantuml-local/compare/v0.14.1...v0.14.2
 [0.14.1]: https://github.com/kkdev92/plantuml-local/compare/v0.14.0...v0.14.1
 [0.14.0]: https://github.com/kkdev92/plantuml-local/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/kkdev92/plantuml-local/compare/v0.12.1...v0.13.0
