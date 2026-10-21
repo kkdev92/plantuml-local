@@ -68,3 +68,17 @@ updates:
     directory: /
     schedule:
       interval: weekly
+
+  # The base image of .oss-scanner/Dockerfile is pinned by digest for the same
+  # reason, and kept current the same way: Dependabot moves the digest when the
+  # tag is rebuilt.
+  - package-ecosystem: docker
+    directory: /.oss-scanner
+    schedule:
+      interval: weekly
+    ignore:
+      # The image's Node.js major follows the one CI tests on
+      # (.github/workflows/ci.yml); move both together, by hand.
+      - dependency-name: node
+        update-types:
+          - version-update:semver-major

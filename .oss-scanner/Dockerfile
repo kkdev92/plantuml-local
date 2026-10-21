@@ -1,7 +1,10 @@
 # Build environment for Anthropic OSS Scanner.
 # The scanner builds this file with the repository root as its context.
 # Dependencies and generated bundles remain available when scanning goes offline.
-FROM node:24-bookworm
+# The base image is pinned by digest (the multi-platform index), as the actions
+# in .github/workflows are pinned by commit SHA; Dependabot moves the digest
+# when the tag is rebuilt.
+FROM node:24-bookworm@sha256:925de64a85319052d6971ae81ef2417da956e8a3a2c4a0fac732327970f017f5
 
 ENV CI=true \
     npm_config_audit=false \
