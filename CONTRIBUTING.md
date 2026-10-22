@@ -129,7 +129,8 @@ the previews or exporting there, in WSL and in a Dev Container:
 5. Check that **PlantUML Local: Open Diagram Preview to the Side** draws the
    `.puml` file, and that **PlantUML Local: Export Diagram as SVG** and
    **PlantUML Local: Export Diagram as PNG** write their files into the
-   folder's `images` directory.
+   folder's `images` directory, and that the preview's Copy button puts the
+   diagram on your own computer's clipboard.
 
 The VSIX stays installed in that WSL distribution or container until it is
 uninstalled there.

@@ -269,6 +269,98 @@
     vscode.postMessage({ type: 'exportPng' });
   });
 
+  // Copy puts on the clipboard the PNG the PNG button would write. The
+  // extension has no clipboard for images, so the page writes it: the write
+  // starts at once, while the page has the focus, and takes the PNG once the
+  // extension has drawn the diagram for it.
+  const copyButton = document.getElementById('copy-png');
+  const copyText = copyButton.dataset;
+  /** How to answer each copy under way, by its number. */
+  const copies = new Map();
+  let copied = 0;
+  /** What the extension last said in the status line, which a copy's word stands over for a while. */
+  let said = { text: '', error: false };
+  let restoring = undefined;
+
+  function say(text, error, fade) {
+    clearTimeout(restoring);
+    status.textContent = text;
+    status.classList.toggle('error', error);
+    if (fade) {
+      restoring = setTimeout(() => {
+        if (status.textContent === text) {
+          status.textContent = said.text;
+          status.classList.toggle('error', said.error);
+        }
+      }, 4000);
+    }
+  }
+
+  /** Why a copy was refused, in words fit to show: the extension's, or the page's own. */
+  class Refusal extends Error {}
+
+  // Anything else, such as the clipboard declining the image, is told in the
+  // panel's words rather than the browser's.
+  const fail = (error) => say(copyText.failed.replace('{0}', error instanceof Refusal ? error.message : copyText.unwritten), true, false);
+
+  /** Draws the PNG of a copy, as media/png/png.js draws an exported one. */
+  async function toPng(drawing) {
+    const url = URL.createObjectURL(new Blob([drawing.svg], { type: 'image/svg+xml' }));
+    try {
+      const picture = new Image();
+      picture.src = url;
+      await picture.decode();
+      const surface = document.createElement('canvas');
+      surface.width = drawing.width;
+      surface.height = drawing.height;
+      const context = surface.getContext('2d');
+      context.fillStyle = drawing.background;
+      context.fillRect(0, 0, surface.width, surface.height);
+      context.drawImage(picture, 0, 0, surface.width, surface.height);
+      const png = await new Promise((resolve) => surface.toBlob(resolve, 'image/png'));
+      // A canvas past what the browser can draw stops drawing without saying
+      // so: the size in the PNG's header is checked, not assumed.
+      const header = png === null ? null : new DataView(await png.slice(0, 24).arrayBuffer());
+      if (header === null || header.byteLength < 24 || header.getUint32(16) !== drawing.width || header.getUint32(20) !== drawing.height) {
+        throw new Refusal(copyText.unmade);
+      }
+      return png;
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  }
+
+  function copy() {
+    const id = ++copied;
+    const png = new Promise((resolve, reject) => copies.set(id, { resolve, reject })).then(toPng);
+    let written;
+    try {
+      written = navigator.clipboard.write([new ClipboardItem({ 'image/png': png })]);
+    } catch (error) {
+      copies.delete(id);
+      fail(error);
+      return;
+    }
+    vscode.postMessage({ type: 'copyPng', id });
+    say(copyText.copying, false, false);
+    // One reason is given: the drawing's, or else the clipboard's.
+    written.catch(() => undefined);
+    png.then(() => written).then(() => say(copyText.copied, false, true), fail);
+  }
+
+  copyButton.addEventListener('click', copy);
+
+  // Ctrl+C (Cmd+C on macOS) and Copy in the panel's context menu reach the
+  // page as its copy command: they copy the diagram too, unless text is
+  // selected.
+  document.addEventListener('copy', (event) => {
+    if (size === null || document.getSelection()?.isCollapsed === false) {
+      return;
+    }
+    event.preventDefault();
+    copy();
+  });
+
   window.addEventListener('message', (event) => {
     // VS Code's frame around the page posts the extension's messages with
     // the page's own origin; anything else is not from the extension.
@@ -319,7 +411,17 @@
           }
           apply();
         });
+    } else if (message.type === 'copy' || message.type === 'copyFailed') {
+      const waiting = copies.get(message.id);
+      copies.delete(message.id);
+      if (waiting !== undefined && message.type === 'copy') {
+        waiting.resolve(message);
+      } else if (waiting !== undefined) {
+        waiting.reject(new Refusal(message.message));
+      }
     } else if (message.type === 'status') {
+      clearTimeout(restoring);
+      said = { text: message.text, error: message.error === true };
       status.textContent = message.text;
       status.classList.toggle('error', message.error === true);
       if (message.clear === true) {

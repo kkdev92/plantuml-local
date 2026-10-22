@@ -56,7 +56,9 @@ import {
   drawDocument,
   exportAll,
   exportOne,
+  preparePng,
   writeDocuments,
+  type DrawingDeps,
   type DrawnDocument,
   type ExportFormat,
   type ExporterDeps,
@@ -710,13 +712,13 @@ async function askForName(context: OperationContext, format: ExportFormat): Prom
 
 /** The reason given for a diagram the engine drew as an error. */
 function engineErrorMessage(
-  context: OperationContext,
+  l10n: L10n,
   message: string,
   line: number | null
 ): string {
   return line === null
-    ? context.l10n.t('PlantUML error: {0}', errorMessage(message, context.l10n))
-    : context.l10n.t('PlantUML error on line {0}: {1}', String(line), errorMessage(message, context.l10n));
+    ? l10n.t('PlantUML error: {0}', errorMessage(message, l10n))
+    : l10n.t('PlantUML error on line {0}: {1}', String(line), errorMessage(message, l10n));
 }
 
 /**
@@ -735,7 +737,7 @@ function relocateEngineErrors(
       return failure;
     }
     const line = lineAfterEdits(edits, blamed.line);
-    return { ...failure, error: engineErrorMessage(context, blamed.message, line) };
+    return { ...failure, error: engineErrorMessage(context.l10n, blamed.message, line) };
   });
   return { ...outcome, failed };
 }
@@ -868,61 +870,52 @@ async function drawPng(
 }
 
 /**
- * Resolves a path against the document's own folder and writes through
- * `vscode.workspace.fs`, so exporting works on remote and virtual file
- * systems rather than only on local disk.
+ * What drawing a diagram of `document` as it is exported needs, with
+ * `render` to draw it: the palette and PNG scale set for the document, and
+ * the reasons given for a diagram that cannot be drawn.
  */
-function exporterDeps(
-  context: OperationContext,
-  renderer: RendererClient,
+function drawingDeps(
+  l10n: L10n,
+  render: DrawingDeps['render'],
   palettes: ThemePalettes,
   settings: SettingsReader,
-  exportRecords: TypedStorage<ExportRecords>,
-  workspace: WorkspaceService,
   document: vscode.Uri
-): ExporterDeps {
-  const draw = drawWith(renderer, settings, context.l10n);
+): DrawingDeps {
   return {
-    errorMessage: (message) => errorMessage(message, context.l10n),
-    render: (source, dark) => draw(source, dark, document.toString()),
+    errorMessage: (message) => errorMessage(message, l10n),
+    render,
     resolvePalette: (source, dark, included) => palettes.resolve(source, dark, included),
-    remoteReferenceMessage: context.l10n.t(
+    remoteReferenceMessage: l10n.t(
       'Loading files or themes from URLs (!include, !theme) is not supported. Use files in your workspace or bundled libraries and themes.'
     ),
-    emojiUnavailableMessage: context.l10n.t(
+    emojiUnavailableMessage: l10n.t(
       'Emoji syntax (<:name:>) is not supported because emoji images are not included with this extension.'
     ),
-    invalidNameMessage: context.l10n.t(
-      'Use 1–128 letters (A–Z, a–z), digits, hyphens, or underscores. Reserved file names such as CON are not allowed.'
-    ),
-    severalDiagramsMessage: context.l10n.t(
+    severalDiagramsMessage: l10n.t(
       'Each PlantUML code block can contain only one diagram. Move each diagram into a separate code block.'
     ),
-    pagesMessage: context.l10n.t(
+    pagesMessage: l10n.t(
       'Multi-page diagrams (newpage) are not supported. Split the pages into separate diagrams.'
     ),
-    engineErrorMessage: (message, line) => engineErrorMessage(context, message, line),
+    engineErrorMessage: (message, line) => engineErrorMessage(l10n, message, line),
     pngTooLargeMessage: (width, height, fits) =>
       fits === null
-        ? context.l10n.t(
+        ? l10n.t(
             'The PNG would be {0} × {1} pixels even at the smallest scale, over the size limit for PNG images. Export as SVG instead.',
             String(width),
             String(height)
           )
-        : context.l10n.t(
+        : l10n.t(
             'The PNG would be {0} × {1} pixels, over the size limit for PNG images. Set the PNG scale to {2} in Settings, or export as SVG.',
             String(width),
             String(height),
             String(fits)
           ),
-    pngFailedMessage: context.l10n.t('The PNG was not created correctly. Try exporting as SVG.'),
-    sameFileMessage: context.l10n.t('Multiple diagrams would be saved to the same file. Give each diagram a unique name or use separate export folders.'),
-    changedMessage: context.l10n.t('The image file changed during export, so it was not overwritten. Check it, then export again.'),
+    pngFailedMessage: l10n.t('The PNG was not created correctly. Try exporting as SVG.'),
     pngScale: (): number => {
       const scale = settings.read({ resource: document }).values[CONFIG.EXPORT_PNG_SCALE];
       return PNG_SCALES.includes(scale as 1 | 2 | 4) ? Number(scale) : 2;
     },
-    toPng: (svg, width, height, background) => drawPng(context.l10n, svg, width, height, background),
     // Exports default to the light palette regardless of the editor theme:
     // the files face hosts like GitHub, whose background this extension
     // does not control, and a dark diagram on a white page reads as broken.
@@ -940,6 +933,32 @@ function exporterDeps(
       }
       return false;
     },
+  };
+}
+
+/**
+ * Resolves a path against the document's own folder and writes through
+ * `vscode.workspace.fs`, so exporting works on remote and virtual file
+ * systems rather than only on local disk.
+ */
+function exporterDeps(
+  context: OperationContext,
+  renderer: RendererClient,
+  palettes: ThemePalettes,
+  settings: SettingsReader,
+  exportRecords: TypedStorage<ExportRecords>,
+  workspace: WorkspaceService,
+  document: vscode.Uri
+): ExporterDeps {
+  const draw = drawWith(renderer, settings, context.l10n);
+  return {
+    ...drawingDeps(context.l10n, (source, dark) => draw(source, dark, document.toString()), palettes, settings, document),
+    invalidNameMessage: context.l10n.t(
+      'Use 1–128 letters (A–Z, a–z), digits, hyphens, or underscores. Reserved file names such as CON are not allowed.'
+    ),
+    sameFileMessage: context.l10n.t('Multiple diagrams would be saved to the same file. Give each diagram a unique name or use separate export folders.'),
+    changedMessage: context.l10n.t('The image file changed during export, so it was not overwritten. Check it, then export again.'),
+    toPng: (svg, width, height, background) => drawPng(context.l10n, svg, width, height, background),
     resolve: (documentPath, relative) =>
       vscode.Uri.joinPath(vscode.Uri.parse(documentPath), '..', relative).toString(),
     readExisting: async (path): Promise<Uint8Array | null> => {
@@ -1404,6 +1423,13 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         exportPng: async (uri, line): Promise<void> => {
           await commands.invoke(ExportPng, { uri, line });
         },
+        // As the PNG button exports it, but with the previews' renders: the
+        // diagram shown is often drawn in that palette already.
+        copyPng: async (uri, diagram) => {
+          const drawing = drawingDeps(l10n, (source, dark) => renders(source, dark, uri), palettes, settings, vscode.Uri.parse(uri));
+          const source = await preparePng(drawing, diagram);
+          return 'svg' in source ? source : { error: source.error ?? drawing.pngFailedMessage };
+        },
         labels: {
           errorMessage: (message) => errorMessage(message, l10n),
           diagram: (position) => l10n.t('Diagram {0}', String(position)),
@@ -1441,6 +1467,16 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         fit: l10n.t('Fit to Window'),
         actualSize: l10n.t('Actual Size'),
         exportPng: l10n.t('Export Diagram as PNG'),
+        copy: {
+          text: l10n.t('Copy'),
+          label: l10n.t('Copy Diagram as PNG'),
+          copying: l10n.t('Copying the diagram…'),
+          copied: l10n.t('Copied the diagram to the clipboard.'),
+          // The page puts the reason in place of {0}.
+          failed: l10n.t('Could not copy the diagram: {0}', '{0}'),
+          unmade: l10n.t('The PNG was not created correctly. Try exporting as SVG.'),
+          unwritten: l10n.t('The clipboard did not take the image. Try again, or save it with the PNG button.'),
+        },
       };
 
       /** Takes over `panel` for `document`: its options, its page and its messages. */
