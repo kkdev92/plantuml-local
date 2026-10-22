@@ -39,13 +39,23 @@ select {
 	color: var(--vscode-errorForeground);
 }
 
-/* A narrow panel wraps the toolbar rather than breaking a button's label. */
-#tools {
+/* The zoom and the actions keep to the right. A narrow panel wraps them,
+   PNG and Copy together, rather than breaking a button's label. */
+#bar {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.25rem 0.75rem;
+	align-items: center;
+	justify-content: flex-end;
+	margin-left: auto;
+}
+
+#tools,
+#actions {
 	display: flex;
 	flex-wrap: wrap;
 	gap: 0.25rem;
 	align-items: center;
-	margin-left: auto;
 }
 
 #tools button,
