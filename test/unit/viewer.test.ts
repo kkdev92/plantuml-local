@@ -22,7 +22,7 @@ function makeDeps(
     /** The SVG, or the SVG with the includes that failed. */
     render?: (source: string, dark: boolean, document: string) => Promise<string | DiagramRender>;
   }
-): ViewerDeps & { render: ReturnType<typeof vi.fn>; exportPng: ReturnType<typeof vi.fn> } {
+): ViewerDeps & { render: ReturnType<typeof vi.fn>; exportPng: ReturnType<typeof vi.fn>; copyPng: ReturnType<typeof vi.fn> } {
   const inner = overrides?.render ?? ((source: string) => Promise.resolve(`<svg>${source}</svg>`));
   const render = vi.fn((source: string, dark: boolean, document: string) =>
     inner(source, dark, document).then((value): DiagramRender =>
@@ -33,6 +33,9 @@ function makeDeps(
     resolvePalette: (_source: string, dark: boolean) => Promise.resolve(dark),
     isDark: () => false,
     exportPng: vi.fn(() => Promise.resolve()),
+    copyPng: vi.fn((_uri: string, diagram: { source: string }) =>
+      Promise.resolve({ svg: `<svg>${diagram.source}</svg>`, width: 20, height: 10, background: '#FFFFFF' })
+    ),
     labels: {
       errorMessage: (message) => message,
       diagram: (position) => `Diagram ${String(position)}`,
@@ -49,7 +52,7 @@ function makeDeps(
     },
     ...overrides,
     render,
-  } as ViewerDeps & { render: ReturnType<typeof vi.fn>; exportPng: ReturnType<typeof vi.fn> };
+  } as ViewerDeps & { render: ReturnType<typeof vi.fn>; exportPng: ReturnType<typeof vi.fn>; copyPng: ReturnType<typeof vi.fn> };
 }
 
 const FLOWS = [
@@ -66,10 +69,11 @@ const of = (sent: unknown[], type: string): unknown[] =>
   sent.filter((message) => (message as { type: string }).type === type);
 
 describe('parseRequest', () => {
-  it('accepts a ready page, a choice among the diagrams and the PNG button', () => {
+  it('accepts a ready page, a choice among the diagrams, and the PNG and Copy buttons', () => {
     expect(parseRequest({ type: 'ready' }, 2)).toEqual({ type: 'ready' });
     expect(parseRequest({ type: 'exportPng' }, 2)).toEqual({ type: 'exportPng' });
     expect(parseRequest({ type: 'select', index: 1 }, 2)).toEqual({ type: 'select', index: 1 });
+    expect(parseRequest({ type: 'copyPng', id: 3 }, 2)).toEqual({ type: 'copyPng', id: 3 });
   });
 
   it('ignores anything else the page sends', () => {
@@ -80,6 +84,11 @@ describe('parseRequest', () => {
       { type: 'select', index: -1 },
       { type: 'select', index: 0.5 },
       { type: 'select', index: '0' },
+      { type: 'copyPng' },
+      { type: 'copyPng', id: 0 },
+      { type: 'copyPng', id: 1.5 },
+      { type: 'copyPng', id: '1' },
+      { type: 'copyPng', id: Number.MAX_SAFE_INTEGER + 1 },
       { type: 'open', path: '/etc/passwd' },
     ]) {
       expect(parseRequest(message, 2), JSON.stringify(message)).toBeNull();
@@ -155,6 +164,52 @@ describe('DiagramViewer', () => {
 
     await viewer.receive({ type: 'exportPng' }, FLOWS.replace('(id=orders)', '(id=renamed)'));
     expect(deps.exportPng).toHaveBeenCalledTimes(2);
+  });
+
+  it('answers a copy with what to draw of the diagram shown, under the number the page gave it', async () => {
+    const panel = makePanel();
+    const deps = makeDeps();
+    const viewer = new DiagramViewer(panel, deps, 'flows', 'file:///flows.puml');
+    viewer.select(FLOWS, 0);
+
+    await viewer.receive({ type: 'copyPng', id: 7 }, FLOWS);
+
+    expect(deps.copyPng).toHaveBeenCalledWith('file:///flows.puml', expect.objectContaining({ name: 'orders', openLine: 0 }));
+    expect(panel.sent).toEqual([
+      {
+        type: 'copy',
+        id: 7,
+        svg: '<svg>@startuml(id=orders)\nA -> B : orders\n@enduml</svg>',
+        width: 20,
+        height: 10,
+        background: '#FFFFFF',
+      },
+    ]);
+    // Copying draws nothing in the panel.
+    expect(deps.render).not.toHaveBeenCalled();
+  });
+
+  it('answers a copy that cannot be made with the reason, as for a diagram that has gone or an error', async () => {
+    const panel = makePanel();
+    const deps = makeDeps({
+      copyPng: vi
+        .fn()
+        .mockResolvedValueOnce({ error: 'too large' })
+        .mockRejectedValueOnce(new Error('worker stopped')),
+    });
+    const viewer = new DiagramViewer(panel, deps, 'flows', 'file:///flows.puml');
+    viewer.select(FLOWS, 0);
+
+    await viewer.receive({ type: 'copyPng', id: 1 }, FLOWS);
+    await viewer.receive({ type: 'copyPng', id: 2 }, FLOWS);
+    await viewer.receive({ type: 'copyPng', id: 3 }, FLOWS.replace('(id=orders)', '(id=renamed)'));
+
+    expect(panel.sent).toEqual([
+      { type: 'copyFailed', id: 1, message: 'too large' },
+      { type: 'copyFailed', id: 2, message: 'worker stopped' },
+      { type: 'copyFailed', id: 3, message: 'gone' },
+    ]);
+    expect(deps.copyPng).toHaveBeenCalledTimes(2);
   });
 
   it('follows a named diagram when diagrams move about', async () => {
@@ -344,6 +399,15 @@ describe('DiagramViewer not updated', () => {
 describe('viewerBody', () => {
   const escape = (text: string): string =>
     text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const copy = {
+    text: 'Copy',
+    label: 'Copy Diagram as PNG',
+    copying: 'Copying…',
+    copied: 'Copied.',
+    failed: 'Could not copy: {0}',
+    unmade: 'No PNG.',
+    unwritten: 'Not taken.',
+  };
 
   it('has a toolbar whose buttons name what they do and the key that does it too', () => {
     const body = viewerBody(
@@ -355,6 +419,7 @@ describe('viewerBody', () => {
         fit: 'Fit to Window',
         actualSize: 'Actual Size',
         exportPng: 'Export Diagram as PNG',
+        copy,
       },
       escape
     );
@@ -366,22 +431,35 @@ describe('viewerBody', () => {
     expect(body).toContain('<select id="diagrams" aria-label="Select a diagram" hidden>');
     expect(body).toContain('<button id="fit" type="button" aria-label="Fit to Window" title="Fit to Window (0)" aria-pressed="true">Fit to Window</button>');
     expect(body).toContain('<button id="actual" type="button" aria-label="Actual Size" title="Actual Size (1)">100%</button>');
-    // Beside the zoom, not in it: the PNG button.
+    // Beside the zoom, not in it: the PNG button, then Copy, which carries
+    // what the page says of a copy.
     expect(body).toContain(
-      '</div><button id="export-png" type="button" aria-label="Export Diagram as PNG" title="Export Diagram as PNG">PNG</button></header>'
+      '</div><button id="export-png" type="button" aria-label="Export Diagram as PNG" title="Export Diagram as PNG">PNG</button>' +
+        '<button id="copy-png" type="button" aria-label="Copy Diagram as PNG" title="Copy Diagram as PNG"' +
+        ' data-copying="Copying…" data-copied="Copied." data-failed="Could not copy: {0}" data-unmade="No PNG." data-unwritten="Not taken.">Copy</button></header>'
     );
     expect(body).toContain('<main id="stage" tabindex="0">');
   });
 
   it('escapes the labels it is given', () => {
     const body = viewerBody(
-      { selectDiagram: 'a"&b', toolbar: '"><script>', zoomOut: 'a&b', zoomIn: 'in', fit: '<b>', actualSize: 'x', exportPng: '<i>' },
+      {
+        selectDiagram: 'a"&b',
+        toolbar: '"><script>',
+        zoomOut: 'a&b',
+        zoomIn: 'in',
+        fit: '<b>',
+        actualSize: 'x',
+        exportPng: '<i>',
+        copy: { text: '<u>', label: '"><s>', copying: '<em>', copied: '"x"', failed: '<q>{0}', unmade: '<p>', unwritten: '<ol>' },
+      },
       escape
     );
 
-    expect(body).not.toContain('<script>');
-    expect(body).not.toContain('<b>');
-    expect(body).not.toContain('<i>');
+    for (const tag of ['<script>', '<b>', '<i>', '<u>', '<s>', '<em>', '<q>', '<p>', '<ol>']) {
+      expect(body).not.toContain(tag);
+    }
+    expect(body).toContain('data-copied="&quot;x&quot;"');
     expect(body).toContain('aria-label="&quot;&gt;&lt;script&gt;"');
     expect(body).toContain('aria-label="a&amp;b"');
     expect(body).toContain('<select id="diagrams" aria-label="a&quot;&amp;b"');

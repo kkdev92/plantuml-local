@@ -107,6 +107,31 @@ export interface ExporterDeps {
   changedMessage: string;
 }
 
+/** What drawing a diagram as it is exported needs: the deps that do not touch files. */
+export type DrawingDeps = Pick<
+  ExporterDeps,
+  | 'errorMessage'
+  | 'render'
+  | 'isDark'
+  | 'resolvePalette'
+  | 'pngScale'
+  | 'remoteReferenceMessage'
+  | 'emojiUnavailableMessage'
+  | 'severalDiagramsMessage'
+  | 'pagesMessage'
+  | 'engineErrorMessage'
+  | 'pngTooLargeMessage'
+  | 'pngFailedMessage'
+>;
+
+/** What a PNG is drawn from: the SVG with its background, the size in pixels, and that background. */
+export interface PngSource {
+  svg: string;
+  width: number;
+  height: number;
+  background: string;
+}
+
 /** The largest PNG made: pixels a side and in all, and bytes. */
 export const PNG_LIMITS = { side: 8192, pixels: 16_000_000, bytes: 64 * 1024 * 1024 } as const;
 
@@ -237,27 +262,14 @@ function messageOf(error: unknown): string {
 }
 
 /**
- * Renders one block, or says why it cannot be exported.
- *
- * Renders are serialised inside the worker, so calling this in a loop is
- * already sequential; there is nothing to gain from firing them at once.
+ * Renders a block as it is exported, in the export palette with its
+ * background baked in, or says why it cannot be exported.
  */
-async function drawBlock(
-  deps: ExporterDeps,
-  documentPath: string,
-  directory: string,
+async function renderBlock(
+  deps: DrawingDeps,
   block: PlantUmlBlock,
-  name: string,
-  format: ExportFormat
-): Promise<Drawing | ExportResult> {
-  // Names become file names, and they come from the document — so on a
-  // repository someone else wrote, `x/../../..` would put a file wherever
-  // the block asked. Checked here rather than only at the call sites so
-  // that no future caller can route around it.
-  if (!isValidBlockName(name)) {
-    return { name, path: null, error: deps.invalidNameMessage, cause: 'source' };
-  }
-
+  name: string
+): Promise<{ svg: string; dark: boolean } | ExportResult> {
   // The preview refuses these before the engine sees them; export has to
   // refuse them too, or the same block that shows an explanation on screen
   // would write out the engine's "cannot include" error diagram instead.
@@ -305,44 +317,7 @@ async function drawBlock(
       };
     }
 
-    const svg = addBackground(rendered, dark);
-    const path = deps.resolve(documentPath, `${directory}/${name}.${format}`);
-    if (format === 'svg') {
-      return { name, path, document: documentPath, content: svg };
-    }
-
-    // Drawn at the scale asked for, without the screen's own pixel ratio,
-    // and refused rather than shrunk or cut when it would be too large.
-    const size = svgSize(svg);
-    if (size === null) {
-      return { name, path: null, error: deps.pngFailedMessage, cause: 'png' };
-    }
-    const scale = deps.pngScale();
-    const width = Math.ceil(size.width * scale);
-    const height = Math.ceil(size.height * scale);
-    if (!fitsPng(width, height)) {
-      const fits = [...PNG_SCALES]
-        .reverse()
-        .find((smaller) => fitsPng(Math.ceil(size.width * smaller), Math.ceil(size.height * smaller)));
-      return {
-        name,
-        path: null,
-        error: deps.pngTooLargeMessage(width, height, fits ?? null),
-        cause: 'png',
-        ...(fits === undefined ? {} : { fitsAt: fits }),
-      };
-    }
-    const backdrop = dark ? DIAGRAM_BACKDROP.dark : DIAGRAM_BACKDROP.light;
-    let png: Uint8Array;
-    try {
-      png = await deps.toPng(svg, width, height, backdrop);
-    } catch (error: unknown) {
-      return { name, path: null, error: deps.errorMessage(messageOf(error)), cause: 'png' };
-    }
-    if (!isPngOfSize(png, width, height) || png.byteLength > PNG_LIMITS.bytes) {
-      return { name, path: null, error: deps.pngFailedMessage, cause: 'png' };
-    }
-    return { name, path, document: documentPath, content: png };
+    return { svg: addBackground(rendered, dark), dark };
   } catch (error: unknown) {
     const message = messageOf(error);
     return {
@@ -352,6 +327,92 @@ async function drawBlock(
       cause: 'source',
     };
   }
+}
+
+/**
+ * What a PNG of `svg` is drawn from: the scale asked for, without the
+ * screen's own pixel ratio, refused rather than shrunk or cut when it
+ * would be too large.
+ */
+function pngSource(deps: DrawingDeps, name: string, svg: string, dark: boolean): PngSource | ExportResult {
+  const size = svgSize(svg);
+  if (size === null) {
+    return { name, path: null, error: deps.pngFailedMessage, cause: 'png' };
+  }
+  const scale = deps.pngScale();
+  const width = Math.ceil(size.width * scale);
+  const height = Math.ceil(size.height * scale);
+  if (!fitsPng(width, height)) {
+    const fits = [...PNG_SCALES]
+      .reverse()
+      .find((smaller) => fitsPng(Math.ceil(size.width * smaller), Math.ceil(size.height * smaller)));
+    return {
+      name,
+      path: null,
+      error: deps.pngTooLargeMessage(width, height, fits ?? null),
+      cause: 'png',
+      ...(fits === undefined ? {} : { fitsAt: fits }),
+    };
+  }
+  return { svg, width, height, background: dark ? DIAGRAM_BACKDROP.dark : DIAGRAM_BACKDROP.light };
+}
+
+/**
+ * Renders one block, or says why it cannot be exported.
+ *
+ * Renders are serialised inside the worker, so calling this in a loop is
+ * already sequential; there is nothing to gain from firing them at once.
+ */
+async function drawBlock(
+  deps: ExporterDeps,
+  documentPath: string,
+  directory: string,
+  block: PlantUmlBlock,
+  name: string,
+  format: ExportFormat
+): Promise<Drawing | ExportResult> {
+  // Names become file names, and they come from the document — so on a
+  // repository someone else wrote, `x/../../..` would put a file wherever
+  // the block asked. Checked here rather than only at the call sites so
+  // that no future caller can route around it.
+  if (!isValidBlockName(name)) {
+    return { name, path: null, error: deps.invalidNameMessage, cause: 'source' };
+  }
+
+  const rendered = await renderBlock(deps, block, name);
+  if (!('svg' in rendered)) {
+    return rendered;
+  }
+  const path = deps.resolve(documentPath, `${directory}/${name}.${format}`);
+  if (format === 'svg') {
+    return { name, path, document: documentPath, content: rendered.svg };
+  }
+
+  const source = pngSource(deps, name, rendered.svg, rendered.dark);
+  if (!('svg' in source)) {
+    return source;
+  }
+  let png: Uint8Array;
+  try {
+    png = await deps.toPng(source.svg, source.width, source.height, source.background);
+  } catch (error: unknown) {
+    return { name, path: null, error: deps.errorMessage(messageOf(error)), cause: 'png' };
+  }
+  if (!isPngOfSize(png, source.width, source.height) || png.byteLength > PNG_LIMITS.bytes) {
+    return { name, path: null, error: deps.pngFailedMessage, cause: 'png' };
+  }
+  return { name, path, document: documentPath, content: png };
+}
+
+/**
+ * Renders a block as Export Diagram as PNG does, short of drawing the PNG:
+ * what to draw it from, or why it cannot be exported. For copying the
+ * diagram to the clipboard, which needs neither a name nor a file.
+ */
+export async function preparePng(deps: DrawingDeps, block: PlantUmlBlock): Promise<PngSource | ExportResult> {
+  const name = block.name ?? '';
+  const rendered = await renderBlock(deps, block, name);
+  return 'svg' in rendered ? pngSource(deps, name, rendered.svg, rendered.dark) : rendered;
 }
 
 /**

@@ -18,6 +18,7 @@ import { DIAGRAM_BACKDROP, EMOJI_UNAVAILABLE, hasRemoteReference } from '../core
 import { diagramShape } from '../core/shape';
 import type { DiagramRender, IncludedStyle } from '../core/types';
 import { blockAtLine, findFileDiagrams, type PlantUmlBlock } from '../export/blocks';
+import type { PngSource } from '../export/exporter';
 import { withIncludeReason } from '../includes/describe';
 import { changeTo } from '../includes/tracking';
 import { drawReadable } from '../render/palette';
@@ -60,23 +61,37 @@ export interface ViewerDeps {
    * PNG, as Export Diagram as PNG does at the cursor.
    */
   exportPng(uri: string, line: number): Promise<void>;
+  /**
+   * What copying `diagram` of the file at `uri` puts on the clipboard: the
+   * PNG Export Diagram as PNG would write, for the page to draw, or why
+   * there is none.
+   */
+  copyPng(uri: string, diagram: PlantUmlBlock): Promise<PngSource | { error: string }>;
   labels: ViewerLabels;
 }
 
 /** What the page may ask for. Anything else it sends is ignored. */
-export type ViewerRequest = { type: 'ready' } | { type: 'select'; index: number } | { type: 'exportPng' };
+export type ViewerRequest =
+  | { type: 'ready' }
+  | { type: 'select'; index: number }
+  | { type: 'exportPng' }
+  | { type: 'copyPng'; id: number };
 
 /** Reads a message from the page, which is untrusted, against `count` diagrams. */
 export function parseRequest(message: unknown, count: number): ViewerRequest | null {
   if (typeof message !== 'object' || message === null) {
     return null;
   }
-  const { type, index } = message as { type?: unknown; index?: unknown };
+  const { type, index, id } = message as { type?: unknown; index?: unknown; id?: unknown };
   if (type === 'ready' || type === 'exportPng') {
     return { type };
   }
   if (type === 'select' && typeof index === 'number' && Number.isInteger(index)) {
     return index >= 0 && index < count ? { type: 'select', index } : null;
+  }
+  // The page numbers its copies, so that each answer finds its own.
+  if (type === 'copyPng' && typeof id === 'number' && Number.isSafeInteger(id) && id > 0) {
+    return { type, id };
   }
   return null;
 }
@@ -91,6 +106,22 @@ export interface ToolbarLabels {
   actualSize: string;
   /** The PNG button, which exports the diagram shown. */
   exportPng: string;
+  /**
+   * The Copy button, which copies the diagram shown as the PNG button
+   * exports it, and what the page says of a copy.
+   */
+  copy: {
+    text: string;
+    label: string;
+    copying: string;
+    copied: string;
+    /** A copy that failed, with the reason in place of `{0}`. */
+    failed: string;
+    /** The reason for a PNG the page could not draw at its size. */
+    unmade: string;
+    /** The reason for an image the clipboard did not take. */
+    unwritten: string;
+  };
 }
 
 /**
@@ -110,6 +141,10 @@ export function viewerBody(labels: ToolbarLabels, escape: (text: string) => stri
     button('actual', '100%', labels.actualSize, '1'),
     '</div>',
     `<button id="export-png" type="button" aria-label="${escape(labels.exportPng)}" title="${escape(labels.exportPng)}">PNG</button>`,
+    `<button id="copy-png" type="button" aria-label="${escape(labels.copy.label)}" title="${escape(labels.copy.label)}"` +
+      ` data-copying="${escape(labels.copy.copying)}" data-copied="${escape(labels.copy.copied)}"` +
+      ` data-failed="${escape(labels.copy.failed)}" data-unmade="${escape(labels.copy.unmade)}" data-unwritten="${escape(labels.copy.unwritten)}">` +
+      `${escape(labels.copy.text)}</button>`,
     '</header>',
     '<main id="stage" tabindex="0"><div id="canvas"><img id="diagram" alt="" hidden draggable="false"></div></main>',
   ].join('');
@@ -170,6 +205,10 @@ export class DiagramViewer {
       if (diagram !== undefined) {
         await this.deps.exportPng(this.uri, diagram.openLine);
       }
+      return;
+    }
+    if (request?.type === 'copyPng') {
+      await this.copy(diagrams[this.indexIn(diagrams)], request.id);
       return;
     }
     if (request?.type === 'select') {
@@ -280,6 +319,25 @@ export class DiagramViewer {
       const message = error instanceof Error ? error.message : String(error);
       await this.status(EMOJI_UNAVAILABLE.test(message) ? labels.emojiUnavailable : labels.errorMessage(message), true, true);
     }
+  }
+
+  /**
+   * Answers the page's copy `id` of `diagram`: what to draw onto the
+   * clipboard, or why nothing will be. The page waits for an answer either
+   * way, so an error is answered too.
+   */
+  private async copy(diagram: PlantUmlBlock | undefined, id: number): Promise<void> {
+    let drawn: PngSource | { error: string };
+    try {
+      drawn = diagram === undefined ? { error: this.deps.labels.gone } : await this.deps.copyPng(this.uri, diagram);
+    } catch (error: unknown) {
+      drawn = { error: this.deps.labels.errorMessage(error instanceof Error ? error.message : String(error)) };
+    }
+    await this.panel.post(
+      'error' in drawn
+        ? { type: 'copyFailed', id, message: drawn.error }
+        : { type: 'copy', id, svg: drawn.svg, width: drawn.width, height: drawn.height, background: drawn.background }
+    );
   }
 
   /** Where the diagram shown is among `diagrams`: by its name, else its position. */

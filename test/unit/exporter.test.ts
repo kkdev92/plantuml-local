@@ -10,6 +10,7 @@ import {
   exportOne,
   isPngOfSize,
   PNG_LIMITS,
+  preparePng,
   svgSize,
   writeDocuments,
   type ExporterDeps,
@@ -579,6 +580,65 @@ describe('exportOne as a PNG', () => {
     expect(await exportOne(other, DOC, 'images', block!, 'orders', 'png')).toBeNull();
     expect(other.confirmReplace).toHaveBeenCalledWith(['/repo/docs/images/orders.png'], false);
     expect(other.writeFile).not.toHaveBeenCalled();
+  });
+});
+
+describe('preparePng', () => {
+  // No name: a copy needs none.
+  const [block] = findPlantUmlBlocks('```plantuml\nx\n```');
+  const sized = (width: number, height: number): ExporterDeps['render'] =>
+    vi.fn(() =>
+      Promise.resolve(rendered(`<svg viewBox="0 0 10 10" width="${String(width)}" height="${String(height)}"><g/></svg>`))
+    );
+
+  it('gives what a PNG export would be drawn from, without drawing or writing it', async () => {
+    const deps = makeDeps({ render: sized(100.5, 50) });
+
+    expect(await preparePng(deps, block!)).toEqual({
+      svg: expect.stringContaining('<rect x="0" y="0" width="10" height="10" fill="#FFFFFF"/>') as unknown,
+      width: 201,
+      height: 100,
+      background: '#FFFFFF',
+    });
+    expect(deps.render).toHaveBeenCalledWith('x', false);
+    expect(deps.toPng).not.toHaveBeenCalled();
+    expect(deps.writeFile).not.toHaveBeenCalled();
+  });
+
+  it('uses the export palette and scale, and the other palette for a diagram unreadable in it', async () => {
+    const dark = makeDeps({ render: sized(10, 10), isDark: () => true, pngScale: () => 4 });
+    const turned = makeDeps({ render: sized(10, 10), resolvePalette: () => Promise.resolve(true) });
+
+    expect(await preparePng(dark, block!)).toMatchObject({ width: 40, height: 40, background: '#1b1b1b' });
+    expect(dark.render).toHaveBeenCalledWith('x', true);
+    expect(await preparePng(turned, block!)).toMatchObject({ background: '#1b1b1b' });
+  });
+
+  it('refuses what a PNG export refuses, for the same reasons', async () => {
+    const [remote] = findPlantUmlBlocks('```plantuml\n@startuml\n!include https://example.com/x.puml\n@enduml\n```');
+    const [pages] = findPlantUmlBlocks('```plantuml\n@startuml\nA -> B\nnewpage\nC -> D\n@enduml\n```');
+    const [several] = findPlantUmlBlocks('```plantuml\n@startuml\nA -> B\n@enduml\n@startuml\nC -> D\n@enduml\n```');
+    const [broken] = findPlantUmlBlocks('```plantuml\n@startuml\nAlice -> Bob\nthis is not valid ;;; [[[\n@enduml\n```');
+    const engineError = makeDeps({ render: vi.fn(() => Promise.resolve(rendered(engineOutput('syntax-error')))) });
+    const emoji = makeDeps({
+      render: vi.fn(() => Promise.reject(new Error('java.lang.RuntimeException: Failed to load emoji.js'))),
+    });
+
+    expect(await preparePng(makeDeps(), remote!)).toMatchObject({ error: 'remote references are not supported' });
+    expect(await preparePng(makeDeps(), pages!)).toMatchObject({ error: 'no pages' });
+    expect(await preparePng(makeDeps(), several!)).toMatchObject({ error: 'one diagram per block' });
+    expect(await preparePng(engineError, broken!)).toMatchObject({
+      error: 'engine: Syntax Error? (Assumed diagram type: sequence) @ 4',
+      cause: 'source',
+    });
+    expect(await preparePng(emoji, block!)).toMatchObject({ error: 'emoji are not available', cause: 'source' });
+    expect(await preparePng(makeDeps({ render: sized(3000, 2000), pngScale: () => 4 }), block!)).toMatchObject({
+      error: 'too large: 12000×8000, fits 1',
+      fitsAt: 1,
+    });
+    expect(await preparePng(makeDeps({ render: vi.fn(() => Promise.resolve(rendered('<svg><g/></svg>'))) }), block!)).toMatchObject({
+      error: 'no PNG',
+    });
   });
 });
 

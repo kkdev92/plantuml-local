@@ -2223,6 +2223,52 @@ describe('viewer (dist)', () => {
     ]);
   });
 
+  it('answers the Copy button with what the PNG button would export, or why there is none', async () => {
+    const editor = makeEditor('file:///c/viewcopy/flows.puml', FLOWS, 5, { languageId: 'plantuml' });
+    vscodeStub._test.setActiveEditor(editor);
+    const before = vscodeStub._test.webviewPanels.length;
+    await run('plantumlLocal.openPreviewToSide');
+    const panel = vscodeStub._test.webviewPanels[before]!;
+    expect(panel.webview.html).toContain('<button id="copy-png" type="button" aria-label="Copy Diagram as PNG" title="Copy Diagram as PNG"');
+    panel.receive({ type: 'ready' });
+    await waitFor(() => posted(panel, 'render').length > 0);
+    type Answer = { type: string; id?: number; svg?: string; width?: number; height?: number; background?: string; message?: string };
+    const answers = (): Answer[] =>
+      (panel.webview.posted as Answer[]).filter((message) => message.type === 'copy' || message.type === 'copyFailed');
+
+    panel.receive({ type: 'copyPng', id: 1 });
+    await waitFor(() => answers().length > 0);
+    const copy = answers()[0];
+    // The diagram shown, in the light palette of exports with its
+    // background, at the PNG scale: twice its size by default.
+    expect(copy).toMatchObject({ type: 'copy', id: 1, background: '#FFFFFF' });
+    expect(copy?.svg).toContain('second');
+    expect(copy?.svg).toContain('fill="#FFFFFF"');
+    const open = /^<svg[^>]*>/.exec(copy?.svg ?? '')?.[0] ?? '';
+    const width = Number(/\swidth="([\d.]+)"/.exec(open)?.[1]);
+    const height = Number(/\sheight="([\d.]+)"/.exec(open)?.[1]);
+    expect(width).toBeGreaterThan(0);
+    expect(copy).toMatchObject({ width: Math.ceil(width * 2), height: Math.ceil(height * 2) });
+
+    // The palette and scale set for the file's folder.
+    vscodeStub._test.setConfiguration('exportPngScale', 1, 'file:///c/viewcopy');
+    vscodeStub._test.setConfiguration('exportTheme', 'dark', 'file:///c/viewcopy');
+    try {
+      panel.receive({ type: 'copyPng', id: 2 });
+      await waitFor(() => answers().length > 1);
+      expect(answers()[1]).toMatchObject({ type: 'copy', id: 2, width: Math.ceil(width), background: '#1b1b1b' });
+    } finally {
+      vscodeStub._test.setConfiguration('exportPngScale', undefined, 'file:///c/viewcopy');
+      vscodeStub._test.setConfiguration('exportTheme', undefined, 'file:///c/viewcopy');
+    }
+
+    // A diagram the engine draws as an error is not copied.
+    editor.document.setText(FLOWS.replace('Carol -> Dave : second', 'this is not valid ;;; [[['));
+    panel.receive({ type: 'copyPng', id: 3 });
+    await waitFor(() => answers().length > 2);
+    expect(answers()[2]).toMatchObject({ type: 'copyFailed', id: 3, message: expect.stringMatching(/^PlantUML error on line 6: /) as unknown });
+  });
+
   it('keeps one panel per file and draws the diagram it is asked for', async () => {
     const editor = makeEditor('file:///c/view/flows.puml', FLOWS, 1, { languageId: 'plantuml' });
     vscodeStub._test.setActiveEditor(editor);

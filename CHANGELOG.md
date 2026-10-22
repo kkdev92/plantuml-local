@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Copying a diagram to the clipboard from the `.puml` preview.** The Copy
+  button beside the PNG button puts on the clipboard the PNG that the PNG
+  button would write, in the same palette (`plantumlLocal.exportTheme`, light
+  by default) and at the same scale (`plantumlLocal.exportPngScale`), to paste
+  into a chat, a slide or a document. Ctrl+C (Cmd+C on macOS) in the panel and
+  *Copy* in its context menu do the same; they copied nothing before. The
+  panel says when the image is on the clipboard, or why it is not, and a
+  diagram the PNG button would not export is not copied either. Copying writes
+  no file, so it also works in Restricted Mode.
+
 ## [0.14.2] - 2026-10-21
 
 ### Security

@@ -39,7 +39,7 @@ Your diagram source is processed locally and is not sent to a rendering service.
 ## Features
 
 - **Built-in Preview**: Diagrams appear in the same Markdown preview you already use
-- **`.puml` Files**: PlantUML files open as their own language, with folding, an outline and a preview beside the editor that zooms and exports PNG
+- **`.puml` Files**: PlantUML files open as their own language, with folding, an outline and a preview beside the editor that zooms, exports PNG and copies it to the clipboard
 - **Local Includes**: `!include`, `!includesub` and `!theme … from` read shared definitions, sections and themes from the files of your workspace folder, in a trusted workspace; their paths complete, and Ctrl+Click opens the file
 - **Syntax Highlighting**: ```` ```plantuml ```` blocks and `.puml` files are coloured in the editor, following the syntax the bundled engine accepts
 - **Offline Rendering**: No Java, no PlantUML server, no network connection required — nothing to install besides the extension
@@ -218,6 +218,12 @@ the panel is hidden, and across a restart. The PNG button beside them exports
 the diagram shown as *Export Diagram as PNG* does, at its own size and scale
 rather than the zoom of the panel, and in the palette of exports: light,
 whatever the editor theme, unless `plantumlLocal.exportTheme` says otherwise.
+
+The Copy button puts that same PNG on the clipboard instead of in a file, to
+paste into a chat, a slide or a document; so do Ctrl+C (Cmd+C on macOS) in the
+panel and *Copy* in its context menu. The panel says when the image is on the
+clipboard, or why it is not: a diagram the PNG button would not export, such
+as one with an error or one past the size limit of a PNG, is not copied either.
 
 The panel shows the SVG as an image, so nothing in it can run, and loads
 nothing but its own script and stylesheet.
@@ -583,8 +589,8 @@ and would show the referenced image as a second copy.
 | `plantumlLocal.theme` | `auto` | Diagram palette. `auto` follows the VS Code theme; `light` / `dark` pin it |
 | `plantumlLocal.logLevel` | `info` | Floor for the rendering entries in the *PlantUML Local* output channel: the render worker and the diagrams of the Markdown preview. Commands such as export log regardless. VS Code's own channel level applies first — see [Troubleshooting](#troubleshooting) |
 | `plantumlLocal.exportDirectory` | `images` | Where exported SVGs and PNGs are written, relative to the Markdown file. `.` for the same folder; absolute paths and `..` are rejected. Can be set per folder |
-| `plantumlLocal.exportTheme` | `light` | Palette for exported SVGs and PNGs. `preview` follows the palette the preview currently uses. Can be set per folder |
-| `plantumlLocal.exportPngScale` | `2` | Scale of an exported PNG: 1, 2 or 4 times the diagram's own size. Can be set per folder |
+| `plantumlLocal.exportTheme` | `light` | Palette for exported SVGs and PNGs, and for diagrams copied from the `.puml` preview. `preview` follows the palette the preview currently uses. Can be set per folder |
+| `plantumlLocal.exportPngScale` | `2` | Scale of an exported PNG, and of a diagram copied from the `.puml` preview: 1, 2 or 4 times the diagram's own size. Can be set per folder |
 | `plantumlLocal.hideExportedImages` | `true` | Hide images marked `#plantuml-local` in the preview, so an exported diagram is not shown next to its block's render |
 | `plantumlLocal.preview.updateMode` | `onChange` | When a changed diagram is drawn again in the previews: `onChange`, `onSave`, or `manual` (with *Clear Render Cache and Re-render*). Can be set per folder |
 | `plantumlLocal.diagnostics.enabled` | `true` | List the problems of the diagrams in open Markdown files in the Problems panel; can be set per folder |
@@ -679,7 +685,8 @@ the remote machine and runs there, so that is where diagrams are rendered and
 exported files are written. The previews, and the panel a PNG is drawn in,
 stay on your own computer: SVGs travel to them, and PNGs back, over VS Code's
 own connection to that machine, and a PNG's text is drawn with your computer's
-fonts. No rendering service is involved either way.
+fonts. A diagram copied from the `.puml` preview goes to your own computer's
+clipboard. No rendering service is involved either way.
 
 ---
 
@@ -689,7 +696,7 @@ fonts. No rendering service is involved either way.
 - **A red syntax-error box appears**: The message comes from the PlantUML engine — only that diagram is affected, and the rest of the page still renders
 - **"An error has occurred!" with "For some reason, dot/GraphViz has crashed."**: Graphviz could not lay out that diagram (packages nested a hundred deep are one way to get there). Only that diagram is affected, and it is an error, as a syntax error is: the preview says what to do, and it is not exported. Simplify it, or add `!pragma layout smetana`, which lays out the diagram without Graphviz
 - **Colours look wrong after switching themes**: Backgrounds follow the palette the diagram was *rendered* with. If you pinned `plantumlLocal.theme`, that palette wins by design
-- **Exported images have different colours from the preview**: Exports, the PNG button of the `.puml` preview included, use the light palette by default, whatever the editor theme (`plantumlLocal.exportTheme`). Set it to `preview` to export in the palette the preview uses, or set `plantumlLocal.theme` to `light` to preview diagrams in the colours they are exported in
+- **Exported images have different colours from the preview**: Exports, the PNG and Copy buttons of the `.puml` preview included, use the light palette by default, whatever the editor theme (`plantumlLocal.exportTheme`). Set it to `preview` to export in the palette the preview uses, or set `plantumlLocal.theme` to `light` to preview diagrams in the colours they are exported in
 - **Layout differs from plantuml.com**: Text is measured with approximate metrics in the Node renderer, so box widths, line wrapping and element placement can differ slightly
 - **Setting `logLevel: debug` shows nothing new**: The channel is a `LogOutputChannel` now, and VS Code decides what one of those shows — an extension cannot raise its own channel's level. Run **Developer: Set Log Level** and pick *PlantUML Local*; that choice is per channel and survives a restart. `plantumlLocal.logLevel` is a floor on top of it for the rendering entries, so it can only make those quieter
 
