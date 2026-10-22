@@ -216,7 +216,8 @@ dragging moves the diagram, and the arrow keys move it by 40 pixels (200 with
 Shift). Each diagram keeps its zoom and position while it is redrawn, while
 the panel is hidden, and across a restart. The PNG button beside them exports
 the diagram shown as *Export Diagram as PNG* does, at its own size and scale
-rather than the zoom of the panel.
+rather than the zoom of the panel, and in the palette of exports: light,
+whatever the editor theme, unless `plantumlLocal.exportTheme` says otherwise.
 
 The panel shows the SVG as an image, so nothing in it can run, and loads
 nothing but its own script and stylesheet.
@@ -688,6 +689,7 @@ fonts. No rendering service is involved either way.
 - **A red syntax-error box appears**: The message comes from the PlantUML engine — only that diagram is affected, and the rest of the page still renders
 - **"An error has occurred!" with "For some reason, dot/GraphViz has crashed."**: Graphviz could not lay out that diagram (packages nested a hundred deep are one way to get there). Only that diagram is affected, and it is an error, as a syntax error is: the preview says what to do, and it is not exported. Simplify it, or add `!pragma layout smetana`, which lays out the diagram without Graphviz
 - **Colours look wrong after switching themes**: Backgrounds follow the palette the diagram was *rendered* with. If you pinned `plantumlLocal.theme`, that palette wins by design
+- **Exported images have different colours from the preview**: Exports, the PNG button of the `.puml` preview included, use the light palette by default, whatever the editor theme (`plantumlLocal.exportTheme`). Set it to `preview` to export in the palette the preview uses, or set `plantumlLocal.theme` to `light` to preview diagrams in the colours they are exported in
 - **Layout differs from plantuml.com**: Text is measured with approximate metrics in the Node renderer, so box widths, line wrapping and element placement can differ slightly
 - **Setting `logLevel: debug` shows nothing new**: The channel is a `LogOutputChannel` now, and VS Code decides what one of those shows — an extension cannot raise its own channel's level. Run **Developer: Set Log Level** and pick *PlantUML Local*; that choice is per channel and survives a restart. `plantumlLocal.logLevel` is a floor on top of it for the rendering entries, so it can only make those quieter
 
