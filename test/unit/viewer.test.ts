@@ -431,12 +431,13 @@ describe('viewerBody', () => {
     expect(body).toContain('<select id="diagrams" aria-label="Select a diagram" hidden>');
     expect(body).toContain('<button id="fit" type="button" aria-label="Fit to Window" title="Fit to Window (0)" aria-pressed="true">Fit to Window</button>');
     expect(body).toContain('<button id="actual" type="button" aria-label="Actual Size" title="Actual Size (1)">100%</button>');
-    // Beside the zoom, not in it: the PNG button, then Copy, which carries
-    // what the page says of a copy.
+    // Beside the zoom, not in it, and kept together: the PNG button, then
+    // Copy, which carries what the page says of a copy.
+    expect(body).toContain('<div id="bar"><div id="tools" role="toolbar"');
     expect(body).toContain(
-      '</div><button id="export-png" type="button" aria-label="Export Diagram as PNG" title="Export Diagram as PNG">PNG</button>' +
+      '</div><div id="actions"><button id="export-png" type="button" aria-label="Export Diagram as PNG" title="Export Diagram as PNG">PNG</button>' +
         '<button id="copy-png" type="button" aria-label="Copy Diagram as PNG" title="Copy Diagram as PNG"' +
-        ' data-copying="Copying…" data-copied="Copied." data-failed="Could not copy: {0}" data-unmade="No PNG." data-unwritten="Not taken.">Copy</button></header>'
+        ' data-copying="Copying…" data-copied="Copied." data-failed="Could not copy: {0}" data-unmade="No PNG." data-unwritten="Not taken.">Copy</button></div></div></header>'
     );
     expect(body).toContain('<main id="stage" tabindex="0">');
   });

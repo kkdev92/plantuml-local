@@ -133,6 +133,8 @@ export function viewerBody(labels: ToolbarLabels, escape: (text: string) => stri
     `<button id="${id}" type="button" aria-label="${escape(label)}" title="${escape(`${label} (${key})`)}"${more}>${escape(text)}</button>`;
   return [
     `<header><select id="diagrams" aria-label="${escape(labels.selectDiagram)}" hidden></select><span id="status" role="status"></span>`,
+    // The zoom, then PNG and Copy, which a narrow panel wraps together.
+    '<div id="bar">',
     `<div id="tools" role="toolbar" aria-label="${escape(labels.toolbar)}">`,
     button('zoom-out', '−', labels.zoomOut, '-'),
     '<span id="zoom" aria-live="polite"></span>',
@@ -140,11 +142,14 @@ export function viewerBody(labels: ToolbarLabels, escape: (text: string) => stri
     button('fit', labels.fit, labels.fit, '0', ' aria-pressed="true"'),
     button('actual', '100%', labels.actualSize, '1'),
     '</div>',
+    '<div id="actions">',
     `<button id="export-png" type="button" aria-label="${escape(labels.exportPng)}" title="${escape(labels.exportPng)}">PNG</button>`,
     `<button id="copy-png" type="button" aria-label="${escape(labels.copy.label)}" title="${escape(labels.copy.label)}"` +
       ` data-copying="${escape(labels.copy.copying)}" data-copied="${escape(labels.copy.copied)}"` +
       ` data-failed="${escape(labels.copy.failed)}" data-unmade="${escape(labels.copy.unmade)}" data-unwritten="${escape(labels.copy.unwritten)}">` +
       `${escape(labels.copy.text)}</button>`,
+    '</div>',
+    '</div>',
     '</header>',
     '<main id="stage" tabindex="0"><div id="canvas"><img id="diagram" alt="" hidden draggable="false"></div></main>',
   ].join('');
