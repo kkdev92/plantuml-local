@@ -6,7 +6,10 @@
 # when the tag is rebuilt.
 FROM node:24-bookworm@sha256:925de64a85319052d6971ae81ef2417da956e8a3a2c4a0fac732327970f017f5
 
-ARG NODE_VERSION=24.22.1
+# Install the newest Node.js release of the major line CI tests on, checked
+# against that release's SHASUMS256.txt. The version comes from the
+# latest-v<major>.x listing, so each patch release is taken without an edit here.
+ARG NODE_MAJOR=24
 RUN set -eux; \
     case "$(dpkg --print-architecture)" in \
       amd64) node_arch=x64 ;; \
@@ -14,9 +17,12 @@ RUN set -eux; \
       ppc64el) node_arch=ppc64le ;; \
       *) echo "Unsupported Node.js architecture" >&2; exit 1 ;; \
     esac; \
-    node_archive="node-v$NODE_VERSION-linux-$node_arch.tar.xz"; \
-    curl -fsSLO "https://nodejs.org/dist/v$NODE_VERSION/$node_archive"; \
-    curl -fsSLO "https://nodejs.org/dist/v$NODE_VERSION/SHASUMS256.txt"; \
+    curl -fsSLO "https://nodejs.org/dist/latest-v$NODE_MAJOR.x/SHASUMS256.txt"; \
+    node_archive="$(grep -oE "node-v$NODE_MAJOR\.[0-9]+\.[0-9]+-linux-$node_arch\.tar\.xz$" SHASUMS256.txt)"; \
+    test "$(printf '%s\n' "$node_archive" | wc -l)" -eq 1; \
+    node_version="${node_archive#node-}"; \
+    node_version="${node_version%-linux-$node_arch.tar.xz}"; \
+    curl -fsSLO "https://nodejs.org/dist/$node_version/$node_archive"; \
     grep "  $node_archive$" SHASUMS256.txt | sha256sum -c -; \
     tar -xJf "$node_archive" -C /usr/local --strip-components=1 --no-same-owner; \
     rm "$node_archive" SHASUMS256.txt; \
