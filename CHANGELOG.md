@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- happy-dom, the DOM the diagram engine runs on inside the render worker,
+  21.0.3 → 21.0.4. 21.0.4 fixes a code injection in its compiler for module
+  scripts ([GHSA-834v-8h66-3h79](https://github.com/advisories/GHSA-834v-8h66-3h79)),
+  which needs happy-dom's JavaScript evaluation turned on; the extension
+  leaves it off, so it was not exposed.
+
 ## [0.15.0] - 2026-10-23
 
 ### Added
