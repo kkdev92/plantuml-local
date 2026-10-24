@@ -1,0 +1,12 @@
+# OSV-Scanner reads this file for the lockfile next to it, and so does the
+# OpenSSF Scorecard Vulnerabilities check, which runs OSV-Scanner.
+#
+# Each entry sets aside one advisory that does not reach the extension, with
+# the reason. ignoreUntil makes the scanners report it again on that date, so
+# the entry is looked at again instead of staying by default. Remove an entry
+# once the lockfile can take the fixed version.
+
+[[IgnoredVulns]]
+id = "GHSA-xcx6-jx8p-x3h5"
+ignoreUntil = 2026-12-22
+reason = "@azure/msal-node comes in only through @vscode/vsce, which packages and publishes the extension; the VSIX does not ship it. To sign in with Microsoft Entra ID, vsce chains the environment, Azure CLI, managed identity, Azure PowerShell and Azure Developer CLI credentials, none of which uses the authorization code flow that the advisory affects. @azure/identity 4.13.3 accepts only ^6.0.0, and the fix is in 7.1.0."
