@@ -364,7 +364,7 @@
   "dependencies": {
     "@kkdev92/vscode-ext-kit": "^7.1.0",
     "@plantuml/core": "1.2026.9",
-    "happy-dom": "^21.0.3",
+    "happy-dom": "^21.0.4",
     "markdown-it": "^14.3.3"
   },
   "devDependencies": {
