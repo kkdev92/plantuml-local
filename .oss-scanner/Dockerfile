@@ -4,7 +4,7 @@
 # The base image is pinned by digest (the multi-platform index), as the actions
 # in .github/workflows are pinned by commit SHA; Dependabot moves the digest
 # when the tag is rebuilt.
-FROM node:24-bookworm@sha256:925de64a85319052d6971ae81ef2417da956e8a3a2c4a0fac732327970f017f5
+FROM node:24-bookworm@sha256:6449e19d8184d84062525b6a7524def03146c2cb04a7f08b076680d0e8e4240a
 
 # Install the newest Node.js release of the major line CI tests on, checked
 # against that release's SHASUMS256.txt. The version comes from the
