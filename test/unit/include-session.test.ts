@@ -87,6 +87,19 @@ describe('IncludeSession', () => {
     expect(session.themes).toEqual(['skinparam backgroundColor #FEDCBA', '!theme cerulean']);
   });
 
+  it('reads a theme whose lines end with a lone CR like one with LF', async () => {
+    await mkdir(join(root, 'docs', 'themes'), { recursive: true });
+    await writeFile(
+      join(root, 'docs', 'themes', 'puml-theme-classic.puml'),
+      ['---', 'name: classic', '---', "' how it looks", 'skinparam backgroundColor #FEDCBA', '', '!theme cerulean', ''].join(
+        String.fromCharCode(13)
+      )
+    );
+    const session = new IncludeSession(access, closed);
+    await session.load('themes/puml-theme-classic.puml', null, 'theme');
+    expect(session.themes).toEqual(['skinparam backgroundColor #FEDCBA', '!theme cerulean']);
+  });
+
   it.each(['include', 'includesub', undefined] as const)('does not classify a filename as a theme for kind %s', async (kind) => {
     await writeFile(join(root, 'docs', 'puml-theme-sections.puml'), '@startuml\n!theme cerulean\nA -> B\n@enduml\n');
     const session = new IncludeSession(access, closed);

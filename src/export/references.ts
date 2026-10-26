@@ -1,4 +1,5 @@
 import { EXPORT_FRAGMENT } from '../core/constants';
+import { splitLines } from '../core/lines';
 import { findPlantUmlBlocks } from './blocks';
 
 /**
@@ -104,7 +105,7 @@ export function planReferenceEdits(
   exportedNames: ReadonlySet<string>,
   directory: string
 ): ReferenceEdit[] {
-  const lines = text.split(/\r\n|\r|\n/);
+  const lines = splitLines(text);
   const edits: ReferenceEdit[] = [];
 
   for (const block of findPlantUmlBlocks(text)) {

@@ -67,6 +67,7 @@ import {
 } from './export/exporter';
 import { MAX_DOCUMENTS, findDocuments } from './export/folder';
 import { isLastExport, withExport, type ExportRecords } from './export/ownership';
+import { splitLines } from './core/lines';
 import { START, forEachCodeLine } from './core/shape';
 import { errorMessage } from './core/messages';
 import { lineAfterEdits, planReferenceEdits, type ReferenceEdit } from './export/references';
@@ -2250,7 +2251,7 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
       const diagnose = async (document: vscode.TextDocument, generation: number): Promise<void> => {
         const key = document.uri.toString();
         const text = document.getText();
-        const lines = text.split(/\r\n|\r|\n/);
+        const lines = splitLines(text);
         const found: vscode.Diagnostic[] = [];
         const reads: string[] = [];
         for (const block of findPlantUmlBlocks(text)) {

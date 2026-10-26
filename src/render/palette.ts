@@ -1,4 +1,5 @@
 import { DIAGRAM_BACKDROP } from '../core/constants';
+import { splitLines } from '../core/lines';
 import type { DiagramRender, IncludedStyle } from '../core/types';
 import { firstLocalIncludeLine } from '../includes/describe';
 
@@ -86,8 +87,7 @@ export interface LabelContrast {
 
 /** The `!theme` lines of a diagram, trimmed; none when it picks no theme. */
 export function themeLines(source: string): string[] {
-  return source
-    .split(/\r?\n/)
+  return splitLines(source)
     .filter((line) => /^[ \t]*!theme[ \t]/.test(line))
     .map((line) => line.trim());
 }
@@ -110,7 +110,7 @@ export function paletteLines(source: string, included?: IncludedStyle): string[]
   const fromFolder = (line: string): boolean => THEME_FROM_FOLDER.test(line);
   const own = (lines: readonly string[]): string[] => themeLines(lines.join('\n')).filter((line) => !fromFolder(line));
   const at = firstLocalIncludeLine(source);
-  const lines = source.split(/\r?\n/);
+  const lines = splitLines(source);
   const before = at < 0 ? lines : lines.slice(0, at);
   const after = at < 0 ? [] : lines.slice(at);
   return [...own(before), ...included.themes.filter((line) => !fromFolder(line)), ...own(after)];

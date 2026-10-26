@@ -20,6 +20,7 @@
  * Lines are counted from 0.
  */
 
+import { splitLines } from '../core/lines';
 import { END, START } from '../core/shape';
 
 /** A range to fold: the lines after `start`, up to and including `end`. */
@@ -109,7 +110,7 @@ export function foldingRanges(source: string): Fold[] {
   // A block comment has no `close`: it ends on a line ending in `'/`.
   let text: { start: number; close: RegExp | null } | null = null;
 
-  source.split(/\r?\n/).forEach((line, index) => {
+  splitLines(source).forEach((line, index) => {
     const trimmed = line.trim();
     if (text?.close === null) {
       if (trimmed.endsWith("'/")) {

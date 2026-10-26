@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- A PlantUML file whose lines end with a lone CR — the classic Mac OS line
+  ending — is read line by line, as the editor shows it, wherever the
+  extension reads a file it has not opened: the folder export, the files a
+  diagram includes, the themes read from a folder. The folder export took
+  such a file as one line before, so a file holding several named diagrams
+  counted as one diagram, only the first was exported, and the summary did
+  not mention the others.
+
 ## [0.15.1] - 2026-10-24
 
 ### Changed

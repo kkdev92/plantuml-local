@@ -1,6 +1,7 @@
 import { join } from 'node:path';
 import { parentPort } from 'node:worker_threads';
 
+import { splitLines } from '../core/lines';
 import type { IncludeResponseMessage, RenderRequestMessage, RenderResponseMessage } from '../core/types';
 import { loadEngine } from './engine';
 import { installFileLoader } from './file-loader';
@@ -62,7 +63,7 @@ function renderOnce(request: RenderRequestMessage): Promise<string> {
     try {
       const svg = await new Promise<string>((resolve, reject) => {
         engine.renderToString(
-          request.source.split(/\r\n|\r|\n/),
+          splitLines(request.source),
           (result) => {
             resolve(result);
           },

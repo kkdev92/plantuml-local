@@ -331,6 +331,32 @@ describe('findFileDiagrams', () => {
     ]);
   });
 
+  it('ends a line at a lone CR too, as the editor does when it opens the file', () => {
+    // A file saved with the classic Mac OS line ending, read from disk by the
+    // folder export without being opened.
+    const cr = String.fromCharCode(13);
+    const diagrams = findFileDiagrams(
+      ['@startuml(id=one)', 'A -> B', '@enduml', '@startuml(id=two)', 'C -> D', '@enduml', ''].join(cr),
+      'flows'
+    );
+
+    expect(diagrams.map((d) => [d.name, d.openLine, d.closeLine, d.source])).toEqual([
+      ['one', 0, 2, '@startuml(id=one)\nA -> B\n@enduml'],
+      ['two', 3, 5, '@startuml(id=two)\nC -> D\n@enduml'],
+    ]);
+  });
+
+  it('ends a line at CR LF, giving the same diagrams as LF', () => {
+    const crlf = String.fromCharCode(13, 10);
+    const diagrams = findFileDiagrams(['@startuml(id=one)', 'A -> B', '@enduml', '@startuml(id=two)', 'C -> D', '@enduml'].join(crlf), 'flows');
+
+    expect(diagrams.map((d) => [d.name, d.openLine, d.closeLine])).toEqual([
+      ['one', 0, 2],
+      ['two', 3, 5],
+    ]);
+    expect(diagrams[1]?.source).toBe('@startuml(id=two)\nC -> D\n@enduml');
+  });
+
   it('takes a file without a start line as one diagram, and an empty one as none', () => {
     expect(findFileDiagrams(md('Alice -> Bob', ''), 'loose').map((d) => [d.name, d.source])).toEqual([
       ['loose', 'Alice -> Bob\n'],

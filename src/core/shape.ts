@@ -14,6 +14,8 @@
  * Lines are counted from 0 within the source.
  */
 
+import { splitLines } from './lines';
+
 /** What the preview and export do with a block's source. */
 export type DiagramShape =
   /**
@@ -47,7 +49,7 @@ const NEWPAGE = /^\s*newpage(?:\s|$)/i;
  */
 export function forEachCodeLine(source: string, visit: (line: string, index: number) => void): void {
   let inBlockComment = false;
-  source.split(/\r?\n/).forEach((line, index) => {
+  splitLines(source).forEach((line, index) => {
     const trimmed = line.trim();
     if (inBlockComment || trimmed.startsWith("/'")) {
       inBlockComment = !trimmed.endsWith("'/");

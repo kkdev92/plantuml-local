@@ -17,6 +17,7 @@
  */
 
 import { EMOJI_UNAVAILABLE, remoteReferenceLine } from '../core/constants';
+import { splitLines } from '../core/lines';
 import { diagramShape } from '../core/shape';
 import type { PlantUmlBlock } from '../export/blocks';
 import { withIncludeReason } from '../includes/describe';
@@ -161,7 +162,7 @@ export function renderProblems(
 
   // The engine counts the lines it was given; past the block's own lines are
   // the ones added for it, which are nowhere in the document.
-  const lines = block.source.split(/\r?\n/);
+  const lines = splitLines(block.source);
   const located = failure.line !== null && failure.line <= lines.length ? failure.line : null;
   const line = located === null ? check.startLine : block.sourceLine + located - 1;
   const { code, message } = classify(failure.message, labels, outcome.failedIncludes);

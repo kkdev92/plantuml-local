@@ -15,6 +15,7 @@
 import MarkdownIt from 'markdown-it';
 
 import { isDiagramFence } from '../core/constants';
+import { splitLines } from '../core/lines';
 import { END, START, forEachCodeLine } from '../core/shape';
 
 /** A `plantuml` fenced block found in a document, or a diagram of a PlantUML file. */
@@ -123,7 +124,7 @@ function frontMatterEnd(lines: readonly string[]): number {
  * diagram block can start.
  */
 export function isProseLine(text: string, line: number): boolean {
-  const lines = text.split(/\r\n|\r|\n/);
+  const lines = splitLines(text);
   if (line <= frontMatterEnd(lines)) {
     return false;
   }
@@ -161,7 +162,7 @@ function closesFence(line: string | undefined, markup: string): boolean {
  * fence inside an HTML comment, as in the preview.
  */
 export function findPlantUmlBlocks(text: string): PlantUmlBlock[] {
-  const lines = withoutFrontMatter(text.split(/\r\n|\r|\n/));
+  const lines = withoutFrontMatter(splitLines(text));
   const blocks: PlantUmlBlock[] = [];
 
   for (const token of parser.parse(lines.join('\n'), {})) {
@@ -202,7 +203,7 @@ export const DECLARED_ID = /^\s*[@\\]start[A-Za-z0-9_]+\(id=([^)]*)\)/;
  * file with no `@start…` line is one diagram.
  */
 export function findFileDiagrams(text: string, fileName: string): PlantUmlBlock[] {
-  const lines = text.split(/\r?\n/);
+  const lines = splitLines(text);
   const found: { start: number; end: number; closed: boolean; id: string | null }[] = [];
   let open: (typeof found)[number] | null = null;
   let code = false;
