@@ -1836,7 +1836,7 @@ describe('Insert Diagram Template (dist)', () => {
     }
   };
 
-  it('offers the six kinds, and inserts the one picked as one edit where a diagram can start', async () => {
+  it('offers the sixteen kinds, and inserts the one picked as one edit where a diagram can start', async () => {
     const editor = makeEditor('file:///c/tpl/doc.md', '# Title\n\nText\n', 1);
     const shown = vscodeStub._test.quickPicksShown.length;
 
@@ -1852,6 +1852,16 @@ describe('Insert Diagram Template (dist)', () => {
           'State diagram',
           'Component diagram',
           'Use case diagram',
+          'Object diagram',
+          'Entity relationship diagram',
+          'Deployment diagram',
+          'Timing diagram',
+          'Gantt chart',
+          'Mind map',
+          'Work breakdown structure',
+          'Salt wireframe',
+          'JSON data',
+          'YAML data',
         ],
       },
     ]);
@@ -2006,7 +2016,21 @@ describe('templates (dist)', () => {
     expect(text?.[0]?.label).toEqual({ label: 'puml-sequence', description: 'Sequence diagram' });
     expect(inserted(text?.[0])).toMatch(/^```plantuml \$\{1:sequence-diagram\}\n@startuml\n[\s\S]*\n@enduml\n```$/);
     expect(text?.[0]?.keepWhitespace).toBe(true);
-    expect(text).toHaveLength(6);
+    expect(text).toHaveLength(16);
+    // Each kind under its own start line, as the engine wants it.
+    expect(text?.map((item) => inserted(item).split('\n')[1])).toEqual([
+      ...Array<string>(6).fill('@startuml'),
+      '@startuml',
+      '@startuml',
+      '@startuml',
+      '@startuml',
+      '@startgantt',
+      '@startmindmap',
+      '@startwbs',
+      '@startsalt',
+      '@startjson',
+      '@startyaml',
+    ]);
 
     expect(inserted(complete(document, 5, 2)?.[0])).toMatch(/^@startuml\n[\s\S]*\n@enduml$/);
     // Inside a diagram: no second start line.

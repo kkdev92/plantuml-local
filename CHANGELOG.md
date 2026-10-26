@@ -56,6 +56,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   notice points to the Problems panel; SVG text over 32 MiB is refused with
   a pointer to the file export. The PNG *Copy* button and Ctrl+C in the
   preview are as they were.
+- **Ten more diagram templates.** `puml-object`, `puml-er`, `puml-deployment`,
+  `puml-timing`, `puml-gantt`, `puml-mindmap`, `puml-wbs`, `puml-salt`,
+  `puml-json` and `puml-yaml` join the six templates, in the completion where
+  a diagram can start and in *Insert Diagram Template*. Each draws as it is
+  with the bundled engine, its placeholders at their defaults.
 
 ### Changed
 

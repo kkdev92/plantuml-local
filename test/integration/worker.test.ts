@@ -506,9 +506,14 @@ describe('diagram templates (dist)', () => {
     async (_kind, diagram) => {
       // `${n:default}` -> `default`, as accepting the template without edits leaves it.
       const source = diagram.replace(/\$\{\d+:([^}]*)\}/g, '$1');
+      // The names the template puts in: drawn as text, in a diagram of its kind.
+      const names = [...diagram.matchAll(/\$\{\d+:([A-Za-z][A-Za-z ]+)\}/g)].map((match) => match[1] ?? '');
+      expect(names.length).toBeGreaterThan(0);
 
       for (const dark of [false, true]) {
-        expect(recognizeEngineError(await render(source, dark))).toBeNull();
+        const svg = await render(source, dark);
+        expect(recognizeEngineError(svg)).toBeNull();
+        expect(names.some((name) => svg.includes(name)), `${source}\n${svg.slice(0, 400)}`).toBe(true);
       }
     }
   );

@@ -246,6 +246,16 @@ function templateNames(l10n: { t(message: string): string }): Record<string, str
     state: l10n.t('State diagram'),
     component: l10n.t('Component diagram'),
     usecase: l10n.t('Use case diagram'),
+    object: l10n.t('Object diagram'),
+    er: l10n.t('Entity relationship diagram'),
+    deployment: l10n.t('Deployment diagram'),
+    timing: l10n.t('Timing diagram'),
+    gantt: l10n.t('Gantt chart'),
+    mindmap: l10n.t('Mind map'),
+    wbs: l10n.t('Work breakdown structure'),
+    salt: l10n.t('Salt wireframe'),
+    json: l10n.t('JSON data'),
+    yaml: l10n.t('YAML data'),
   };
 }
 
