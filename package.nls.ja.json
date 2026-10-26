@@ -12,6 +12,7 @@
   "command.addMissingEnd.title": "図を閉じる行を補う",
   "command.diagramAction.title": "図の操作を実行する",
   "command.insertTemplate.title": "図のテンプレートを挿入する",
+  "command.goToDiagram.title": "文書内の図へ移動…",
   "command.openPreview.title": "図のプレビューを開く",
   "command.openPreviewToSide.title": "図のプレビューを横に開く",
   "config.theme.description": "プレビューに表示する図の配色を指定します。\"auto\" は VS Code の配色に合わせます。\"light\" または \"dark\" も選べます。図のテーマや Azure アイコンが見えにくくなる場合は、その図だけ配色を切り替えます。",

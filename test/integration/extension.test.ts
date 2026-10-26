@@ -2288,6 +2288,70 @@ describe('naming a diagram (dist)', () => {
   });
 });
 
+describe('going to a diagram (dist)', () => {
+  const run = (): Promise<unknown> => Promise.resolve(vscodeStub._test.registeredCommands.get('plantumlLocal.goToDiagram')?.());
+  const QUOTED = ['> ```puml', '> @startmindmap', '> * Root', '> @endmindmap', '> ```'].join('\n');
+
+  it('lists the diagrams of the active Markdown document in source order, and moves to the one picked', async () => {
+    const editor = makeEditor('file:///c/goto/doc.md', ['# Doc', '', NAMED_BLOCK, '', QUOTED].join('\n'), 0);
+    vscodeStub._test.setActiveEditor(editor);
+    vscodeStub._test.quickPickReply = 'Diagram without a name';
+    try {
+      await run();
+    } finally {
+      vscodeStub._test.quickPickReply = null;
+      vscodeStub._test.setActiveEditor(undefined);
+    }
+    expect(vscodeStub._test.quickPicksShown.at(-1)).toEqual({ title: 'Go to Diagram in Document', labels: ['orders', 'Diagram without a name'] });
+    expect(vscodeStub._test.shownDocuments.at(-1)).toEqual({ uri: 'file:///c/goto/doc.md', line: 8 });
+  });
+
+  it('reads the document again when it changes while the list is open, and moves to where the block is then', async () => {
+    const editor = makeEditor('file:///c/goto/moving.md', ['# Doc', NAMED_BLOCK].join('\n'), 0);
+    vscodeStub._test.setActiveEditor(editor);
+    vscodeStub._test.quickPickReply = 'orders';
+    const shown = vscodeStub._test.quickPicksShown.length;
+    const done = run();
+    // The list is open: two lines go in above the block before the pick.
+    expect(vscodeStub._test.quickPicksShown).toHaveLength(shown + 1);
+    editor.document.setText(['# Doc', '', 'intro', NAMED_BLOCK].join('\n'));
+    editor.document.version = 2;
+    vscodeStub._test.changeDocument(editor.document);
+    try {
+      await done;
+    } finally {
+      vscodeStub._test.quickPickReply = null;
+      vscodeStub._test.setActiveEditor(undefined);
+    }
+    expect(vscodeStub._test.shownDocuments.at(-1)).toEqual({ uri: 'file:///c/goto/moving.md', line: 3 });
+  });
+
+  it('moves nowhere when the list is dismissed, says when there is no diagram, and asks for a Markdown file', async () => {
+    const moved = vscodeStub._test.shownDocuments.length;
+    const shown = vscodeStub._test.quickPicksShown.length;
+    vscodeStub._test.setActiveEditor(makeEditor('file:///c/goto/dismissed.md', NAMED_BLOCK, 0));
+    await run();
+    expect(vscodeStub._test.quickPicksShown).toHaveLength(shown + 1);
+    expect(vscodeStub._test.shownDocuments).toHaveLength(moved);
+
+    const infos = vscodeStub._test.notifications.info.length;
+    vscodeStub._test.setActiveEditor(makeEditor('file:///c/goto/empty.md', '# Nothing here\n', 0));
+    await run();
+    expect(vscodeStub._test.notifications.info.slice(infos)).toEqual(['No diagrams found in this file.']);
+
+    const warnings = vscodeStub._test.notifications.warn.length;
+    vscodeStub._test.setActiveEditor(makeEditor('file:///c/goto/flows.puml', '@startuml\nA -> B\n@enduml', 0, { languageId: 'plantuml' }));
+    try {
+      await run();
+    } finally {
+      vscodeStub._test.setActiveEditor(undefined);
+    }
+    expect(vscodeStub._test.notifications.warn.slice(warnings)).toEqual(['Open a Markdown file to go to one of its diagrams.']);
+    expect(vscodeStub._test.quickPicksShown).toHaveLength(shown + 1);
+    expect(vscodeStub._test.shownDocuments).toHaveLength(moved);
+  });
+});
+
 describe('copying SVG text (dist)', () => {
   const copies = (): string[] => vscodeStub._test.clipboardWrites;
   const run = async (...args: unknown[]): Promise<void> => {

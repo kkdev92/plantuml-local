@@ -249,6 +249,18 @@ file with no `@start…` line, whose lines are meant to be included, gets
 nothing. `plantumlLocal.codeLens.enabled` turns the actions off, per folder if
 wanted; so does VS Code's `editor.codeLens`, for every extension's.
 
+### Going to a diagram in a Markdown file
+
+*PlantUML Local: Go to Diagram in Document…* lists the diagram blocks of the
+Markdown file in the editor — named or not, drawn or not, in a block quote or
+a list item — each with its line, the kind its start line declares, the
+heading above it and its title or first line, and moves the cursor to the
+block picked. The list filters on all of that: `mind` finds the mind map,
+`Orders` the blocks under that heading. Edited while the list is open, the
+file is read again, so a pick lands where the block is then. Nothing is drawn
+for the list, and VS Code's own outline of the headings is as it was. From the
+block, the *Preview* action above it opens the Markdown preview.
+
 ### Completion
 
 In a diagram — a ` ```plantuml ` block or a `.puml` file — suggestions open on:

@@ -124,19 +124,21 @@ function frontMatterEnd(lines: readonly string[]): number {
  * diagram block can start.
  */
 export function isProseLine(text: string, line: number): boolean {
+  return proseLinesOf(text)(line);
+}
+
+/**
+ * {@link isProseLine} for every line of `text`, the document read once: for
+ * a reader that asks about many of its lines.
+ */
+export function proseLinesOf(text: string): (line: number) => boolean {
   const lines = splitLines(text);
-  if (line <= frontMatterEnd(lines)) {
-    return false;
-  }
-  return !parser
+  const front = frontMatterEnd(lines);
+  const blocks = parser
     .parse(withoutFrontMatter(lines).join('\n'), {})
-    .some(
-      (token) =>
-        (token.type === 'fence' || token.type === 'code_block' || token.type === 'html_block') &&
-        token.map !== null &&
-        line >= token.map[0] &&
-        line < token.map[1]
-    );
+    .filter((token) => (token.type === 'fence' || token.type === 'code_block' || token.type === 'html_block') && token.map !== null)
+    .map((token) => token.map as [number, number]);
+  return (line) => line > front && !blocks.some(([start, end]) => line >= start && line < end);
 }
 
 /**
