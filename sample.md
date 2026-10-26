@@ -2,7 +2,7 @@
 
 Open the preview of this file: the preview button at the top right of the editor, or **Markdown: Open Preview** (`Ctrl+Shift+V` by default). Every block below renders locally — no Java, no server, no network.
 
-A block is a diagram when its language is `plantuml` or `puml`. The blocks under [What the preview reports](#what-the-preview-reports) go wrong on purpose. For a PlantUML file of its own, open [sample.puml](sample.puml).
+A block is a diagram when its language is `plantuml` or `puml`. In the editor, *Preview*, *Export SVG* and *Export PNG* above each block act on that diagram, and *PlantUML Local: Go to Diagram in Document…* lists the blocks to go to. The blocks under [What the preview reports](#what-the-preview-reports) go wrong on purpose. For a PlantUML file of its own, open [sample.puml](sample.puml).
 
 ## Use-case diagram (system boundary, include / extend)
 
@@ -297,7 +297,17 @@ stop
 
 ## Writing a diagram
 
-In a block, suggestions open on `@` or `!` at the start of a line, on `!theme ` and on `<&`. Outside a block, type `puml` and press `Ctrl+Space` for a whole block from one of six templates, or run *PlantUML Local: Insert Diagram Template*.
+In a block, suggestions open on `@` or `!` at the start of a line, on `!theme ` and on `<&`. Outside a block, type `puml` and press `Ctrl+Space` for a whole block from one of sixteen templates, or run *PlantUML Local: Insert Diagram Template*.
+
+A swatch sits beside each colour a diagram sets, such as the two below; clicking it opens VS Code's colour picker, and the pick is written back as `#RRGGBB`.
+
+```plantuml
+@startuml
+skinparam sequenceArrowColor #2E7D32
+participant "Web shop" as Shop #LightBlue
+Customer -> Shop : Place order
+@enduml
+```
 
 ## What the preview reports
 
@@ -309,6 +319,14 @@ These blocks go wrong on purpose. Each gets a message in the preview, the rest o
 @startuml
 !include <aws/AWSCommon>
 Alice -> Bob
+@enduml
+```
+
+### A formula in `<math>` (left blank, with a note)
+
+```plantuml
+@startuml
+Alice -> Bob : <math>x^2 + y^2 = z^2</math>
 @enduml
 ```
 
@@ -330,6 +348,8 @@ Alice -> Bob
 ```
 
 ### No `@enduml` (drawn anyway, with a note)
+
+In the editor, the light bulb on its warning adds the end line.
 
 ```plantuml
 @startuml
