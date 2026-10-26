@@ -47,6 +47,7 @@ Your diagram source is processed locally and is not sent to a rendering service.
 - **Problems Panel**: Errors, warnings and unsupported syntax in the diagrams of open Markdown and PlantUML files are listed with their line, preview or not
 - **Writing Help**: Completion for start lines, directives, themes and icons, templates for sixteen kinds of diagram, and quick fixes that name a diagram for export and add a missing end line
 - **Actions Above Each Diagram**: *Preview*, *Export SVG* and *Export PNG* sit above the first line of each diagram, in `.puml` files and Markdown alike, and act on that diagram
+- **Colours**: A swatch beside each colour a diagram sets — a `skinparam` value, an element's colour, a `<style>` property — opens VS Code's colour picker, which writes the pick back as `#RRGGBB`
 - **Export**: Diagrams can be written to SVG or PNG files — one, a whole document or a whole folder — and referenced from the Markdown, for hosts such as GitHub that do not draw PlantUML
 - **Multi-Diagram Pages**: Any number of diagrams per page; renders are serialised so results never mix
 - **Dark-Mode Aware**: Diagrams re-render to match your colour theme, or pin the palette via settings
@@ -291,6 +292,22 @@ those characters, or with *Trigger Suggest* (`Ctrl+Space`) — type `puml` and
 press it for the templates.
 
 ![Typing puml and Ctrl+Space in a Markdown file inserts a sequence diagram template; Tab moves through its names while the preview draws it](images/insert-template.gif)
+
+### Colours
+
+A swatch sits beside each colour a diagram sets where the extension can edit
+it: the value of a `skinparam`, on its own line or in a `skinparam … { }`
+block; the colour at the end of an element's declaration, as in `class Order
+#pink`; and a colour property in a `<style>` block. The swatch shows the
+colour as written — `#ABC`, `#AABBCC` or a name the bundled engine knows,
+such as `#pink` or `#Business` — not as the palette draws it in a dark
+editor. Clicking it opens VS Code's colour picker, and a pick is written back
+as `#RRGGBB` in place of the token, as one edit. A pick with an alpha is
+offered nothing to write, as the token cannot carry it. A gradient
+(`#red/blue`), a colour with a style modifier (`#red;line:blue`), a colour
+with an alpha (`#80AABBCC`) and a `#` in a comment, a string or a URL get no
+swatch and are left as they are. VS Code's `editor.colorDecorators`, per
+language if wanted, turns the swatches off.
 
 ### Problems
 

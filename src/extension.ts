@@ -68,7 +68,9 @@ import {
 } from './export/exporter';
 import { MAX_DOCUMENTS, findDocuments } from './export/folder';
 import { isLastExport, withExport, type ExportRecords } from './export/ownership';
+import { findColors, hexOf, rgbOf } from './core/colors';
 import { splitLines } from './core/lines';
+import { documentColumnOf, documentLineOf } from './core/positions';
 import { hasStartLine } from './core/shape';
 import { errorMessage } from './core/messages';
 import { lineAfterEdits, planReferenceEdits, type ReferenceEdit } from './export/references';
@@ -385,7 +387,7 @@ interface ActiveDocument {
  */
 function toDiagnostic(problem: BlockProblem, lines: readonly string[], container: string): vscode.Diagnostic {
   const text = lines[problem.line] ?? '';
-  const inside = text.startsWith(container) ? container.length : 0;
+  const inside = documentColumnOf(text, container, 0);
   const rest = text.slice(inside);
   const start = inside + rest.length - rest.trimStart().length;
   const diagnostic = new vscode.Diagnostic(
@@ -2090,6 +2092,44 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         await vscode.window.showTextDocument(document, { selection: new vscode.Range(block.openLine, 0, block.openLine, 0) });
         await context.commands.execute('markdown.showPreviewToSide', document.uri);
       }
+    },
+  });
+
+  module.raw.register({
+    id: 'plantuml.colors',
+    bind: ({ registrations }): undefined => {
+      // A swatch beside each colour a diagram sets where the picker can edit
+      // it (src/core/colors.ts), and VS Code's colour picker on it. The
+      // swatch shows the colour as written, not as the palette draws it.
+      // `editor.colorDecorators` turns the swatches off; a pick writes
+      // `#RRGGBB`, and a pick with an alpha, which the source cannot carry
+      // without losing it, is offered nothing.
+      registrations.own(
+        vscode.languages.registerColorProvider([{ language: 'markdown' }, { language: 'plantuml' }], {
+          provideDocumentColors: (document) => {
+            const text = document.getText();
+            const lines = splitLines(text);
+            return diagramsOf(document, text).flatMap((block) =>
+              findColors(block.source).map((use) => {
+                const line = documentLineOf(block.sourceLine, use.line);
+                const documentLine = lines[line] ?? '';
+                const { red, green, blue } = rgbOf(use.hex);
+                return new vscode.ColorInformation(
+                  new vscode.Range(
+                    line,
+                    documentColumnOf(documentLine, block.container, use.start),
+                    line,
+                    documentColumnOf(documentLine, block.container, use.end)
+                  ),
+                  new vscode.Color(red, green, blue, 1)
+                );
+              })
+            );
+          },
+          provideColorPresentations: (color) => (color.alpha === 1 ? [new vscode.ColorPresentation(hexOf(color))] : []),
+        })
+      );
+      return undefined;
     },
   });
 

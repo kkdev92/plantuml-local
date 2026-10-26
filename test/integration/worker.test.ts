@@ -5,6 +5,7 @@ import { runInNewContext } from 'node:vm';
 import { Worker } from 'node:worker_threads';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import { NAMED_COLORS, findColors } from '../../src/core/colors';
 import { EMOJI_UNAVAILABLE } from '../../src/core/constants';
 import type { RenderResponseMessage } from '../../src/core/types';
 import { TEMPLATES } from '../../src/language/completion';
@@ -497,6 +498,47 @@ describe('render worker (dist)', () => {
       expect(svg).toContain('Hello');
       expect(svg).not.toContain('data:image');
     });
+  });
+});
+
+describe('the colours the picker edits (dist, re-check on every engine update)', () => {
+  // Each position the picker shows a colour at, with the colour the engine
+  // paints there: the fill or the stroke of the element.
+  it.each([
+    ['a skinparam', ['skinparam rectangleBackgroundColor #AABBCC', 'rectangle R'], 'fill'],
+    ['a skinparam block', ['skinparam rectangle {', '  BackgroundColor #AABBCC', '}', 'rectangle R'], 'fill'],
+    ['an element', ['rectangle R #AABBCC'], 'fill'],
+    ['an element with an alias', ['rectangle "Named" as r #AABBCC'], 'fill'],
+    ['a class', ['class Foo #AABBCC'], 'fill'],
+    ['a participant', ['participant Alice #AABBCC', 'Alice -> Bob'], 'fill'],
+    ['a state', ['state S #AABBCC'], 'fill'],
+    ['a style background', ['<style>', 'rectangle {', '  BackgroundColor #AABBCC', '}', '</style>', 'rectangle R'], 'fill'],
+    ['a style line', ['<style>', 'rectangle {', '  LineColor #AABBCC;', '}', '</style>', 'rectangle R'], 'stroke'],
+  ])('paints %s with the colour the source sets, which the picker finds there', async (_what, lines, attribute) => {
+    const source = ['@startuml', ...lines, '@enduml'].join('\n');
+    const svg = await render(source);
+    expect(recognizeEngineError(svg)).toBeNull();
+    expect(svg).toMatch(new RegExp(`${attribute}="#AABBCC"`, 'i'));
+    expect(findColors(source).map((use) => use.hex)).toEqual(['#AABBCC']);
+  });
+
+  it('reads three digits and a name in any case as the picker does', async () => {
+    expect(await render('@startuml\nrectangle R #ABC\n@enduml')).toMatch(/fill="#AABBCC"/i);
+    expect(await render('@startuml\nrectangle R #pink\n@enduml')).toMatch(/fill="#FFC0CB"/i);
+    expect(await render('@startuml\nrectangle R #PINK\n@enduml')).toMatch(/fill="#FFC0CB"/i);
+  });
+
+  it('draws a name it does not know as an error, and a colour with an alpha as given, which the picker leaves alone', async () => {
+    expect(recognizeEngineError(await render('@startuml\nrectangle R #notacolour\n@enduml'))).not.toBeNull();
+    const alpha = '@startuml\nrectangle R #80AABBCC\n@enduml';
+    expect(await render(alpha)).toMatch(/fill="#80AABBCC"/i);
+    expect(findColors(alpha)).toEqual([]);
+  });
+
+  it.each(Object.entries(NAMED_COLORS))('draws #%s as %s, as the picker shows it', async (name, hex) => {
+    const svg = await render(`@startuml\nrectangle R #${name}\n@enduml`);
+    expect(recognizeEngineError(svg)).toBeNull();
+    expect(svg.toUpperCase()).toContain(`FILL="${hex}"`);
   });
 });
 
