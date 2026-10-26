@@ -68,7 +68,7 @@ import {
 import { MAX_DOCUMENTS, findDocuments } from './export/folder';
 import { isLastExport, withExport, type ExportRecords } from './export/ownership';
 import { splitLines } from './core/lines';
-import { START, forEachCodeLine } from './core/shape';
+import { hasStartLine } from './core/shape';
 import { errorMessage } from './core/messages';
 import { lineAfterEdits, planReferenceEdits, type ReferenceEdit } from './export/references';
 import {
@@ -83,6 +83,7 @@ import {
 } from './language/completion';
 import { templatePlace } from './language/templates';
 import { missingEndAt, namesDiagram, unnamedAt, withName } from './language/code-actions';
+import { diagramLenses, diagramTarget, targetBlock, type DiagramAction, type DiagramTarget } from './language/code-lens';
 import { foldingRanges } from './language/folding';
 import { declarations, type Declaration } from './language/symbols';
 import {
@@ -146,6 +147,8 @@ export const Settings = defineSettings({
     // Read as written for the document (includePathsOf), so that a value of
     // the wrong type is reported rather than taken as no folders.
     [CONFIG.INCLUDE_PATHS]: setting.stringArray({ default: [], scope: 'resource' }),
+    // Resource-scoped, so a folder can do without the lenses: read per document.
+    [CONFIG.CODE_LENS_ENABLED]: setting.boolean({ default: true, scope: 'resource' }),
   },
 });
 
@@ -208,6 +211,15 @@ export const AssignDiagramName = defineCommandContract<readonly unknown[], void>
  */
 export const AddMissingEnd = defineCommandContract<readonly unknown[], void>({
   id: COMMANDS.ADD_MISSING_END,
+});
+
+/**
+ * Runs a lens's action on its diagram: shows it, or writes it as SVG or PNG.
+ * Given the target the lens was made with (src/language/code-lens.ts), which
+ * names a diagram of an open document, and acts on nothing else.
+ */
+export const RunDiagramAction = defineCommandContract<readonly unknown[], void>({
+  id: COMMANDS.DIAGRAM_ACTION,
 });
 
 /** Inserts a diagram template where a diagram can start (src/language/templates.ts). */
@@ -365,18 +377,6 @@ function diagramsOf(document: vscode.TextDocument, text: string): PlantUmlBlock[
   return document.languageId === 'plantuml'
     ? findFileDiagrams(text, withoutExtension(fileNameOf(document)))
     : findPlantUmlBlocks(text);
-}
-
-/**
- * Whether `source` has a line that starts a diagram, outside comments. A
- * PlantUML file without one is lines to include, not a diagram.
- */
-function hasStartLine(source: string): boolean {
-  let found = false;
-  forEachCodeLine(source, (line) => {
-    found ||= START.test(line);
-  });
-  return found;
 }
 
 /** The last segment of a document's path: `flows.puml`. */
@@ -1916,6 +1916,104 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
       workspace: Workspace,
     },
     execute: exportAtCursor('png'),
+  });
+
+  /**
+   * A lens's action on its diagram. The target names a document open here
+   * and a diagram in it as the document was when the lens was made; the
+   * diagram is found again before anything is done (src/language/code-lens.ts),
+   * so a lens left from before an edit does not act on another diagram, and
+   * an argument made up elsewhere opens no file. An export goes the way of
+   * the export commands, with their checks.
+   */
+  module.commands.handle(RunDiagramAction, {
+    inject: {
+      viewers: Viewers,
+      renderer: Renderer,
+      palettes: Palettes,
+      settings: Settings.token,
+      exportRecords: ExportedFiles.token,
+      workspace: Workspace,
+    },
+    execute: async (context: OperationContext, args, { viewers, ...deps }): Promise<void> => {
+      const target = diagramTarget(args[0]);
+      if (target === null) {
+        return;
+      }
+      const document = vscode.workspace.textDocuments.find((candidate) => candidate.uri.toString() === target.uri);
+      const block =
+        document !== undefined && isDiagramFile(document)
+          ? targetBlock(diagramsOf(document, document.getText()), target, document.version)
+          : null;
+      if (document === undefined || block === null) {
+        void context.notify.warn(context.l10n.t('The file has changed. Check the diagram again.'));
+        return;
+      }
+      if (target.action !== 'preview') {
+        await exportAtCursor(target.action)(context, [{ uri: document.uri.toString(), line: block.openLine }], deps);
+      } else if (document.languageId === 'plantuml') {
+        // The file's viewer, on this diagram; the cursor stays where it is.
+        viewers.open(document, block.openLine, vscode.ViewColumn.Beside);
+      } else {
+        // VS Code's Markdown preview takes no block to show: the block's
+        // source is selected, and the preview opened beside it follows the
+        // editor as far as its scrolling does.
+        await vscode.window.showTextDocument(document, { selection: new vscode.Range(block.openLine, 0, block.openLine, 0) });
+        await context.commands.execute('markdown.showPreviewToSide', document.uri);
+      }
+    },
+  });
+
+  module.raw.register({
+    id: 'plantuml.codeLens',
+    inject: { settings: Settings.token, l10n: Localization },
+    bind: ({ registrations }, { settings, l10n }): undefined => {
+      // Preview, Export SVG and Export PNG above the first line of each
+      // diagram (src/language/code-lens.ts). VS Code asks no provider while
+      // `editor.codeLens` is off; `plantumlLocal.codeLens.enabled` is the
+      // extension's own switch, read for the document.
+      const titles: Record<DiagramAction, string> = {
+        preview: l10n.t('Preview'),
+        svg: l10n.t('Export SVG'),
+        png: l10n.t('Export PNG'),
+      };
+      const changed = registrations.own(new vscode.EventEmitter<void>());
+      registrations.own(
+        vscode.workspace.onDidChangeConfiguration((event) => {
+          if (event.affectsConfiguration(`${EXTENSION_ID}.${CONFIG.CODE_LENS_ENABLED}`)) {
+            changed.fire();
+          }
+        })
+      );
+      registrations.own(
+        vscode.languages.registerCodeLensProvider([{ language: 'markdown' }, { language: 'plantuml' }], {
+          onDidChangeCodeLenses: changed.event,
+          provideCodeLenses: (document) => {
+            if (!isDiagramFile(document) || settings.read({ resource: document.uri }).values[CONFIG.CODE_LENS_ENABLED] === false) {
+              return [];
+            }
+            const plantUml = document.languageId === 'plantuml';
+            return diagramLenses(diagramsOf(document, document.getText()), plantUml).flatMap(({ block, actions }) =>
+              actions.map((action) => {
+                const target: DiagramTarget = {
+                  action,
+                  uri: document.uri.toString(),
+                  version: document.version,
+                  line: block.openLine,
+                  name: block.name,
+                };
+                return new vscode.CodeLens(new vscode.Range(block.openLine, 0, block.openLine, 0), {
+                  title: titles[action],
+                  command: COMMANDS.DIAGRAM_ACTION,
+                  arguments: [target],
+                });
+              })
+            );
+          },
+        })
+      );
+      return undefined;
+    },
   });
 
   module.commands.handle(ExportAllSvg, {

@@ -46,6 +46,7 @@ Your diagram source is processed locally and is not sent to a rendering service.
 - **Fault-Tolerant**: A syntax error shows up inline at the broken diagram; the rest of the page stays intact
 - **Problems Panel**: Errors, warnings and unsupported syntax in the diagrams of open Markdown and PlantUML files are listed with their line, preview or not
 - **Writing Help**: Completion for start lines, directives, themes and icons, templates for six kinds of diagram, and quick fixes that name a diagram for export and add a missing end line
+- **Actions Above Each Diagram**: *Preview*, *Export SVG* and *Export PNG* sit above the first line of each diagram, in `.puml` files and Markdown alike, and act on that diagram
 - **Export**: Diagrams can be written to SVG or PNG files — one, a whole document or a whole folder — and referenced from the Markdown, for hosts such as GitHub that do not draw PlantUML
 - **Multi-Diagram Pages**: Any number of diagrams per page; renders are serialised so results never mix
 - **Dark-Mode Aware**: Diagrams re-render to match your colour theme, or pin the palette via settings
@@ -227,6 +228,22 @@ as one with an error or one past the size limit of a PNG, is not copied either.
 
 The panel shows the SVG as an image, so nothing in it can run, and loads
 nothing but its own script and stylesheet.
+
+### Actions above each diagram
+
+*Preview*, *Export SVG* and *Export PNG* sit above the first line of each
+diagram — the `@start…` line in a `.puml` file, the opening fence of a block
+in Markdown — and act on that diagram, wherever the cursor is. In a `.puml`
+file, *Preview* opens the file's preview beside the editor on that diagram. In
+Markdown, it selects the block and opens VS Code's Markdown preview beside the
+editor, which follows the editor's scrolling rather than the block. The two
+exports write the diagram as *Export Diagram as SVG* and *Export Diagram as
+PNG* do, under the same conditions: a saved file in a trusted workspace, and a
+name for the diagram, asked for when it has none. A block holding several
+diagrams, which cannot be exported as one, gets *Preview* only, and a `.puml`
+file with no `@start…` line, whose lines are meant to be included, gets
+nothing. `plantumlLocal.codeLens.enabled` turns the actions off, per folder if
+wanted; so does VS Code's `editor.codeLens`, for every extension's.
 
 ### Completion
 
@@ -599,6 +616,7 @@ and would show the referenced image as a second copy.
 | `plantumlLocal.hideExportedImages` | `true` | Hide images marked `#plantuml-local` in the preview, so an exported diagram is not shown next to its block's render |
 | `plantumlLocal.preview.updateMode` | `onChange` | When a changed diagram is drawn again in the previews: `onChange`, `onSave`, or `manual` (with *Clear Render Cache and Re-render*). Can be set per folder |
 | `plantumlLocal.diagnostics.enabled` | `true` | List the problems of the diagrams in open Markdown and PlantUML files in the Problems panel; can be set per folder |
+| `plantumlLocal.codeLens.enabled` | `true` | Show *Preview*, *Export SVG* and *Export PNG* above each diagram in Markdown and PlantUML files; `editor.codeLens` must be on as well. Can be set per folder |
 | `plantumlLocal.includePaths` | `[]` | Folders a bare `!include` name is also looked for in, after the folder of the including file: relative to the workspace folder, up to 16. Can be set per folder; not used until the workspace is trusted |
 
 A diagram that picks a `!theme` is drawn in that theme's colours, and most

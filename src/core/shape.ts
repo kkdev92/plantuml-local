@@ -44,6 +44,18 @@ export const END = /^\s*[@\\]end/;
 const NEWPAGE = /^\s*newpage(?:\s|$)/i;
 
 /**
+ * Whether `source` has a line that starts a diagram, outside comments. A
+ * PlantUML file without one is lines to include, not a diagram.
+ */
+export function hasStartLine(source: string): boolean {
+  let found = false;
+  forEachCodeLine(source, (line) => {
+    found ||= START.test(line);
+  });
+  return found;
+}
+
+/**
  * Calls `visit` with each line the engine reads as part of the diagram text,
  * skipping comment lines and block comments, with the line's index.
  */

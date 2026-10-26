@@ -34,6 +34,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   such a diagram says so in its notice and in the Output panel. Comment
   lines, the braces of a Salt diagram and `{{` inside a label, which the
   engine draws as text, are left alone.
+- **Preview, Export SVG and Export PNG sit above each diagram.** The first
+  line of each diagram — the `@start…` line in a `.puml` file, the opening
+  fence of a block in Markdown — carries the three actions, which act on that
+  diagram wherever the cursor is: the `.puml` preview opens beside the editor
+  on it, a Markdown block is selected and VS Code's Markdown preview opened
+  beside the editor, and the exports write it as the export commands do,
+  under the same conditions. An action left from before an edit finds its
+  diagram again by name, and does nothing rather than act on another. A
+  block holding several diagrams gets *Preview* only; a `.puml` file with no
+  `@start…` line gets nothing. `plantumlLocal.codeLens.enabled` turns the
+  actions off, per folder if wanted, besides VS Code's `editor.codeLens`.
 
 ### Changed
 

@@ -8,6 +8,7 @@ import { createContextStub, type ContextStub } from './helpers/context-stub';
 import {
   createVscodeStub,
   type CodeActionStub,
+  type CodeLensStub,
   type CompletionItemStub,
   type DiagnosticStub,
   type DocumentSymbolStub,
@@ -2260,6 +2261,185 @@ describe('naming a diagram (dist)', () => {
     const lines = editor.document.getText().split('\n');
     expect(lines[3]).toBe('@startuml(id=second)');
     expect(lines[6]).toBe('@startmindmap(id=mind)');
+  });
+});
+
+describe('diagram lenses (dist)', () => {
+  const FLOWS = ['@startuml(id=first)', 'Alice -> Bob : first', '@enduml', '', '@startuml(id=second)', 'Carol -> Dave : second', '@enduml', ''].join(
+    '\n'
+  );
+  const lensesOf = (document: TextEditorStub['document']): CodeLensStub[] => {
+    const registration = vscodeStub._test.codeLensProviders[0];
+    if (registration === undefined) {
+      throw new Error('no code lens provider registered');
+    }
+    return registration.provider.provideCodeLenses(document, { isCancellationRequested: false }) ?? [];
+  };
+  const summary = (lens: CodeLensStub): [number, string | undefined] => [lens.range.start.line, lens.command?.title];
+  const run = async (lens: CodeLensStub | undefined): Promise<void> => {
+    await vscodeStub._test.registeredCommands.get(lens?.command?.command ?? '')?.(...(lens?.command?.arguments ?? []));
+  };
+  const written = (folder: string): string[] => [...vscodeStub._test.writtenFiles.keys()].filter((key) => key.startsWith(folder)).sort();
+  const commandsSince = (count: number): { id: string; args: unknown[] }[] =>
+    vscodeStub._test.commandCalls.slice(count).filter((call) => call.id !== 'setContext');
+
+  it('is registered for Markdown and PlantUML files, and says when its lenses change', () => {
+    expect(vscodeStub._test.codeLensProviders).toHaveLength(1);
+    expect(vscodeStub._test.codeLensProviders[0]?.selector).toEqual([{ language: 'markdown' }, { language: 'plantuml' }]);
+    expect(typeof vscodeStub._test.codeLensProviders[0]?.provider.onDidChangeCodeLenses).toBe('function');
+  });
+
+  it('puts Preview, Export SVG and Export PNG above each diagram of a PlantUML file, naming the document as it is', () => {
+    const lenses = lensesOf(makeEditor('file:///c/lens/flows.puml', FLOWS, 0, { languageId: 'plantuml' }).document);
+    expect(lenses.map(summary)).toEqual([
+      [0, 'Preview'],
+      [0, 'Export SVG'],
+      [0, 'Export PNG'],
+      [4, 'Preview'],
+      [4, 'Export SVG'],
+      [4, 'Export PNG'],
+    ]);
+    expect(lenses[4]?.command).toEqual({
+      title: 'Export SVG',
+      command: 'plantumlLocal.diagramAction',
+      arguments: [{ action: 'svg', uri: 'file:///c/lens/flows.puml', version: 1, line: 4, name: 'second' }],
+    });
+    // A file with no start line holds lines to include: nothing to act on.
+    const shared = makeEditor('file:///c/lens/shared.iuml', '!procedure $x()\nA -> B\n!endprocedure\n', 0, { languageId: 'plantuml' });
+    expect(lensesOf(shared.document)).toEqual([]);
+  });
+
+  it('puts them above a Markdown block, and Preview only above a block holding several diagrams', () => {
+    const text = ['# Doc', '', NAMED_BLOCK, '', '```plantuml', '@startuml', 'A -> B', '@enduml', '@startuml', 'C -> D', '@enduml', '```'].join('\n');
+    const lenses = lensesOf(makeEditor('file:///c/lens/doc.md', text, 0).document);
+    expect(lenses.map(summary)).toEqual([
+      [2, 'Preview'],
+      [2, 'Export SVG'],
+      [2, 'Export PNG'],
+      [8, 'Preview'],
+    ]);
+    expect(lenses[0]?.command?.arguments).toEqual([{ action: 'preview', uri: 'file:///c/lens/doc.md', version: 1, line: 2, name: 'orders' }]);
+    expect(lenses[3]?.command?.arguments).toEqual([{ action: 'preview', uri: 'file:///c/lens/doc.md', version: 1, line: 8, name: null }]);
+  });
+
+  it('shows none while plantumlLocal.codeLens.enabled is off for the document, and says so when that changes', () => {
+    const editor = makeEditor('file:///c/lensoff/flows.puml', FLOWS, 0, { languageId: 'plantuml' });
+    let changes = 0;
+    const listening = vscodeStub._test.codeLensProviders[0]!.provider.onDidChangeCodeLenses!(() => {
+      changes += 1;
+    });
+    try {
+      vscodeStub._test.setConfiguration('codeLens.enabled', false, 'file:///c/lensoff');
+      expect(changes).toBe(1);
+      expect(lensesOf(editor.document)).toEqual([]);
+      // Another folder keeps its lenses.
+      expect(lensesOf(makeEditor('file:///c/lens/flows.puml', FLOWS, 0, { languageId: 'plantuml' }).document)).toHaveLength(6);
+    } finally {
+      vscodeStub._test.setConfiguration('codeLens.enabled', undefined, 'file:///c/lensoff');
+      listening.dispose();
+    }
+    expect(changes).toBe(2);
+    expect(lensesOf(editor.document)).toHaveLength(6);
+  });
+
+  it('exports the diagram the lens belongs to, wherever the cursor is', async () => {
+    const flows = makeEditor('file:///c/lensexport/flows.puml', FLOWS, 0, { languageId: 'plantuml' });
+    vscodeStub._test.openDocument(flows.document);
+    // The cursor is in another document meanwhile.
+    vscodeStub._test.setActiveEditor(makeEditor('file:///c/lensexport/other.md', NAMED_BLOCK, 1));
+    try {
+      await run(lensesOf(flows.document)[4]);
+    } finally {
+      vscodeStub._test.setActiveEditor(undefined);
+      vscodeStub._test.closeDocument(flows.document);
+    }
+    expect(written('file:///c/lensexport/')).toEqual(['file:///c/lensexport/images/second.svg']);
+    expect(vscodeStub._test.writtenFiles.get('file:///c/lensexport/images/second.svg')).toContain('second');
+  });
+
+  it('finds a named diagram again once lines were added above it, and leaves an unnamed one alone once its document changed', async () => {
+    const flows = makeEditor('file:///c/lensstale/flows.puml', FLOWS, 0, { languageId: 'plantuml' });
+    vscodeStub._test.openDocument(flows.document);
+    const lens = lensesOf(flows.document)[4];
+    // The first diagram grows by a line: the second starts on line 5 now.
+    flows.document.setText(FLOWS.replace('Alice -> Bob : first', 'Alice -> Bob : first\nBob -> Alice : again'));
+    flows.document.version = 2;
+
+    const blocks = ['```plantuml', '@startuml', 'A -> B : one', '@enduml', '```', '', '```plantuml', '@startuml', 'A -> B : two', '@enduml', '```'];
+    const notes = makeEditor('file:///c/lensstale/notes.md', blocks.join('\n'), 0);
+    vscodeStub._test.openDocument(notes.document);
+    const unnamed = lensesOf(notes.document)[4];
+    expect(unnamed?.command?.arguments).toEqual([{ action: 'svg', uri: 'file:///c/lensstale/notes.md', version: 1, line: 6, name: null }]);
+    notes.document.setText(['# Title', ...blocks].join('\n'));
+    notes.document.version = 2;
+
+    const warnings = vscodeStub._test.notifications.warn.length;
+    const prompts = vscodeStub._test.inputBoxPrompts.length;
+    try {
+      await run(lens);
+      await run(unnamed);
+    } finally {
+      vscodeStub._test.closeDocument(flows.document);
+      vscodeStub._test.closeDocument(notes.document);
+    }
+    expect(written('file:///c/lensstale/')).toEqual(['file:///c/lensstale/images/second.svg']);
+    expect(vscodeStub._test.writtenFiles.get('file:///c/lensstale/images/second.svg')).toContain('second');
+    expect(vscodeStub._test.notifications.warn.slice(warnings)).toEqual(['The file has changed. Check the diagram again.']);
+    expect(vscodeStub._test.inputBoxPrompts).toHaveLength(prompts);
+  });
+
+  it("opens the .puml preview on the lens's diagram, leaving the cursor where it is", async () => {
+    // Named apart from the other tests' flows.puml: the viewer tests find their panel by its title.
+    const flows = makeEditor('file:///c/lensview/lensed.puml', FLOWS, 0, { languageId: 'plantuml' });
+    vscodeStub._test.openDocument(flows.document);
+    vscodeStub._test.setActiveEditor(flows);
+    const before = vscodeStub._test.webviewPanels.length;
+    try {
+      await run(lensesOf(flows.document)[3]);
+      const panel = vscodeStub._test.webviewPanels[before];
+      expect(panel).toMatchObject({ viewType: 'plantumlLocal.viewer', title: 'Preview: lensed.puml' });
+      expect(panel?.column).toBe(vscodeStub.ViewColumn.Beside);
+      panel?.receive({ type: 'ready' });
+      const posted = (): { type: string; items?: string[]; selected?: number }[] =>
+        (panel?.webview.posted ?? []) as { type: string; items?: string[]; selected?: number }[];
+      expect(await waitFor(() => posted().some((message) => message.type === 'render'), 30_000)).toBe(true);
+      expect(posted().find((message) => message.type === 'diagrams')).toMatchObject({
+        items: ['first (line 1)', 'second (line 5)'],
+        selected: 1,
+      });
+      expect(flows.selection.active.line).toBe(0);
+      panel?.dispose();
+    } finally {
+      vscodeStub._test.setActiveEditor(undefined);
+      vscodeStub._test.closeDocument(flows.document);
+    }
+  });
+
+  it("selects a Markdown block's source and opens the Markdown preview beside it", async () => {
+    const editor = makeEditor('file:///c/lensmd/doc.md', `# Doc\n\n${NAMED_BLOCK}\n`, 0);
+    vscodeStub._test.openDocument(editor.document);
+    const calls = vscodeStub._test.commandCalls.length;
+    try {
+      await run(lensesOf(editor.document)[0]);
+    } finally {
+      vscodeStub._test.closeDocument(editor.document);
+    }
+    expect(vscodeStub._test.shownDocuments.at(-1)).toEqual({ uri: 'file:///c/lensmd/doc.md', line: 2 });
+    expect(commandsSince(calls)).toEqual([{ id: 'markdown.showPreviewToSide', args: [editor.document.uri] }]);
+  });
+
+  it('acts on nothing for an argument it did not make, or a document that is not open', async () => {
+    const warnings = vscodeStub._test.notifications.warn.length;
+    const calls = vscodeStub._test.commandCalls.length;
+    const panels = vscodeStub._test.webviewPanels.length;
+    const command = vscodeStub._test.registeredCommands.get('plantumlLocal.diagramAction')!;
+    await command({ action: 'open', uri: 'file:///c/lens/flows.puml', version: 1, line: 0, name: null });
+    await command('file:///c/lens/flows.puml');
+    expect(vscodeStub._test.notifications.warn).toHaveLength(warnings);
+    await command({ action: 'preview', uri: 'file:///c/lens/absent.puml', version: 1, line: 0, name: null });
+    expect(vscodeStub._test.notifications.warn.slice(warnings)).toEqual(['The file has changed. Check the diagram again.']);
+    expect(commandsSince(calls)).toEqual([]);
+    expect(vscodeStub._test.webviewPanels).toHaveLength(panels);
   });
 });
 
