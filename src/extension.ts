@@ -57,6 +57,7 @@ import {
   exportAll,
   exportOne,
   preparePng,
+  prepareSvg,
   writeDocuments,
   type DrawingDeps,
   type DrawnDocument,
@@ -175,6 +176,15 @@ export const ExportSvg = defineCommandContract<readonly unknown[], void>({
 /** Writes the diagram under the cursor to a PNG file, at plantumlLocal.exportPngScale. */
 export const ExportPng = defineCommandContract<readonly unknown[], void>({
   id: COMMANDS.EXPORT_PNG,
+});
+
+/**
+ * Puts the SVG of the diagram under the cursor on the clipboard as text, as
+ * Export Diagram as SVG would write it, without writing a file. The `.puml`
+ * preview names its file and the line of the diagram it shows.
+ */
+export const CopySvgText = defineCommandContract<readonly unknown[], void>({
+  id: COMMANDS.COPY_SVG_TEXT,
 });
 
 /** Writes every named diagram in the active document to SVG files. */
@@ -533,12 +543,8 @@ async function refuseUntrusted(context: OperationContext): Promise<void> {
 
 /**
  * The document to export from, or null after explaining why there is
- * none: a Markdown document, or with `plantUml`, the PlantUML file in the
- * active editor.
- *
- * `vscode.window` rather than the kit's editor service because export
- * needs the document's own URI to resolve a relative directory against,
- * and the cursor's line number rather than its text.
+ * none: the document {@link pickDocument} finds, in a trusted workspace
+ * and saved, so that there is a folder to write beside.
  */
 async function activeDocument(
   context: OperationContext,
@@ -554,7 +560,33 @@ async function activeDocument(
     void refuseUntrusted(context);
     return null;
   }
+  const document = await pickDocument(context, workspace, plantUml, target);
+  if (document === null) {
+    return null;
+  }
+  if (document.textDocument.isUntitled) {
+    // There is no folder to write beside.
+    void context.notify.warn(context.l10n.t('Save the file before exporting.'));
+    return null;
+  }
+  return document;
+}
 
+/**
+ * The document a command acts on, or null after explaining why there is
+ * none: the document `target` names, else a Markdown document, or with
+ * `plantUml`, the PlantUML file in the active editor.
+ *
+ * `vscode.window` rather than the kit's editor service because export
+ * needs the document's own URI to resolve a relative directory against,
+ * and the cursor's line number rather than its text.
+ */
+async function pickDocument(
+  context: OperationContext,
+  workspace: WorkspaceService,
+  plantUml: boolean,
+  target: ExportTarget | null
+): Promise<ActiveDocument | null> {
   const active = vscode.window.activeTextEditor?.document;
   const document =
     target !== null
@@ -566,11 +598,6 @@ async function activeDocument(
         ? active
         : await chooseMarkdownDocument(context, workspace);
   if (document === null) {
-    return null;
-  }
-  if (document.isUntitled) {
-    // There is no folder to write beside.
-    void context.notify.warn(context.l10n.t('Save the file before exporting.'));
     return null;
   }
   const editor = vscode.window.visibleTextEditors.find(
@@ -600,6 +627,26 @@ function exportTarget(value: unknown): ExportTarget | null {
   return typeof uri === 'string' && typeof line === 'number' && Number.isInteger(line) && line >= 0
     ? { uri: vscode.Uri.parse(uri), line }
     : null;
+}
+
+/**
+ * The diagram a command acts on in `document`: the block under the cursor,
+ * or the only block when there is nothing to choose between — a document
+ * picked from a list has no cursor. Null after saying where to put the
+ * cursor.
+ */
+async function diagramAtCursor(context: OperationContext, document: ActiveDocument): Promise<PlantUmlBlock | null> {
+  const blocks = diagramsOf(document.textDocument, document.text);
+  const atCursor = document.line === null ? null : blockAtLine(blocks, document.line);
+  const block = atCursor ?? (blocks.length === 1 ? (blocks[0] ?? null) : null);
+  if (block === null) {
+    await context.notify.warn(
+      document.textDocument.languageId === 'plantuml'
+        ? context.l10n.t('Place the cursor in the source code of the diagram you want to export.')
+        : context.l10n.t('Place the cursor inside the PlantUML code block you want to export.')
+    );
+  }
+  return block;
 }
 
 /** How the settings accessor is seen by the helpers below. */
@@ -949,6 +996,11 @@ function drawingDeps(
             String(fits)
           ),
     pngFailedMessage: l10n.t('The PNG was not created correctly. Try exporting as SVG.'),
+    svgTooLargeMessage: (bytes) =>
+      l10n.t(
+        'The SVG text is {0} MiB, over the 32 MiB that can be copied. Export the diagram as an SVG file instead.',
+        String(Math.ceil(bytes / (1024 * 1024)))
+      ),
     pngScale: (): number => {
       const scale = settings.read({ resource: document }).values[CONFIG.EXPORT_PNG_SCALE];
       return PNG_SCALES.includes(scale as 1 | 2 | 4) ? Number(scale) : 2;
@@ -1471,6 +1523,9 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         exportPng: async (uri, line): Promise<void> => {
           await commands.invoke(ExportPng, { uri, line });
         },
+        copySvgText: async (uri, line): Promise<void> => {
+          await commands.invoke(CopySvgText, { uri, line });
+        },
         // As the PNG button exports it, but with the previews' renders: the
         // diagram shown is often drawn in that palette already.
         copyPng: async (uri, diagram) => {
@@ -1519,6 +1574,7 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         fit: l10n.t('Fit to Window'),
         actualSize: l10n.t('Actual Size'),
         exportPng: l10n.t('Export Diagram as PNG'),
+        copySvgText: l10n.t('Copy Diagram as SVG Text'),
         copy: {
           text: l10n.t('Copy'),
           label: l10n.t('Copy Diagram as PNG'),
@@ -1811,17 +1867,8 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         return;
       }
 
-      const blocks = diagramsOf(document.textDocument, document.text);
-      // The block under the cursor, or the only block when there is nothing
-      // to choose between — a document picked from a list has no cursor.
-      const atCursor = document.line === null ? null : blockAtLine(blocks, document.line);
-      const block = atCursor ?? (blocks.length === 1 ? (blocks[0] ?? null) : null);
+      const block = await diagramAtCursor(context, document);
       if (block === null) {
-        await context.notify.warn(
-          document.textDocument.languageId === 'plantuml'
-            ? context.l10n.t('Place the cursor in the source code of the diagram you want to export.')
-            : context.l10n.t('Place the cursor inside the PlantUML code block you want to export.')
-        );
         return;
       }
 
@@ -1864,13 +1911,7 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         context.logger.warn(message);
         const actions: NoticeAction[] = [];
         if (result.cause === 'source') {
-          // The diagnostics list the same problem for a Markdown or PlantUML
-          // file, unless they are turned off. They check no other file: the
-          // output has it.
-          const listed =
-            isDiagramFile(document.textDocument) &&
-            settings.read({ resource: document.textDocument.uri }).values[CONFIG.DIAGNOSTICS_ENABLED] !== false;
-          actions.push(listed ? problemsButton(context) : outputButton(context));
+          actions.push(problemsOrOutput(context, settings, document));
         } else if (result.cause === 'png') {
           if (result.fitsAt !== undefined) {
             actions.push(settingsButton(context, CONFIG.EXPORT_PNG_SCALE));
@@ -1916,6 +1957,75 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
       workspace: Workspace,
     },
     execute: exportAtCursor('png'),
+  });
+
+  /**
+   * The way on for a diagram with a problem: the Problems panel, where the
+   * diagnostics list it for a Markdown or PlantUML file unless they are
+   * turned off — they check no other file — else the Output panel, which
+   * has it for any file.
+   */
+  const problemsOrOutput = (context: OperationContext, settings: SettingsReader, document: ActiveDocument): NoticeAction => {
+    const listed =
+      isDiagramFile(document.textDocument) &&
+      settings.read({ resource: document.textDocument.uri }).values[CONFIG.DIAGNOSTICS_ENABLED] !== false;
+    return listed ? problemsButton(context) : outputButton(context);
+  };
+
+  module.commands.handle(CopySvgText, {
+    inject: {
+      renderer: Renderer,
+      palettes: Palettes,
+      settings: Settings.token,
+      exportRecords: ExportedFiles.token,
+      workspace: Workspace,
+    },
+    execute: async (
+      context: OperationContext,
+      args,
+      { renderer, palettes, settings, exportRecords, workspace }
+    ): Promise<void> => {
+      // No file is written, so neither an untitled document nor a restricted
+      // workspace is refused: the diagram is drawn as far as it can be there,
+      // as the previews draw it.
+      const document = await pickDocument(context, workspace, true, exportTarget(args[0]));
+      if (document === null) {
+        return;
+      }
+      const block = await diagramAtCursor(context, document);
+      if (block === null) {
+        return;
+      }
+      const deps = exporterDeps(context, renderer, palettes, settings, exportRecords, workspace, document.textDocument.uri);
+      const prepared = await prepareSvg(deps, block);
+      // The file the clipboard cannot take: the same diagram, the same drawing.
+      const exportInstead: NoticeAction = {
+        title: context.l10n.t('Export as SVG'),
+        run: (): Promise<unknown> => context.commands.execute(COMMANDS.EXPORT_SVG, { uri: document.path, line: block.openLine }),
+      };
+      if (!('svg' in prepared)) {
+        const message = context.l10n.t('Could not copy the diagram: {0}', prepared.error ?? '');
+        context.logger.warn(message);
+        await notifyWith(context, 'error', message, [prepared.cause === 'source' ? problemsOrOutput(context, settings, document) : exportInstead]);
+        return;
+      }
+      try {
+        await vscode.env.clipboard.writeText(prepared.svg);
+      } catch (error: unknown) {
+        const message = context.l10n.t(
+          'Could not copy the diagram: {0}',
+          context.l10n.t('The clipboard did not take the text. Try again, or export the diagram as SVG.')
+        );
+        const detail = `${message} ${error instanceof Error ? error.message : String(error)}`;
+        context.logger.warn(detail);
+        await notifyWith(context, 'error', message, [exportInstead]);
+        return;
+      }
+      // What the diagram was drawn without, if anything, is said with it.
+      const message = [context.l10n.t('Copied the diagram as SVG text.'), ...prepared.notes].join(' ');
+      context.logger.info(message);
+      await (prepared.notes.length > 0 ? context.notify.warn(message) : context.notify.info(message));
+    },
   });
 
   /**

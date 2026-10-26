@@ -28,6 +28,7 @@ export const COMMANDS = {
   ADD_MISSING_END: `${EXTENSION_ID}.addMissingEnd`,
   INSERT_TEMPLATE: `${EXTENSION_ID}.insertTemplate`,
   DIAGRAM_ACTION: `${EXTENSION_ID}.diagramAction`,
+  COPY_SVG_TEXT: `${EXTENSION_ID}.copySvgText`,
 } as const;
 
 /** The view type of the diagram viewer's panels. */

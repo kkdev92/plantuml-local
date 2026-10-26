@@ -39,7 +39,7 @@ Your diagram source is processed locally and is not sent to a rendering service.
 ## Features
 
 - **Built-in Preview**: Diagrams appear in the same Markdown preview you already use
-- **`.puml` Files**: PlantUML files open as their own language, with folding, an outline and a preview beside the editor that zooms, exports PNG and copies it to the clipboard
+- **`.puml` Files**: PlantUML files open as their own language, with folding, an outline and a preview beside the editor that zooms, exports PNG and copies the diagram to the clipboard, as a PNG or as SVG text
 - **Local Includes**: `!include`, `!includesub` and `!theme … from` read shared definitions, sections and themes from the files of your workspace folder, in a trusted workspace; their paths complete, and Ctrl+Click opens the file
 - **Syntax Highlighting**: ```` ```plantuml ```` blocks and `.puml` files are coloured in the editor, following the syntax the bundled engine accepts
 - **Offline Rendering**: No Java, no PlantUML server, no network connection required — nothing to install besides the extension
@@ -225,6 +225,10 @@ paste into a chat, a slide or a document; so do Ctrl+C (Cmd+C on macOS) in the
 panel and *Copy* in its context menu. The panel says when the image is on the
 clipboard, or why it is not: a diagram the PNG button would not export, such
 as one with an error or one past the size limit of a PNG, is not copied either.
+*Copy SVG* puts the diagram's SVG on the clipboard as text instead — what
+*Export Diagram as SVG* would write, to paste into a file or a tool that takes
+SVG — and a notice says when it is there, or why it is not. The size limit of
+a PNG does not apply to it.
 
 The panel shows the SVG as an image, so nothing in it can run, and loads
 nothing but its own script and stylesheet.
@@ -431,12 +435,15 @@ reference whose target is `images/orders-api.svg#plantuml-local`.
 | `PlantUML Local: Export All Diagrams in File as SVG` | Writes every **named** block in the file |
 | `PlantUML Local: Export All Diagrams as SVG and Update Image Links` | The above, then inserts or updates the image line after each block |
 | `PlantUML Local: Export Diagram as PNG` | Writes the block under the cursor, or the only block in the file, as a PNG (below) |
+| `PlantUML Local: Copy Diagram as SVG Text` | Puts the SVG of the block under the cursor, or the only block in the file, on the clipboard as text — what the SVG export would write — without writing a file |
 | `PlantUML Local: Export All Diagrams in Folder as SVG` | Writes every **named** block of the Markdown and PlantUML files in a folder (below) |
 | `PlantUML Local: Export All Diagrams in Folder as PNG` | The same, as PNGs |
 
-The first four are also in the editor's right-click menu: the single exports appear
-with the cursor inside a block, the other two whenever the file contains a
-diagram — so the menu of an ordinary Markdown file stays untouched. Run from
+The first five are also in the editor's right-click menu: the single exports
+and the copy appear with the cursor inside a block, the other two whenever the
+file contains a diagram — so the menu of an ordinary Markdown file stays
+untouched. The copy needs no name for the block, and no saved file or trusted
+workspace either, as far as the diagram renders without them. Run from
 the command palette while the preview has focus, they use the only open
 Markdown document, or ask which one when several are open. The message each
 export ends with offers *Show in Explorer*, which selects the file it
@@ -719,7 +726,7 @@ clipboard. No rendering service is involved either way.
 - **A red syntax-error box appears**: The message comes from the PlantUML engine — only that diagram is affected, and the rest of the page still renders
 - **"An error has occurred!" with "For some reason, dot/GraphViz has crashed."**: Graphviz could not lay out that diagram (packages nested a hundred deep are one way to get there). Only that diagram is affected, and it is an error, as a syntax error is: the preview says what to do, and it is not exported. Simplify it, or add `!pragma layout smetana`, which lays out the diagram without Graphviz
 - **Colours look wrong after switching themes**: Backgrounds follow the palette the diagram was *rendered* with. If you pinned `plantumlLocal.theme`, that palette wins by design
-- **Exported images have different colours from the preview**: Exports, the PNG and Copy buttons of the `.puml` preview included, use the light palette by default, whatever the editor theme (`plantumlLocal.exportTheme`). Set it to `preview` to export in the palette the preview uses, or set `plantumlLocal.theme` to `light` to preview diagrams in the colours they are exported in
+- **Exported images have different colours from the preview**: Exports, the PNG, Copy and Copy SVG buttons of the `.puml` preview included, use the light palette by default, whatever the editor theme (`plantumlLocal.exportTheme`). Set it to `preview` to export in the palette the preview uses, or set `plantumlLocal.theme` to `light` to preview diagrams in the colours they are exported in
 - **Layout differs from plantuml.com**: Text is measured with approximate metrics in the Node renderer, so box widths, line wrapping and element placement can differ slightly
 - **Setting `logLevel: debug` shows nothing new**: The channel is a `LogOutputChannel` now, and VS Code decides what one of those shows — an extension cannot raise its own channel's level. Run **Developer: Set Log Level** and pick *PlantUML Local*; that choice is per channel and survives a restart. `plantumlLocal.logLevel` is a floor on top of it for the rendering entries, so it can only make those quieter
 

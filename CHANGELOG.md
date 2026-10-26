@@ -45,6 +45,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   block holding several diagrams gets *Preview* only; a `.puml` file with no
   `@start…` line gets nothing. `plantumlLocal.codeLens.enabled` turns the
   actions off, per folder if wanted, besides VS Code's `editor.codeLens`.
+- **A diagram can be copied as SVG text.** *Copy Diagram as SVG Text* — in
+  the Command Palette, in the editor's right-click menu inside a block, and
+  as the *Copy SVG* button of the `.puml` preview — puts on the clipboard the
+  SVG that *Export Diagram as SVG* would write: the export palette, the
+  background, and a note of what the engine left out. No file is written, so
+  the block needs no name, and an untitled document or a restricted
+  workspace, where the export stops, can be copied from as far as the
+  diagram renders there. A diagram with an error is not copied, and the
+  notice points to the Problems panel; SVG text over 32 MiB is refused with
+  a pointer to the file export. The PNG *Copy* button and Ctrl+C in the
+  preview are as they were.
 
 ### Changed
 

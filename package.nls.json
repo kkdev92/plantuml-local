@@ -3,6 +3,7 @@
   "command.clearCache.title": "Clear Render Cache and Re-render",
   "command.exportSvg.title": "Export Diagram as SVG",
   "command.exportPng.title": "Export Diagram as PNG",
+  "command.copySvgText.title": "Copy Diagram as SVG Text",
   "command.exportAllSvg.title": "Export All Diagrams in File as SVG",
   "command.exportAllAndUpdateRefs.title": "Export All Diagrams as SVG and Update Image Links",
   "command.exportFolderSvg.title": "Export All Diagrams in Folder as SVG",

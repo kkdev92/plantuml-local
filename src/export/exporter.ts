@@ -106,6 +106,8 @@ export interface ExporterDeps {
   pngTooLargeMessage(width: number, height: number, fits: number | null): string;
   /** Localised reason given for a PNG that could not be made as asked. */
   pngFailedMessage: string;
+  /** Localised reason given for SVG text of `bytes` bytes, past what is copied to the clipboard. */
+  svgTooLargeMessage(bytes: number): string;
   /** Localised reason given for a diagram headed for the file another one is written to. */
   sameFileMessage: string;
   /** Localised reason given for a file that changed after the export looked at it. */
@@ -129,6 +131,7 @@ export type DrawingDeps = Pick<
   | 'engineErrorMessage'
   | 'pngTooLargeMessage'
   | 'pngFailedMessage'
+  | 'svgTooLargeMessage'
 >;
 
 /** What a PNG is drawn from: the SVG with its background, the size in pixels, and that background. */
@@ -144,6 +147,9 @@ export const PNG_LIMITS = { side: 8192, pixels: 16_000_000, bytes: 64 * 1024 * 1
 
 /** The scales a PNG can be drawn at. */
 export const PNG_SCALES = [1, 2, 4] as const;
+
+/** The most SVG text that is copied to the clipboard, in UTF-8 bytes. */
+export const SVG_TEXT_LIMIT = 32 * 1024 * 1024;
 
 /** One diagram's outcome. */
 export interface ExportResult {
@@ -163,9 +169,10 @@ export interface ExportResult {
   /**
    * What a failure is about, so that a caller can offer the way out: the
    * diagram's source, whose problems the Problems panel lists too; the PNG
-   * drawn from it, where an SVG may still do; or the file written.
+   * drawn from it, where an SVG may still do; the SVG text, too long for
+   * the clipboard, where a file may still do; or the file written.
    */
-  cause?: 'source' | 'png' | 'file';
+  cause?: 'source' | 'png' | 'text' | 'file';
   /** For a PNG too large at the scale set, the largest scale it fits at. */
   fitsAt?: number;
   /** What a written diagram was drawn without: notation the engine does not draw, for the report. */
@@ -432,6 +439,26 @@ export async function preparePng(deps: DrawingDeps, block: PlantUmlBlock): Promi
   const name = block.name ?? '';
   const rendered = await renderBlock(deps, block, name);
   return 'svg' in rendered ? pngSource(deps, name, rendered.svg, rendered.dark) : rendered;
+}
+
+/**
+ * Renders a block as Export Diagram as SVG writes it — the export palette,
+ * the background baked in — for copying the text to the clipboard, which
+ * needs neither a name nor a file: the text, with what the diagram was
+ * drawn without for the notice, or why there is none. Text past
+ * {@link SVG_TEXT_LIMIT} is refused rather than handed to the clipboard.
+ */
+export async function prepareSvg(deps: DrawingDeps, block: PlantUmlBlock): Promise<{ svg: string; notes: string[] } | ExportResult> {
+  const name = block.name ?? '';
+  const rendered = await renderBlock(deps, block, name);
+  if (!('svg' in rendered)) {
+    return rendered;
+  }
+  const bytes = bytesOf(rendered.svg).byteLength;
+  if (bytes > SVG_TEXT_LIMIT) {
+    return { name, path: null, error: deps.svgTooLargeMessage(bytes), cause: 'text' };
+  }
+  return { svg: rendered.svg, notes: notationNotes(deps, block.source) };
 }
 
 /**

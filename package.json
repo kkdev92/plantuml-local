@@ -151,6 +151,11 @@
         "category": "PlantUML Local"
       },
       {
+        "command": "plantumlLocal.copySvgText",
+        "title": "%command.copySvgText.title%",
+        "category": "PlantUML Local"
+      },
+      {
         "command": "plantumlLocal.exportAllSvg",
         "title": "%command.exportAllSvg.title%",
         "category": "PlantUML Local"
@@ -215,14 +220,19 @@
           "group": "2_plantuml@2"
         },
         {
+          "command": "plantumlLocal.copySvgText",
+          "when": "editorLangId =~ /^(markdown|plantuml)$/ && plantumlLocal.cursorInDiagram",
+          "group": "2_plantuml@3"
+        },
+        {
           "command": "plantumlLocal.exportAllSvg",
           "when": "editorLangId =~ /^(markdown|plantuml)$/ && plantumlLocal.hasDiagrams",
-          "group": "2_plantuml@3"
+          "group": "2_plantuml@4"
         },
         {
           "command": "plantumlLocal.exportAllAndUpdateRefs",
           "when": "editorLangId == markdown && plantumlLocal.hasDiagrams",
-          "group": "2_plantuml@4"
+          "group": "2_plantuml@5"
         }
       ],
       "explorer/context": [

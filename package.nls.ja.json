@@ -3,6 +3,7 @@
   "command.clearCache.title": "描画キャッシュをクリアして再描画する",
   "command.exportSvg.title": "図を SVG に書き出す",
   "command.exportPng.title": "図を PNG に書き出す",
+  "command.copySvgText.title": "図を SVG テキストとしてコピー",
   "command.exportAllSvg.title": "ファイル内のすべての図を SVG に書き出す",
   "command.exportAllAndUpdateRefs.title": "すべての図を SVG に書き出して画像リンクを更新する",
   "command.exportFolderSvg.title": "フォルダー内のすべての図を SVG に書き出す",
