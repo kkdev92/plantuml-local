@@ -25,6 +25,7 @@ export const COMMANDS = {
   EXPORT_FOLDER_SVG: `${EXTENSION_ID}.exportFolderSvg`,
   EXPORT_FOLDER_PNG: `${EXTENSION_ID}.exportFolderPng`,
   ASSIGN_DIAGRAM_NAME: `${EXTENSION_ID}.assignDiagramName`,
+  ADD_MISSING_END: `${EXTENSION_ID}.addMissingEnd`,
   INSERT_TEMPLATE: `${EXTENSION_ID}.insertTemplate`,
 } as const;
 

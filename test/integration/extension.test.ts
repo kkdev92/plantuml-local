@@ -9,6 +9,7 @@ import {
   createVscodeStub,
   type CodeActionStub,
   type CompletionItemStub,
+  type DiagnosticStub,
   type DocumentSymbolStub,
   type FoldingRangeStub,
   type TextEditorStub,
@@ -2111,13 +2112,20 @@ describe('symbols (dist)', () => {
 });
 
 describe('naming a diagram (dist)', () => {
-  const actionsAt = (editor: TextEditorStub, line: number): CodeActionStub[] | undefined => {
+  const actionsAt = (editor: TextEditorStub, line: number, diagnostics: DiagnosticStub[] = []): CodeActionStub[] | undefined => {
     const registration = vscodeStub._test.actionProviders[0];
     if (registration === undefined) {
       throw new Error('no code action provider registered');
     }
     const at = new vscodeStub.Position(line, 0);
-    return registration.provider.provideCodeActions(editor.document, { start: at, end: at });
+    return registration.provider.provideCodeActions(editor.document, { start: at, end: at }, { diagnostics });
+  };
+  /** The warning the Problems panel shows for a diagram without its end line, on its start line. */
+  const missingEnd = (line: number): DiagnosticStub => {
+    const problem = new vscodeStub.Diagnostic(new vscodeStub.Range(line, 0, line, 9), 'The closing @enduml line is missing.', 1);
+    problem.code = 'PLLOCAL-DOC002';
+    problem.source = 'PlantUML Local';
+    return problem;
   };
   const run = async (action: CodeActionStub | undefined): Promise<void> => {
     await vscodeStub._test.registeredCommands.get(action?.command?.command ?? '')?.(...(action?.command?.arguments ?? []));
@@ -2153,6 +2161,49 @@ describe('naming a diagram (dist)', () => {
     expect(editor.document.getText()).toBe(text.replace('```plantuml', '```plantuml orders'));
     // Named now: nothing more is offered.
     expect(actionsAt(editor, 2)).toBeUndefined();
+  });
+
+  it('adds the end line a diagram lacks, on the warning that reports it, with the quote marker of its block', async () => {
+    const text = ['> ```plantuml', '> @startuml', '> A -> B', '>', '> ```'].join('\n');
+    const editor = makeEditor('file:///c/ending/quoted.md', text, 1);
+    vscodeStub._test.setActiveEditor(editor);
+    vscodeStub._test.openDocument(editor.document);
+
+    // Without the warning, nothing is offered on that line.
+    expect(actionsAt(editor, 1)).toBeUndefined();
+    const actions = actionsAt(editor, 1, [missingEnd(1)]) ?? [];
+    expect(actions.map((action) => action.title)).toEqual(['Add the missing @enduml line']);
+    expect(actions[0]).toMatchObject({
+      kind: 'quickfix',
+      isPreferred: true,
+      command: { command: 'plantumlLocal.addMissingEnd', arguments: ['file:///c/ending/quoted.md', 1, 1] },
+    });
+    expect(actions[0]?.diagnostics).toHaveLength(1);
+
+    await run(actions[0]);
+    expect(editor.document.getText()).toBe(['> ```plantuml', '> @startuml', '> A -> B', '> @enduml', '>', '> ```'].join('\n'));
+  });
+
+  it('ends a diagram of a PlantUML file before the next one, and does nothing a second time', async () => {
+    const text = ['@startuml(id=one)', 'A -> B', '', '@startuml(id=two)', 'C -> D', '@enduml', ''].join('\n');
+    const editor = makeEditor('file:///c/ending/flows.puml', text, 0, { languageId: 'plantuml' });
+    vscodeStub._test.setActiveEditor(editor);
+    vscodeStub._test.openDocument(editor.document);
+    const [action] = actionsAt(editor, 0, [missingEnd(0)]) ?? [];
+    expect(action?.title).toBe('Add the missing @enduml line');
+
+    await run(action);
+    const fixed = ['@startuml(id=one)', 'A -> B', '@enduml', '', '@startuml(id=two)', 'C -> D', '@enduml', ''].join('\n');
+    expect(editor.document.getText()).toBe(fixed);
+
+    // Run again from the same offer: the diagram has its end line now.
+    const warnings = vscodeStub._test.notifications.warn.length;
+    await run(action);
+    expect(editor.document.getText()).toBe(fixed);
+    expect(vscodeStub._test.notifications.warn.slice(warnings)).toEqual(['The file has changed. Check the diagram again.']);
+    // Offered on an earlier version of the document: the same.
+    await run({ ...action!, command: { ...action!.command!, arguments: ['file:///c/ending/flows.puml', 0, 0] } });
+    expect(editor.document.getText()).toBe(fixed);
   });
 
   it('writes nothing once the document has changed since the name was offered', async () => {

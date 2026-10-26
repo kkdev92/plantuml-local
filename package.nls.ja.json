@@ -8,6 +8,7 @@
   "command.exportFolderSvg.title": "フォルダー内のすべての図を SVG に書き出す",
   "command.exportFolderPng.title": "フォルダー内のすべての図を PNG に書き出す",
   "command.assignDiagramName.title": "図に書き出し用の名前を付ける",
+  "command.addMissingEnd.title": "図を閉じる行を補う",
   "command.insertTemplate.title": "図のテンプレートを挿入する",
   "command.openPreview.title": "図のプレビューを開く",
   "command.openPreviewToSide.title": "図のプレビューを横に開く",
