@@ -82,11 +82,12 @@ import {
   type Suggestions,
 } from './language/completion';
 import { templatePlace } from './language/templates';
-import { namesDiagram, unnamedAt, withName } from './language/code-actions';
+import { missingEndAt, namesDiagram, unnamedAt, withName } from './language/code-actions';
 import { foldingRanges } from './language/folding';
 import { declarations, type Declaration } from './language/symbols';
 import {
   checkSource,
+  PROBLEM_CODES,
   renderProblems,
   type BlockProblem,
   type ProblemLabels,
@@ -198,6 +199,15 @@ export const ExportFolderPng = defineCommandContract<readonly unknown[], void>({
  */
 export const AssignDiagramName = defineCommandContract<readonly unknown[], void>({
   id: COMMANDS.ASSIGN_DIAGRAM_NAME,
+});
+
+/**
+ * Adds the end line a diagram lacks, after its last line: the quick fix's
+ * command, given the document's URI, the diagram's start line and the
+ * version the fix was offered on.
+ */
+export const AddMissingEnd = defineCommandContract<readonly unknown[], void>({
+  id: COMMANDS.ADD_MISSING_END,
 });
 
 /** Inserts a diagram template where a diagram can start (src/language/templates.ts). */
@@ -2789,6 +2799,29 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
     await vscode.workspace.applyEdit(edit);
   });
 
+  module.commands.handle(AddMissingEnd, async (context: OperationContext, args): Promise<void> => {
+    const [uri, line, version] = args;
+    const document = vscode.workspace.textDocuments.find((candidate) => candidate.uri.toString() === uri);
+    if (document === undefined || typeof line !== 'number') {
+      return;
+    }
+    // Offered on the document as it was then: edited since, the diagram may
+    // have its end line, or start on another line.
+    const fix =
+      document.version === version
+        ? missingEndAt(document.getText(), line, document.languageId === 'plantuml', withoutExtension(fileNameOf(document)))
+        : undefined;
+    if (fix === undefined) {
+      void context.notify.warn(context.l10n.t('The file has changed. Check the diagram again.'));
+      return;
+    }
+    // One insertion after the diagram's last line, so one Undo takes it away.
+    const eol = document.eol === vscode.EndOfLine.CRLF ? '\r\n' : '\n';
+    const edit = new vscode.WorkspaceEdit();
+    edit.insert(document.uri, document.lineAt(fix.afterLine).range.end, `${eol}${fix.prefix}${fix.end}`);
+    await vscode.workspace.applyEdit(edit);
+  });
+
   module.raw.register({
     id: 'plantuml.codeActions',
     inject: { l10n: Localization },
@@ -2796,26 +2829,51 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
       // Offers a name to a diagram without a usable one
       // (src/language/code-actions.ts), on the line the name goes on only:
       // anywhere in the block, every unnamed diagram would show a light bulb.
+      // And the end line a diagram lacks, on the problem that reports it.
       registrations.own(
         vscode.languages.registerCodeActionsProvider(
           [{ language: 'markdown' }, { language: 'plantuml' }],
           {
-            provideCodeActions: (document, range) => {
+            provideCodeActions: (document, range, context) => {
               const line = range.start.line;
               const plantUml = document.languageId === 'plantuml';
-              if (
-                !namesDiagram(document.lineAt(line).text, plantUml) ||
-                unnamedAt(document.getText(), line, plantUml, withoutExtension(fileNameOf(document))) === undefined
-              ) {
-                return undefined;
+              const fileName = withoutExtension(fileNameOf(document));
+              const text = document.getText();
+              const actions: vscode.CodeAction[] = [];
+              if (namesDiagram(document.lineAt(line).text, plantUml) && unnamedAt(text, line, plantUml, fileName) !== undefined) {
+                const action = new vscode.CodeAction(l10n.t('Name this diagram for export…'), vscode.CodeActionKind.QuickFix);
+                action.command = {
+                  title: action.title,
+                  command: COMMANDS.ASSIGN_DIAGRAM_NAME,
+                  arguments: [document.uri.toString(), line, document.version],
+                };
+                actions.push(action);
               }
-              const action = new vscode.CodeAction(l10n.t('Name this diagram for export…'), vscode.CodeActionKind.QuickFix);
-              action.command = {
-                title: action.title,
-                command: COMMANDS.ASSIGN_DIAGRAM_NAME,
-                arguments: [document.uri.toString(), line, document.version],
-              };
-              return [action];
+              // Added by a command that reads the document again when the fix
+              // runs: the fix was offered on the document as it was when the
+              // problem was found.
+              const offered = new Set<number>();
+              for (const diagnostic of context.diagnostics) {
+                const at = diagnostic.range.start.line;
+                if (diagnostic.source !== EXTENSION_NAME || diagnostic.code !== PROBLEM_CODES.DOC002 || offered.has(at)) {
+                  continue;
+                }
+                const fix = missingEndAt(text, at, plantUml, fileName);
+                if (fix === undefined) {
+                  continue;
+                }
+                offered.add(at);
+                const action = new vscode.CodeAction(l10n.t('Add the missing {0} line', fix.end), vscode.CodeActionKind.QuickFix);
+                action.diagnostics = [diagnostic];
+                action.isPreferred = true;
+                action.command = {
+                  title: action.title,
+                  command: COMMANDS.ADD_MISSING_END,
+                  arguments: [document.uri.toString(), at, document.version],
+                };
+                actions.push(action);
+              }
+              return actions.length > 0 ? actions : undefined;
             },
           },
           { providedCodeActionKinds: [vscode.CodeActionKind.QuickFix] }

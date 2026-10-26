@@ -176,6 +176,11 @@
         "category": "PlantUML Local"
       },
       {
+        "command": "plantumlLocal.addMissingEnd",
+        "title": "%command.addMissingEnd.title%",
+        "category": "PlantUML Local"
+      },
+      {
         "command": "plantumlLocal.insertTemplate",
         "title": "%command.insertTemplate.title%",
         "category": "PlantUML Local"
@@ -246,6 +251,10 @@
         },
         {
           "command": "plantumlLocal.assignDiagramName",
+          "when": "false"
+        },
+        {
+          "command": "plantumlLocal.addMissingEnd",
           "when": "false"
         },
         {

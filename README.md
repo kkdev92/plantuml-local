@@ -45,7 +45,7 @@ Your diagram source is processed locally and is not sent to a rendering service.
 - **Offline Rendering**: No Java, no PlantUML server, no network connection required — nothing to install besides the extension
 - **Fault-Tolerant**: A syntax error shows up inline at the broken diagram; the rest of the page stays intact
 - **Problems Panel**: Errors, warnings and unsupported syntax in the diagrams of open Markdown and PlantUML files are listed with their line, preview or not
-- **Writing Help**: Completion for start lines, directives, themes and icons, templates for six kinds of diagram, and a quick fix that names a diagram for export
+- **Writing Help**: Completion for start lines, directives, themes and icons, templates for six kinds of diagram, and quick fixes that name a diagram for export and add a missing end line
 - **Export**: Diagrams can be written to SVG or PNG files — one, a whole document or a whole folder — and referenced from the Markdown, for hosts such as GitHub that do not draw PlantUML
 - **Multi-Diagram Pages**: Any number of diagrams per page; renders are serialised so results never mix
 - **Dark-Mode Aware**: Diagrams re-render to match your colour theme, or pin the palette via settings
@@ -269,8 +269,9 @@ the line it is on:
 - what the bundled engine cannot do: a library other than `azure`, a URL, emoji;
 - content the bundled engine does not render: a second diagram in a block,
   the pages after `newpage`;
-- a diagram with no `@enduml` line, which is drawn anyway, and lines above
-  `@startuml`, which the drawing leaves out.
+- a diagram with no `@enduml` line, which is drawn anyway — a quick fix on that
+  warning adds the line — and lines above `@startuml`, which the drawing leaves
+  out.
 
 ![Three diagrams with problems: the lines marked in the editor, the engine's messages in the preview, and the list in the Problems panel](images/problems-panel.png)
 

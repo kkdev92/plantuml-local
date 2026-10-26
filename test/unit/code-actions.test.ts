@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
-import { namesDiagram, unnamedAt, withName } from '../../src/language/code-actions';
+import { missingEndAt, namesDiagram, unnamedAt, withName } from '../../src/language/code-actions';
+
+const md = (...lines: string[]): string => lines.join(String.fromCharCode(10));
 
 describe('namesDiagram', () => {
   it('takes the opening line of a diagram block, or the start line of a diagram', () => {
@@ -93,5 +95,35 @@ describe('withName', () => {
     expect(withName('@startmindmap', 'orders', true)).toBe('@startmindmap(id=orders)');
     expect(withName('@startgantt(id=a b)', 'plan', true)).toBe('@startgantt(id=plan)');
     expect(withName('A -> B', 'orders', true)).toBeNull();
+  });
+});
+
+describe('missingEndAt', () => {
+  it('puts the end line after the last line of content, before the closing fence', () => {
+    const text = md('```plantuml', '@startuml', 'A -> B', '', '```');
+    expect(missingEndAt(text, 1, false, 'doc')).toEqual({ end: '@enduml', afterLine: 2, prefix: '' });
+  });
+
+  it('keeps the quote marker or list indentation of the block, and the kind of the start line', () => {
+    const quoted = md('> ```plantuml', '> @startmindmap', '> * root', '>', '> ```');
+    expect(missingEndAt(quoted, 1, false, 'doc')).toEqual({ end: '@endmindmap', afterLine: 2, prefix: '> ' });
+    const listed = md('- item', '', '  ```plantuml', '  @startuml', '  A -> B', '  ```');
+    expect(missingEndAt(listed, 3, false, 'doc')).toEqual({ end: '@enduml', afterLine: 4, prefix: '  ' });
+  });
+
+  it('offers nothing for a diagram with its end line, a block without a closing fence or with two diagrams, or off the start line', () => {
+    expect(missingEndAt(md('```plantuml', '@startuml', 'A -> B', '@enduml', '```'), 1, false, 'doc')).toBeUndefined();
+    expect(missingEndAt(md('```plantuml', '@startuml', 'A -> B'), 1, false, 'doc')).toBeUndefined();
+    expect(missingEndAt(md('```plantuml', '@startuml', 'A -> B', '@startuml', 'C -> D', '```'), 1, false, 'doc')).toBeUndefined();
+    expect(missingEndAt(md('```plantuml', '@startuml', 'A -> B', '', '```'), 2, false, 'doc')).toBeUndefined();
+  });
+
+  it('ends a diagram of a PlantUML file before the next diagram, or at the end of the file', () => {
+    const file = md('@startuml(id=one)', 'A -> B', '', '@startuml(id=two)', 'C -> D', '@enduml');
+    expect(missingEndAt(file, 0, true, 'flows')).toEqual({ end: '@enduml', afterLine: 1, prefix: '' });
+    expect(missingEndAt(file, 3, true, 'flows')).toBeUndefined();
+    expect(missingEndAt(md('@startjson', '{"a": 1}', ''), 0, true, 'data')).toEqual({ end: '@endjson', afterLine: 1, prefix: '' });
+    // A file without a start line is lines to include; there is no end to add.
+    expect(missingEndAt(md('A -> B', ''), 0, true, 'loose')).toBeUndefined();
   });
 });

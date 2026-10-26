@@ -17,6 +17,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   lines to include rather than a diagram, so it is left alone — until its
   preview is open, which draws it as one diagram; then it is checked as one.
   `plantumlLocal.diagnostics.enabled` turns these checks off as well.
+- **A quick fix adds the end line a diagram lacks.** The warning that a
+  diagram has no `@enduml` (or `@endmindmap`, and so on) line now carries a
+  fix, in the editor's light bulb and in the Problems panel, that adds the
+  line after the diagram's last line of content: before the closing fence of
+  a Markdown block, with its quote marker or list indentation, or before the
+  next diagram of a PlantUML file. A block whose fence is not closed, or that
+  holds more than one diagram, gets no such fix. The fix reads the document
+  again when it runs and does nothing if the diagram has changed since.
 
 ### Changed
 

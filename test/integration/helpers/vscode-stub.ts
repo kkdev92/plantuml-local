@@ -163,6 +163,8 @@ export interface CodeActionStub {
   title: string;
   kind: string;
   command?: { title: string; command: string; arguments?: unknown[] };
+  diagnostics?: DiagnosticStub[];
+  isPreferred?: boolean;
 }
 
 /** A code action provider as registered, with what it was registered for. */
@@ -171,7 +173,8 @@ export interface ActionRegistrationStub {
   provider: {
     provideCodeActions(
       document: TextEditorStub['document'],
-      range: { start: PositionStub; end: PositionStub }
+      range: { start: PositionStub; end: PositionStub },
+      context: { diagnostics: readonly DiagnosticStub[] }
     ): CodeActionStub[] | undefined;
   };
   metadata: unknown;
