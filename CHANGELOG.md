@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **The Problems panel lists the diagrams of PlantUML files too.** An open
+  `.puml` file is checked as a Markdown file has been: each of its diagrams
+  on its own, whether or not a preview is open, with the engine's errors and
+  warnings, a file it could not include, and what the bundled engine does not
+  render, on the line concerned. A PlantUML file with no `@start…` line holds
+  lines to include rather than a diagram, so it is left alone — until its
+  preview is open, which draws it as one diagram; then it is checked as one.
+  `plantumlLocal.diagnostics.enabled` turns these checks off as well.
+
+### Changed
+
+- Exporting a diagram of a `.puml` file that the engine rejects now offers
+  *Show Problems*, as a Markdown diagram has, when the checks are on; before,
+  the Problems panel listed no PlantUML file and *Show Output* was offered.
+
 ### Fixed
 
 - A PlantUML file whose lines end with a lone CR — the classic Mac OS line
