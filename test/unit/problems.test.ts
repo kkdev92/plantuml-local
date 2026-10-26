@@ -12,6 +12,8 @@ const LABELS: ProblemLabels = {
   pages: 'pages',
   missingEnd: (end) => `no ${end}`,
   beforeStart: (start) => `above ${start}`,
+  formula: (tag) => `formula ${tag}`,
+  embeddedDiagram: 'embedded',
   themeFrom: 'bundled themes only',
   libraryNotBundled: (library) => `${library} not bundled`,
   emojiUnavailable: 'emoji',
@@ -68,6 +70,16 @@ describe('checkSource', () => {
     const check = checkSource(block, LABELS);
     expect(check.problems).toEqual([
       { line: 4, severity: 'warning', code: PROBLEM_CODES.DOC004, message: 'above @startuml' },
+    ]);
+    expect(check.render).toBe(block.source);
+  });
+
+  it('warns about notation the engine draws blank or leaves out, on its line, and renders anyway', () => {
+    const block = blockOf('@startuml', 'Alice -> Bob : <math>x^2</math>', 'note left', '{{', 'C -> D', '}}', 'end note', '@enduml');
+    const check = checkSource(block, LABELS);
+    expect(check.problems).toEqual([
+      { line: 4, severity: 'warning', code: PROBLEM_CODES.CAP001, message: 'formula <math>' },
+      { line: 6, severity: 'warning', code: PROBLEM_CODES.CAP001, message: 'embedded' },
     ]);
     expect(check.render).toBe(block.source);
   });

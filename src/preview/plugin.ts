@@ -9,6 +9,7 @@ import {
   hasRemoteReference,
   isDiagramFence,
 } from '../core/constants';
+import { unsupportedKinds } from '../core/notation';
 import { diagramShape } from '../core/shape';
 import type { DiagramRender, IncludedStyle, RenderLog } from '../core/types';
 import { hasLocalInclude } from '../includes/describe';
@@ -65,6 +66,10 @@ export interface PluginLabels {
   missingEnd(end: string): string;
   /** Note above a diagram drawn without the lines of its block above `start`. */
   beforeStart(start: string): string;
+  /** Note above a diagram drawn with a formula in `tag` (`<math>` or `<latex>`) left blank. */
+  formula(tag: string): string;
+  /** Note above a diagram drawn without the diagram embedded in it with `{{ … }}`. */
+  embeddedDiagram: string;
   /** Note above a diagram not drawn again since its block changed. */
   notUpdated(mode: Exclude<UpdateMode, 'onChange'>): string;
   /** Note above a diagram whose local include of `path` failed, and why. */
@@ -501,9 +506,11 @@ export function createPlantUmlPlugin(deps: PluginDeps): PlantUmlPlugin {
         if (shape.kind === 'pages') {
           return errorBlock(deps.labels.pages);
         }
+        const unsupported = unsupportedKinds(shape.source);
         const notice = [
           shape.before === null ? null : deps.labels.beforeStart(shape.before.start),
           shape.addedEnd === null ? null : deps.labels.missingEnd(shape.addedEnd),
+          ...unsupported.map((kind) => (kind === 'embedded' ? deps.labels.embeddedDiagram : deps.labels.formula(kind === 'math' ? '<math>' : '<latex>'))),
         ]
           .filter((text): text is string => text !== null)
           .map((text) => `<div class="plantuml-notice">${deps.escapeHtml(text)}</div>`)

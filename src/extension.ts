@@ -932,6 +932,8 @@ function drawingDeps(
     pagesMessage: l10n.t(
       'Multi-page diagrams (newpage) are not supported. Split the pages into separate diagrams.'
     ),
+    formulaMessage: (tag) => l10n.t('The bundled engine does not draw {0} formulas; the formula is left out of the diagram.', tag),
+    embeddedDiagramMessage: l10n.t('The bundled engine does not draw a diagram embedded with {{ … }}; it is left out of the diagram.'),
     engineErrorMessage: (message, line) => engineErrorMessage(l10n, message, line),
     pngTooLargeMessage: (width, height, fits) =>
       fits === null
@@ -1142,6 +1144,20 @@ async function reportOutcome(
   if (outcome.written.length > 0) {
     messages.push(context.l10n.t('Diagrams exported: {0}', String(outcome.written.length)));
   }
+  // Diagrams written without a formula or an embedded diagram the engine
+  // does not draw: counted here, named in the output.
+  const leftOut = outcome.written.filter((result) => (result.notes?.length ?? 0) > 0);
+  if (leftOut.length > 0) {
+    messages.push(
+      context.l10n.t(
+        'Diagrams exported with notation the bundled engine does not draw: {0}. See the Output panel for which.',
+        String(leftOut.length)
+      )
+    );
+    for (const result of leftOut) {
+      context.logger.warn(context.l10n.t('Exported {0}: {1}', result.name, (result.notes ?? []).join(' ')));
+    }
+  }
   messages.push(...extra);
   if (outcome.kept > 0) {
     messages.push(context.l10n.t('Existing files kept: {0}', String(outcome.kept)));
@@ -1181,9 +1197,9 @@ async function reportOutcome(
   await announceExport(
     context,
     summary,
-    forceWarn || outcome.failed.length > 0 || outcome.unnamed > 0,
+    forceWarn || outcome.failed.length > 0 || outcome.unnamed > 0 || leftOut.length > 0,
     outcome.written[0]?.path ?? undefined,
-    outcome.failed.length > 0,
+    outcome.failed.length > 0 || leftOut.length > 0,
     outcome.unnamed > 0 ? unnamedIn : undefined
   );
 }
@@ -1431,6 +1447,8 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
           missingEnd: (end) =>
             l10n.t('The closing {0} line is missing. It has been added for rendering; the source is unchanged.', end),
           beforeStart: (start) => l10n.t('Lines before {0} are ignored when rendering this diagram.', start),
+          formula: (tag) => l10n.t('The bundled engine does not draw {0} formulas; the formula is left out of the diagram.', tag),
+          embeddedDiagram: l10n.t('The bundled engine does not draw a diagram embedded with {{ … }}; it is left out of the diagram.'),
           notUpdated: (mode) => notUpdatedNote(l10n, mode),
           includeFailed: (path, reason) => l10n.t('Could not include {0}: {1}', path, reason),
         },
@@ -1477,6 +1495,8 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
           pages: l10n.t(
             'Multi-page diagrams (newpage) are not supported. Split the pages into separate diagrams, each with its own start and end lines.'
           ),
+          formula: (tag) => l10n.t('The bundled engine does not draw {0} formulas; the formula is left out of the diagram.', tag),
+          embeddedDiagram: l10n.t('The bundled engine does not draw a diagram embedded with {{ … }}; it is left out of the diagram.'),
           engineError: (message, line) =>
             line === null
               ? l10n.t('PlantUML error: {0}', errorMessage(message, l10n))
@@ -1827,10 +1847,17 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
           return;
         }
         if (result.error === null) {
-          context.logger.info(context.l10n.t('Exported to {0}', String(result.path)));
+          // What the drawing was written without, if anything, is said with it.
+          const notes = result.notes ?? [];
+          context.logger.info([context.l10n.t('Exported to {0}', String(result.path)), ...notes].join(' '));
           // The file as the Explorer names it, rather than its encoded URI.
           const written = workspace.relativePath(vscode.Uri.parse(String(result.path)));
-          await announceExport(context, context.l10n.t('Exported to {0}', written), false, result.path ?? undefined);
+          await announceExport(
+            context,
+            [context.l10n.t('Exported to {0}', written), ...notes].join(' '),
+            notes.length > 0,
+            result.path ?? undefined
+          );
           return;
         }
         const message = context.l10n.t('Could not export the diagram: {0}', result.error);
@@ -2261,6 +2288,8 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         missingEnd: (end) =>
           l10n.t('The closing {0} line is missing. It has been added for rendering; the source is unchanged.', end),
         beforeStart: (start) => l10n.t('Lines before {0} are ignored when rendering this diagram.', start),
+        formula: (tag) => l10n.t('The bundled engine does not draw {0} formulas; the formula is left out of the diagram.', tag),
+        embeddedDiagram: l10n.t('The bundled engine does not draw a diagram embedded with {{ … }}; it is left out of the diagram.'),
         themeFrom: l10n.t('Use a bundled theme or a theme file in your workspace.'),
         libraryNotBundled: (library) =>
           l10n.t('The {0} standard library is not included with this extension. Only the azure library is available.', library),

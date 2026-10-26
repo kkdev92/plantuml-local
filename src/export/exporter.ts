@@ -1,4 +1,5 @@
 import { DIAGRAM_BACKDROP, EMOJI_UNAVAILABLE, hasRemoteReference } from '../core/constants';
+import { unsupportedKinds } from '../core/notation';
 import { diagramShape } from '../core/shape';
 import type { DiagramRender, IncludedStyle } from '../core/types';
 import { withIncludeReason } from '../includes/describe';
@@ -87,6 +88,10 @@ export interface ExporterDeps {
   severalDiagramsMessage: string;
   /** Localised reason given for a diagram split into pages with `newpage`. */
   pagesMessage: string;
+  /** Localised note for a formula in `tag` (`<math>` or `<latex>`), which the engine draws blank. */
+  formulaMessage(tag: string): string;
+  /** Localised note for a diagram embedded with `{{ … }}`, which the engine leaves out. */
+  embeddedDiagramMessage: string;
   /**
    * Localised reason given for a diagram the engine drew as an error:
    * `message` is the engine's own text, or for a local include that failed,
@@ -119,6 +124,8 @@ export type DrawingDeps = Pick<
   | 'emojiUnavailableMessage'
   | 'severalDiagramsMessage'
   | 'pagesMessage'
+  | 'formulaMessage'
+  | 'embeddedDiagramMessage'
   | 'engineErrorMessage'
   | 'pngTooLargeMessage'
   | 'pngFailedMessage'
@@ -161,6 +168,8 @@ export interface ExportResult {
   cause?: 'source' | 'png' | 'file';
   /** For a PNG too large at the scale set, the largest scale it fits at. */
   fitsAt?: number;
+  /** What a written diagram was drawn without: notation the engine does not draw, for the report. */
+  notes?: string[];
 }
 
 export interface ExportOutcome {
@@ -179,6 +188,8 @@ export interface Drawing {
   /** The document the diagram is exported from. */
   document: string;
   content: string | Uint8Array;
+  /** Notation the engine drew the diagram without, said in the export's report. */
+  notes?: string[];
 }
 
 /** What a diagram is exported as. */
@@ -259,6 +270,13 @@ export function addBackground(svg: string, dark: boolean): string {
 /** The text an error carries, for a failure's reason. */
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/** The notes an export's report carries for `source`: what the engine drew it without. */
+function notationNotes(deps: DrawingDeps, source: string): string[] {
+  return unsupportedKinds(source).map((kind) =>
+    kind === 'embedded' ? deps.embeddedDiagramMessage : deps.formulaMessage(kind === 'math' ? '<math>' : '<latex>')
+  );
 }
 
 /**
@@ -384,8 +402,9 @@ async function drawBlock(
     return rendered;
   }
   const path = deps.resolve(documentPath, `${directory}/${name}.${format}`);
+  const notes = notationNotes(deps, block.source);
   if (format === 'svg') {
-    return { name, path, document: documentPath, content: rendered.svg };
+    return { name, path, document: documentPath, content: rendered.svg, notes };
   }
 
   const source = pngSource(deps, name, rendered.svg, rendered.dark);
@@ -401,7 +420,7 @@ async function drawBlock(
   if (!isPngOfSize(png, source.width, source.height) || png.byteLength > PNG_LIMITS.bytes) {
     return { name, path: null, error: deps.pngFailedMessage, cause: 'png' };
   }
-  return { name, path, document: documentPath, content: png };
+  return { name, path, document: documentPath, content: png, notes };
 }
 
 /**
@@ -459,7 +478,12 @@ async function writeDrawings(
   const written: ExportResult[] = [];
   let kept = 0;
   for (const { drawing, existing, own } of checked) {
-    const result = { name: drawing.name, path: drawing.path, error: null };
+    const result: ExportResult = {
+      name: drawing.name,
+      path: drawing.path,
+      error: null,
+      ...(drawing.notes !== undefined && drawing.notes.length > 0 ? { notes: drawing.notes } : {}),
+    };
     if (existing !== null && holds(existing, drawing.content)) {
       await deps.noteWritten(drawing.path, drawing.document, bytesOf(drawing.content));
       written.push(result);

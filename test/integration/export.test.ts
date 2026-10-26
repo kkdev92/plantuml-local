@@ -57,6 +57,8 @@ const deps: ExporterDeps = {
   invalidNameMessage: 'Use letters, digits, hyphens and underscores only.',
   severalDiagramsMessage: 'This block holds more than one diagram.',
   pagesMessage: 'Pages after newpage cannot be drawn.',
+  formulaMessage: (tag) => `Formulas in ${tag} are not drawn.`,
+  embeddedDiagramMessage: 'Embedded diagrams are not drawn.',
   engineErrorMessage: (message, line) =>
     line === null ? `PlantUML reported an error: ${message}` : `PlantUML reported an error at line ${String(line)}: ${message}`,
   pngTooLargeMessage: (width, height) => `The PNG would be ${String(width)}×${String(height)} pixels.`,

@@ -266,7 +266,8 @@ the line it is on:
 - the engine's errors and warnings;
 - an included file that is not read, and why (see
   [Including files](#including-files));
-- what the bundled engine cannot do: a library other than `azure`, a URL, emoji;
+- what the bundled engine cannot do: a library other than `azure`, a URL, emoji,
+  a formula in `<math>` or `<latex>` tags, a diagram embedded with `{{ … }}`;
 - content the bundled engine does not render: a second diagram in a block,
   the pages after `newpage`;
 - a diagram with no `@enduml` line, which is drawn anyway — a quick fix on that
@@ -565,7 +566,8 @@ and would show the referenced image as a second copy.
 - Four `!theme` themes are not bundled: `mars`, `sunlust`, `toy` and `vibrant`
 - Features excluded from the bundled PlantUML browser build are unavailable.
   Among them: embedded diagrams (`{{ … }}` inside a note, a legend or a class
-  body) and formulas (`<math>`, `<latex>`) are accepted but not drawn
+  body) and formulas (`<math>`, `<latex>`) are accepted but not drawn; the
+  Problems panel, the previews and the export say when a diagram uses them
 - Text is measured with approximate metrics (Node has no Canvas), so element
   widths, line wrapping and placement can differ slightly from plantuml.com
 - A render that exceeds 30 seconds is terminated
