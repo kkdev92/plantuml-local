@@ -45,7 +45,7 @@ Your diagram source is processed locally and is not sent to a rendering service.
 - **Offline Rendering**: No Java, no PlantUML server, no network connection required — nothing to install besides the extension
 - **Fault-Tolerant**: A syntax error shows up inline at the broken diagram; the rest of the page stays intact
 - **Problems Panel**: Errors, warnings and unsupported syntax in the diagrams of open Markdown and PlantUML files are listed with their line, preview or not
-- **Writing Help**: Completion for start lines, directives, themes and icons, templates for six kinds of diagram, and quick fixes that name a diagram for export and add a missing end line
+- **Writing Help**: Completion for start lines, directives, themes and icons, templates for sixteen kinds of diagram, and quick fixes that name a diagram for export and add a missing end line
 - **Actions Above Each Diagram**: *Preview*, *Export SVG* and *Export PNG* sit above the first line of each diagram, in `.puml` files and Markdown alike, and act on that diagram
 - **Export**: Diagrams can be written to SVG or PNG files — one, a whole document or a whole folder — and referenced from the Markdown, for hosts such as GitHub that do not draw PlantUML
 - **Multi-Diagram Pages**: Any number of diagrams per page; renders are serialised so results never mix
@@ -261,10 +261,12 @@ In a diagram — a ` ```plantuml ` block or a `.puml` file — suggestions open 
 - `!include ` and a `/` in its path: the folders and the files it can include
   (see [Including files](#including-files))
 
-Where a diagram can start, `puml-` offers a template of a sequence, class,
-activity, state, component or use case diagram, with its names to tab through:
-a whole ` ```plantuml ` block in the text of a Markdown file, the bare diagram
-in an empty block or between the diagrams of a `.puml` file.
+Where a diagram can start, `puml-` offers a template of sixteen kinds of
+diagram — sequence, class, activity, state, component, use case, object,
+entity relationship, deployment, timing, Gantt, mind map, WBS, Salt, JSON and
+YAML — with its names to tab through, each drawn as it is by the bundled
+engine: a whole ` ```plantuml ` block in the text of a Markdown file, the bare
+diagram in an empty block or between the diagrams of a `.puml` file.
 *PlantUML Local: Insert Diagram Template* does the same from the command
 palette: pick the kind, and the template goes on lines of its own at the
 cursor, inside the block quote or list item the cursor is in, as one edit that
