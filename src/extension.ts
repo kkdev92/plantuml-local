@@ -289,6 +289,12 @@ interface ViewerSet {
    * as not updated.
    */
   filesChanged(changes: ReadonlyMap<string, boolean>): void;
+  /** Whether a viewer of the document at `uri` is open. */
+  shows(uri: vscode.Uri): boolean;
+  /** Fires with the document's URI when a viewer of it opens or closes. */
+  readonly onDidChangeShown: vscode.Event<vscode.Uri>;
+  /** Releases the event. */
+  dispose(): void;
 }
 const Viewers: ServiceToken<ViewerSet> = serviceToken<ViewerSet>('plantuml.viewers');
 
@@ -351,6 +357,18 @@ function diagramsOf(document: vscode.TextDocument, text: string): PlantUmlBlock[
     : findPlantUmlBlocks(text);
 }
 
+/**
+ * Whether `source` has a line that starts a diagram, outside comments. A
+ * PlantUML file without one is lines to include, not a diagram.
+ */
+function hasStartLine(source: string): boolean {
+  let found = false;
+  forEachCodeLine(source, (line) => {
+    found ||= START.test(line);
+  });
+  return found;
+}
+
 /** The last segment of a document's path: `flows.puml`. */
 function fileNameOf(document: vscode.TextDocument): string {
   return document.uri.path.slice(document.uri.path.lastIndexOf('/') + 1);
@@ -363,16 +381,22 @@ function withoutExtension(file: string): string {
 }
 
 /**
- * A Markdown document that is a file, or will be one once saved. A
- * notebook's Markdown cells and the read-only side of a diff are Markdown
- * documents too, but there is nowhere to export beside them, and their
+ * A Markdown or PlantUML document that is a file, or will be one once saved:
+ * one whose diagrams are checked for the Problems panel. A notebook's
+ * Markdown cells and the read-only side of a diff are documents of these
+ * languages too, but there is nowhere to export beside them, and their
  * problems are not the user's to fix there.
  */
-function isMarkdownFile(document: vscode.TextDocument): boolean {
+function isDiagramFile(document: vscode.TextDocument): boolean {
   return (
-    document.languageId === 'markdown' &&
+    (document.languageId === 'markdown' || document.languageId === 'plantuml') &&
     (document.isUntitled || vscode.workspace.fs.isWritableFileSystem(document.uri.scheme) === true)
   );
+}
+
+/** A Markdown document that is a file, or will be one once saved. */
+function isMarkdownFile(document: vscode.TextDocument): boolean {
+  return document.languageId === 'markdown' && isDiagramFile(document);
 }
 
 /**
@@ -1277,13 +1301,8 @@ async function folderSources(folder: vscode.Uri, signal: AbortSignal): Promise<F
     const uri = vscode.Uri.parse(document.path);
     const open = vscode.workspace.textDocuments.find((candidate) => candidate.uri.toString() === uri.toString());
     const text = open?.getText() ?? new TextDecoder().decode(await vscode.workspace.fs.readFile(uri));
-    // A PlantUML file without a start line is lines to include, not a diagram.
-    let diagram = false;
-    forEachCodeLine(text, (line) => {
-      diagram ||= START.test(line);
-    });
     const name = withoutExtension(uri.path.slice(uri.path.lastIndexOf('/') + 1));
-    const blocks = !document.plantUml ? findPlantUmlBlocks(text) : diagram ? findFileDiagrams(text, name) : [];
+    const blocks = !document.plantUml ? findPlantUmlBlocks(text) : hasStartLine(text) ? findFileDiagrams(text, name) : [];
     if (blocks.length > 0) {
       sources.push({ uri, blocks, plantUml: document.plantUml });
     }
@@ -1459,6 +1478,8 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         },
       };
       const open = new Map<string, { viewer: DiagramViewer; document: vscode.TextDocument; reveal(): void }>();
+      // Which files have a viewer changes what the diagnostics check.
+      const shown = new vscode.EventEmitter<vscode.Uri>();
       const media = vscode.Uri.joinPath(vscode.Uri.file(__dirname), '..', 'media', 'viewer');
       const toolbar: ToolbarLabels = {
         selectDiagram: l10n.t('Select a diagram'),
@@ -1511,11 +1532,13 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
           },
         };
         open.set(key, entry);
+        shown.fire(document.uri);
         panel.webview.onDidReceiveMessage((message: unknown) => {
           void viewer.receive(message, entry.document.getText());
         });
         panel.onDidDispose(() => {
           open.delete(key);
+          shown.fire(document.uri);
         });
         return viewer;
       };
@@ -1591,6 +1614,11 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
               void entry.viewer.stale(notUpdatedNote(l10n, mode));
             }
           }
+        },
+        shows: (uri): boolean => open.has(uri.toString()),
+        onDidChangeShown: shown.event,
+        dispose: (): void => {
+          shown.dispose();
         },
       };
     },
@@ -1799,10 +1827,11 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         context.logger.warn(message);
         const actions: NoticeAction[] = [];
         if (result.cause === 'source') {
-          // The diagnostics list the same problem for a Markdown file, unless
-          // they are turned off. They check no other file: the output has it.
+          // The diagnostics list the same problem for a Markdown or PlantUML
+          // file, unless they are turned off. They check no other file: the
+          // output has it.
           const listed =
-            isMarkdownFile(document.textDocument) &&
+            isDiagramFile(document.textDocument) &&
             settings.read({ resource: document.textDocument.uri }).values[CONFIG.DIAGNOSTICS_ENABLED] !== false;
           actions.push(listed ? problemsButton(context) : outputButton(context));
         } else if (result.cause === 'png') {
@@ -2201,11 +2230,14 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
       settings: Settings.token,
       l10n: Localization,
       watch: IncludeWatch,
+      viewers: Viewers,
     },
-    bind: ({ registrations, logger }, { renders, palettes, settings, l10n, watch }): undefined => {
-      // Puts the problems of the diagrams in open Markdown documents in the
-      // Problems panel, whether or not a preview is open. Renders are shared
-      // with the preview, so a document shown in both is drawn once.
+    bind: ({ registrations, logger }, { renders, palettes, settings, l10n, watch, viewers }): undefined => {
+      // Puts the problems of the diagrams in open Markdown and PlantUML
+      // documents in the Problems panel, whether or not a preview is open.
+      // Renders are shared with the previews, so a document shown in one is
+      // drawn once, unless it includes local files: those renders are not
+      // kept, as the files may change.
       const collection = registrations.own(vscode.languages.createDiagnosticCollection(EXTENSION_ID));
       const labels: ProblemLabels = {
         errorMessage: (message) => errorMessage(message, l10n),
@@ -2254,7 +2286,12 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         const lines = splitLines(text);
         const found: vscode.Diagnostic[] = [];
         const reads: string[] = [];
-        for (const block of findPlantUmlBlocks(text)) {
+        // A PlantUML file with no start line is lines to include, not a
+        // diagram, unless its viewer is open: that draws it as one.
+        const diagrams = diagramsOf(document, text).filter(
+          (block) => document.languageId !== 'plantuml' || viewers.shows(document.uri) || hasStartLine(block.source)
+        );
+        for (const block of diagrams) {
           const check = checkSource(block, labels);
           const problems = [...check.problems];
           if (check.render !== null) {
@@ -2278,7 +2315,7 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
       };
 
       const schedule = (document: vscode.TextDocument, delay: number): void => {
-        if (!isMarkdownFile(document)) {
+        if (!isDiagramFile(document)) {
           return;
         }
         const key = document.uri.toString();
@@ -2331,7 +2368,7 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
       );
       registrations.own(
         vscode.workspace.onDidChangeTextDocument((event) => {
-          if (event.contentChanges.length === 0 || !isMarkdownFile(event.document)) {
+          if (event.contentChanges.length === 0 || !isDiagramFile(event.document)) {
             return;
           }
           // What was found describes text that is gone; it must not stay up
@@ -2341,6 +2378,15 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         })
       );
       registrations.own(vscode.workspace.onDidCloseTextDocument(forget));
+      // A PlantUML file with no start line is checked while its viewer is open.
+      registrations.own(
+        viewers.onDidChangeShown((uri) => {
+          const document = vscode.workspace.textDocuments.find((open) => open.uri.toString() === uri.toString());
+          if (document !== undefined) {
+            schedule(document, 0);
+          }
+        })
+      );
       const checkAll = (): void => {
         for (const document of vscode.workspace.textDocuments) {
           schedule(document, 0);

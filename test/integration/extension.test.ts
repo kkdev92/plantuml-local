@@ -597,6 +597,81 @@ describe('export (dist)', () => {
         vscodeStub._test.setConfiguration('diagnostics.enabled', undefined);
       }
     });
+
+    it('checks each diagram of a PlantUML file on its own, on the lines of the file', async () => {
+      const uri = 'file:///c/diag/flows.puml';
+      const text = [
+        '@startuml(id=good)',
+        'Alice -> Bob',
+        '@enduml',
+        '',
+        '@startuml(id=bad)',
+        'Alice -> Bob',
+        'this is not valid ;;; [[[',
+        '@enduml',
+        '',
+        '@startuml(id=paged)',
+        'Alice -> Bob',
+        'newpage',
+        'Carol -> Dave',
+        '@enduml',
+        '',
+        '@startuml(id=open)',
+        'Alice -> Bob',
+      ].join('\n');
+      const document = makeEditor(uri, text, 0, { languageId: 'plantuml' }).document;
+      vscodeStub._test.openDocument(document);
+      try {
+        const found = await problemsOf(uri, (items) => items.length >= 3);
+        expect(found.map((p) => [p.line, p.code, p.severity])).toEqual([
+          [6, 'PLLOCAL-SYN001', vscodeStub.DiagnosticSeverity.Error],
+          [11, 'PLLOCAL-CAP001', vscodeStub.DiagnosticSeverity.Error],
+          [15, 'PLLOCAL-DOC002', vscodeStub.DiagnosticSeverity.Warning],
+        ]);
+        // The whole line, from its first character: a PlantUML file has no fence to be inside.
+        expect(found[0]?.character).toBe(0);
+      } finally {
+        vscodeStub._test.closeDocument(document);
+      }
+      expect(vscodeStub._test.diagnostics.has(uri)).toBe(false);
+    });
+
+    it('leaves a PlantUML file with no start line alone: its lines are meant to be included', async () => {
+      const uri = 'file:///c/diag/shared.iuml';
+      const document = makeEditor(uri, '!procedure $greet($who)\n$who -> World : hello\n!endprocedure\n', 0, {
+        languageId: 'plantuml',
+      }).document;
+      vscodeStub._test.openDocument(document);
+      try {
+        expect(await problemsOf(uri, () => true)).toEqual([]);
+      } finally {
+        vscodeStub._test.closeDocument(document);
+      }
+    });
+
+    it('checks a PlantUML file with no start line while its preview shows it as a diagram', async () => {
+      const uri = 'file:///c/diag/loose.puml';
+      const editor = makeEditor(uri, 'Alice -> Bob\nthis is not valid ;;; [[[\n', 0, { languageId: 'plantuml' });
+      vscodeStub._test.openDocument(editor.document);
+      const before = vscodeStub._test.webviewPanels.length;
+      try {
+        expect(await problemsOf(uri, () => true)).toEqual([]);
+
+        vscodeStub._test.setActiveEditor(editor);
+        await vscodeStub._test.registeredCommands.get('plantumlLocal.openPreviewToSide')?.();
+        const panel = vscodeStub._test.webviewPanels[before];
+        expect(panel?.title).toBe('Preview: loose.puml');
+        const shown = await problemsOf(uri, (items) => items.length === 1);
+        expect(shown.map((p) => [p.line, p.code])).toEqual([[1, 'PLLOCAL-SYN001']]);
+
+        // Closing the preview takes the check away with it.
+        panel?.dispose();
+        expect(await problemsOf(uri, (items) => items.length === 0)).toEqual([]);
+      } finally {
+        vscodeStub._test.setActiveEditor(undefined);
+        vscodeStub._test.closeDocument(editor.document);
+      }
+    });
   });
 
   describe('when no Markdown editor has focus', () => {
@@ -1123,13 +1198,13 @@ describe('export (dist)', () => {
       expect(vscodeStub._test.writtenFiles.has('file:///c/puml/images/orders.svg')).toBe(false);
     });
 
-    it('points a refused export to the output, as the Problems panel lists no .puml file', async () => {
+    it('points a refused export to the Problems panel, which lists PlantUML files too', async () => {
       vscodeStub._test.setActiveEditor(
         pumlEditor('file:///c/pumlbroken/broken.puml', '@startuml\nthis is not valid ;;; [[[\n@enduml\n', 1)
       );
       const calls = vscodeStub._test.commandCalls.length;
 
-      vscodeStub._test.notificationReply = 'Show Output';
+      vscodeStub._test.notificationReply = 'Show Problems';
       try {
         await vscodeStub._test.registeredCommands.get('plantumlLocal.exportSvg')?.();
       } finally {
@@ -1138,8 +1213,8 @@ describe('export (dist)', () => {
 
       expect(vscodeStub._test.notifications.error.at(-1)).toMatch(/^Could not export the diagram: PlantUML error on line 2: /);
       const called = vscodeStub._test.commandCalls.slice(calls).map((call) => call.id);
-      expect(called.some((id) => id.startsWith('workbench.action.output.show.'))).toBe(true);
-      expect(called).not.toContain('workbench.actions.view.problems');
+      expect(called).toContain('workbench.actions.view.problems');
+      expect(called.some((id) => id.startsWith('workbench.action.output.show.'))).toBe(false);
       expect(vscodeStub._test.writtenFiles.has('file:///c/pumlbroken/images/broken.svg')).toBe(false);
     });
 

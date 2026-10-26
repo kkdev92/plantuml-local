@@ -18,7 +18,7 @@
   "config.exportPngScale.description": "PNG と、.puml のプレビューからコピーする図のサイズを、元の図の 1・2・4 倍から選びます。幅または高さが 8192 ピクセル、または総画素数が 1600 万ピクセルを超える場合は、書き出しとコピーを中止します。自動では縮小されません。",
   "config.hideExportedImages.description": "Markdown プレビューで図が二重に表示されないよう、#plantuml-local が付いた書き出し済みの画像を非表示にします。書き出した画像を確認するには、この設定をオフにしてください。",
   "config.preview.updateMode.description": "Markdown と PlantUML のプレビューを更新するタイミングを指定します。\"onChange\" は入力時、\"onSave\" は保存時、\"manual\" は「PlantUML Local: 描画キャッシュをクリアして再描画する」の実行時に更新します。更新までは前の図と、変更が反映されていないことを示す案内が表示されます。初めて表示する図は常に描画され、書き出しには常に最新のソースが使われます。",
-  "config.diagnostics.enabled.description": "開いている Markdown ファイルの図のエラーや警告を「問題」パネルに表示します。プレビューを開いていなくても確認できます。未対応の構文や、図に反映されない内容も対象です。",
+  "config.diagnostics.enabled.description": "開いている Markdown ファイルと PlantUML ファイルの図のエラーや警告を「問題」パネルに表示します。プレビューを開いていなくても確認できます。未対応の構文や、図に反映されない内容も対象です。",
   "config.includePaths.description": "!include で読み込むファイルの検索先を追加します。!include を記述したファイルのフォルダーから先に検索します。追加するフォルダーは、ワークスペースのフォルダーからの相対パスで 16 個まで指定できます。common.puml や styles/common.puml のような指定が対象です。./ や ../ で始まるパスには適用されず、!include を記述したファイルからの相対パスとして扱われます。読み込めるのは、信頼済みのワークスペースで、その文書が属するワークスペースフォルダー内のファイルだけです。",
   "capability.untrustedWorkspaces.description": "制限モードでも図をプレビューできます。ワークスペース内のファイルの読み込みと図の書き出しには、ワークスペースの信頼が必要です。図はネットワークを使わず、ローカル環境で描画します。",
   "capability.virtualWorkspaces.description": "ローカルファイルの !include はディスク上のファイルを必要とするため、仮想ワークスペースでは利用できません。"
