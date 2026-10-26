@@ -9,6 +9,7 @@
   "command.exportFolderPng.title": "Export All Diagrams in Folder as PNG",
   "command.assignDiagramName.title": "Name Diagram for Export",
   "command.addMissingEnd.title": "Add Missing End Line",
+  "command.diagramAction.title": "Run Diagram Action",
   "command.insertTemplate.title": "Insert Diagram Template",
   "command.openPreview.title": "Open Diagram Preview",
   "command.openPreviewToSide.title": "Open Diagram Preview to the Side",
@@ -20,6 +21,7 @@
   "config.hideExportedImages.description": "Hide exported images marked with #plantuml-local in the Markdown preview to avoid showing the same diagram twice. Turn this off to check the exported images.",
   "config.preview.updateMode.description": "When to refresh diagrams in Markdown and PlantUML previews: \"onChange\" as you type, \"onSave\" when you save, or \"manual\" when you run PlantUML Local: Clear Render Cache and Re-render. Until then, the preview shows the previous diagram with a notice that it is out of date. New diagrams are always rendered, and exports always use the current source.",
   "config.diagnostics.enabled.description": "Show diagram errors and warnings from open Markdown and PlantUML files in the Problems panel, even when no preview is open. This includes unsupported syntax and content that PlantUML leaves out of the diagram.",
+  "config.codeLens.enabled.description": "Show Preview, Export SVG and Export PNG above each diagram in Markdown and PlantUML files. The editor.codeLens setting must also be on.",
   "config.includePaths.description": "Additional folders to search for local !include files, after the folder containing the file with the directive. Specify up to 16 paths relative to the workspace folder. These folders are searched for paths such as common.puml or styles/common.puml; paths starting with ./ or ../ are resolved only relative to the file with the directive. Includes require a trusted workspace and must stay within the document's workspace folder.",
   "capability.untrustedWorkspaces.description": "Diagrams can be previewed in Restricted Mode. Including workspace files and exporting diagrams require a trusted workspace. Rendering runs locally without network access.",
   "capability.virtualWorkspaces.description": "Local !include directives require files on disk and are not available in virtual workspaces."

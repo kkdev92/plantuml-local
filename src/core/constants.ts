@@ -27,6 +27,7 @@ export const COMMANDS = {
   ASSIGN_DIAGRAM_NAME: `${EXTENSION_ID}.assignDiagramName`,
   ADD_MISSING_END: `${EXTENSION_ID}.addMissingEnd`,
   INSERT_TEMPLATE: `${EXTENSION_ID}.insertTemplate`,
+  DIAGRAM_ACTION: `${EXTENSION_ID}.diagramAction`,
 } as const;
 
 /** The view type of the diagram viewer's panels. */
@@ -59,6 +60,7 @@ export const CONFIG = {
   PREVIEW_UPDATE_MODE: 'preview.updateMode',
   DIAGNOSTICS_ENABLED: 'diagnostics.enabled',
   INCLUDE_PATHS: 'includePaths',
+  CODE_LENS_ENABLED: 'codeLens.enabled',
 } as const;
 
 /**

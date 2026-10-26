@@ -50,6 +50,7 @@ it('releases on deactivate every listener, provider and command activation regis
       'commands.registerCommand',
       'languages.createDiagnosticCollection',
       'languages.registerCodeActionsProvider',
+      'languages.registerCodeLensProvider',
       'languages.registerCompletionItemProvider',
       'languages.registerDocumentSymbolProvider',
       'languages.registerFoldingRangeProvider',

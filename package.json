@@ -181,6 +181,11 @@
         "category": "PlantUML Local"
       },
       {
+        "command": "plantumlLocal.diagramAction",
+        "title": "%command.diagramAction.title%",
+        "category": "PlantUML Local"
+      },
+      {
         "command": "plantumlLocal.insertTemplate",
         "title": "%command.insertTemplate.title%",
         "category": "PlantUML Local"
@@ -255,6 +260,10 @@
         },
         {
           "command": "plantumlLocal.addMissingEnd",
+          "when": "false"
+        },
+        {
+          "command": "plantumlLocal.diagramAction",
           "when": "false"
         },
         {
@@ -337,6 +346,12 @@
           "default": true,
           "scope": "resource",
           "description": "%config.diagnostics.enabled.description%"
+        },
+        "plantumlLocal.codeLens.enabled": {
+          "type": "boolean",
+          "default": true,
+          "scope": "resource",
+          "description": "%config.codeLens.enabled.description%"
         },
         "plantumlLocal.includePaths": {
           "type": "array",

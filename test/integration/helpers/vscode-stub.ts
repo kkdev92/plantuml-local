@@ -180,6 +180,25 @@ export interface ActionRegistrationStub {
   metadata: unknown;
 }
 
+/** A `vscode.CodeLens` as the extension builds it. */
+export interface CodeLensStub {
+  range: { start: PositionStub; end: PositionStub };
+  command?: { title: string; command: string; arguments?: unknown[] };
+  readonly isResolved: boolean;
+}
+
+/** A code lens provider as registered, with what it was registered for. */
+export interface CodeLensRegistrationStub {
+  selector: unknown;
+  provider: {
+    onDidChangeCodeLenses?: (listener: () => void) => { dispose(): void };
+    provideCodeLenses(
+      document: TextEditorStub['document'],
+      token: { isCancellationRequested: boolean }
+    ): CodeLensStub[] | undefined;
+  };
+}
+
 /** A definition provider as registered, with what it was registered for. */
 export interface DefinitionRegistrationStub {
   selector: unknown;
@@ -313,8 +332,13 @@ export interface VscodeStub {
       selector: unknown,
       provider: DefinitionRegistrationStub['provider']
     ) => { dispose(): void };
+    registerCodeLensProvider: (
+      selector: unknown,
+      provider: CodeLensRegistrationStub['provider']
+    ) => { dispose(): void };
   };
   CodeAction: new (title: string, kind: string) => CodeActionStub;
+  CodeLens: new (range: CodeLensStub['range'], command?: CodeLensStub['command']) => CodeLensStub;
   CodeActionKind: Record<'QuickFix', string>;
   DocumentSymbol: new (
     name: string,
@@ -512,6 +536,8 @@ export interface VscodeStub {
     actionProviders: ActionRegistrationStub[];
     /** Definition providers registered, in order. */
     definitionProviders: DefinitionRegistrationStub[];
+    /** Code lens providers registered, in order. */
+    codeLensProviders: CodeLensRegistrationStub[];
     /** Webview panels created, in order. */
     webviewPanels: WebviewPanelStub[];
     /** Panel serializers registered, by view type. */
@@ -794,6 +820,16 @@ export function createVscodeStub(): VscodeStub {
   }
   const actionProviders: ActionRegistrationStub[] = [];
   const definitionProviders: DefinitionRegistrationStub[] = [];
+  class CodeLens implements CodeLensStub {
+    constructor(
+      public range: CodeLensStub['range'],
+      public command?: CodeLensStub['command']
+    ) {}
+    get isResolved(): boolean {
+      return this.command !== undefined;
+    }
+  }
+  const codeLensProviders: CodeLensRegistrationStub[] = [];
 
   const webviewPanels: WebviewPanelStub[] = [];
   const webviewSerializers = new Map<
@@ -894,6 +930,7 @@ export function createVscodeStub(): VscodeStub {
     FoldingRangeKind: { Comment: 1, Imports: 2, Region: 3 },
     DocumentSymbol,
     CodeAction,
+    CodeLens,
     // A string here, where VS Code has a CodeActionKind; tests compare it as one.
     CodeActionKind: { QuickFix: 'quickfix' },
     SymbolKind: { Module: 1, Namespace: 2, Package: 3, Class: 4, Enum: 9, Interface: 10, Object: 18 },
@@ -931,6 +968,10 @@ export function createVscodeStub(): VscodeStub {
       registerDefinitionProvider: (selector, provider) => {
         definitionProviders.push({ selector, provider });
         return track('languages.registerDefinitionProvider');
+      },
+      registerCodeLensProvider: (selector, provider) => {
+        codeLensProviders.push({ selector, provider });
+        return track('languages.registerCodeLensProvider');
       },
     },
     EndOfLine: { LF: 1, CRLF: 2 },
@@ -1331,6 +1372,7 @@ export function createVscodeStub(): VscodeStub {
       symbolProviders,
       actionProviders,
       definitionProviders,
+      codeLensProviders,
       webviewPanels,
       webviewSerializers,
       // Restored panels come with whatever options were saved: none here.
