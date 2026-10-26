@@ -15,6 +15,7 @@
  */
 
 import { DIAGRAM_BACKDROP, EMOJI_UNAVAILABLE, hasRemoteReference } from '../core/constants';
+import { unsupportedKinds } from '../core/notation';
 import { diagramShape } from '../core/shape';
 import type { DiagramRender, IncludedStyle } from '../core/types';
 import { blockAtLine, findFileDiagrams, type PlantUmlBlock } from '../export/blocks';
@@ -46,6 +47,10 @@ export interface ViewerLabels {
   remoteReference: string;
   emojiUnavailable: string;
   pages: string;
+  /** A formula in `tag` (`<math>` or `<latex>`), which the engine draws blank. */
+  formula(tag: string): string;
+  /** A diagram embedded with `{{ … }}`, which the engine leaves out. */
+  embeddedDiagram: string;
   engineError(message: string, line: number | null): string;
   /** The diagram is drawn in the palette `dark` names, as its colours are hard to read in the one asked for. */
   otherPalette(dark: boolean): string;
@@ -311,7 +316,11 @@ export class DiagramViewer {
           const translated = labels.errorMessage(message);
           return translated === message ? [] : [translated];
         });
-        await this.status([...warnings, why].filter((text) => text !== '').join(' '), false, false);
+        // And what the engine drew the diagram without.
+        const leftOut = unsupportedKinds(shape.source).map((kind) =>
+          kind === 'embedded' ? labels.embeddedDiagram : labels.formula(kind === 'math' ? '<math>' : '<latex>')
+        );
+        await this.status([...warnings, ...leftOut, why].filter((text) => text !== '').join(' '), false, false);
       } else {
         const line = failure.line === null ? null : diagram.sourceLine + failure.line;
         const message = withIncludeReason(failure.message, failedIncludes);

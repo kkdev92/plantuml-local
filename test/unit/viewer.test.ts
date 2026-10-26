@@ -47,6 +47,8 @@ function makeDeps(
       remoteReference: 'remote',
       emojiUnavailable: 'emoji',
       pages: 'pages',
+      formula: (tag) => `formula ${tag}`,
+      embeddedDiagram: 'embedded',
       engineError: (message, line) => `engine: ${message} @ ${String(line)}`,
       otherPalette: (dark) => `other palette ${String(dark)}`,
     },
@@ -336,6 +338,15 @@ describe('DiagramViewer', () => {
       error: false,
       clear: false,
     });
+  });
+
+  it('says in the status what the engine drew the diagram without', async () => {
+    const panel = makePanel();
+    const viewer = new DiagramViewer(panel, makeDeps(), 'one', 'file:///one.puml');
+
+    await viewer.show(['@startuml', 'A -> B : <math>x</math>', 'note left', '{{', 'C -> D', '}}', 'end note', '@enduml'].join('\n'), 0);
+
+    expect(panel.sent.at(-1)).toEqual({ type: 'status', text: 'formula <math> embedded', error: false, clear: false });
   });
 
   it('names an emoji as the reason when the engine fails on one', async () => {

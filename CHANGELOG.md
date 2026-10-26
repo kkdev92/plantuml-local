@@ -25,6 +25,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   next diagram of a PlantUML file. A block whose fence is not closed, or that
   holds more than one diagram, gets no such fix. The fix reads the document
   again when it runs and does nothing if the diagram has changed since.
+- **What the bundled engine leaves out of a diagram is now said.** The
+  bundled engine draws a formula in `<math>` or
+  `<latex>` tags as blank text, and leaves out a diagram embedded in a note,
+  a legend or a class body with `{{ … }}`, both without an error. The
+  Problems panel now warns on the line concerned, the Markdown preview and
+  the `.puml` preview say so above the drawing, and an export that writes
+  such a diagram says so in its notice and in the Output panel. Comment
+  lines, the braces of a Salt diagram and `{{` inside a label, which the
+  engine draws as text, are left alone.
 
 ### Changed
 

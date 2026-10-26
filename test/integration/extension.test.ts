@@ -1441,6 +1441,18 @@ describe('export (dist)', () => {
       expect(vscodeStub._test.writtenFiles.has('file:///c/problems/images/broken-one.svg')).toBe(false);
     });
 
+    it('writes a diagram the engine draws without its formula, and says so in the notice', async () => {
+      const block = ['```plantuml formula', '@startuml', 'A -> B : <math>x</math>', '@enduml', '```'].join('\n');
+      vscodeStub._test.setActiveEditor(makeEditor('file:///c/formula/doc.md', block, 1));
+
+      await exportSvg();
+
+      expect(vscodeStub._test.writtenFiles.has('file:///c/formula/images/formula.svg')).toBe(true);
+      expect(vscodeStub._test.notifications.warn.at(-1)).toBe(
+        'Exported to formula/images/formula.svg The bundled engine does not draw <math> formulas; the formula is left out of the diagram.'
+      );
+    });
+
     it('removes the temporary file when the rename fails', async () => {
       vscodeStub._test.setActiveEditor(makeEditor('file:///c/failing/doc.md', NAMED_BLOCK, 1));
 

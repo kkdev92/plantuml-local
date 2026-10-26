@@ -78,6 +78,8 @@ function makeDeps(
     invalidNameMessage: 'unusable name',
     severalDiagramsMessage: 'one diagram per block',
     pagesMessage: 'no pages',
+    formulaMessage: (tag: string): string => `formula ${tag}`,
+    embeddedDiagramMessage: 'embedded',
     engineErrorMessage: (message: string, line: number | null): string =>
       `engine: ${message} @ ${String(line)}`,
     pngTooLargeMessage: (width: number, height: number, fits: number | null): string =>
@@ -159,6 +161,16 @@ describe('exportOne', () => {
       false
     );
     expect(deps.confirmReplace).not.toHaveBeenCalled();
+    expect(result).not.toHaveProperty('notes');
+  });
+
+  it('notes what the engine drew the diagram without, for the report', async () => {
+    const deps = makeDeps();
+    const [block] = findPlantUmlBlocks('```plantuml\n@startuml\nA -> B : <math>x</math>\nnote left\n{{\nC -> D\n}}\nend note\n@enduml\n```');
+
+    const result = await exportOne(deps, DOC, 'images', block!, 'maths');
+
+    expect(result).toMatchObject({ error: null, path: '/repo/docs/images/maths.svg', notes: ['formula <math>', 'embedded'] });
   });
 
   it('asks before replacing a file that holds something else, and leaves it when declined', async () => {

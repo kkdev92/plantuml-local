@@ -18,6 +18,7 @@
 
 import { EMOJI_UNAVAILABLE, remoteReferenceLine } from '../core/constants';
 import { splitLines } from '../core/lines';
+import { unsupportedNotations } from '../core/notation';
 import { diagramShape } from '../core/shape';
 import type { PlantUmlBlock } from '../export/blocks';
 import { withIncludeReason } from '../includes/describe';
@@ -66,6 +67,10 @@ export interface ProblemLabels {
   pages: string;
   missingEnd(end: string): string;
   beforeStart(start: string): string;
+  /** A formula in `tag` (`<math>` or `<latex>`), which the engine draws blank. */
+  formula(tag: string): string;
+  /** A diagram embedded with `{{ … }}`, which the engine leaves out. */
+  embeddedDiagram: string;
   /** Follows the engine's "Cannot load theme … in …" for a theme no file was asked for: from a library or a URL. */
   themeFrom: string;
   libraryNotBundled(library: string): string;
@@ -120,6 +125,11 @@ export function checkSource(block: PlantUmlBlock, labels: ProblemLabels): Source
   }
   if (shape.addedEnd !== null) {
     problem(startLine, 'warning', PROBLEM_CODES.DOC002, labels.missingEnd(shape.addedEnd));
+  }
+  // Drawn, but with the formula or the embedded diagram left out.
+  for (const use of unsupportedNotations(block.source)) {
+    const message = use.kind === 'embedded' ? labels.embeddedDiagram : labels.formula(use.kind === 'math' ? '<math>' : '<latex>');
+    problem(at(use.line), 'warning', PROBLEM_CODES.CAP001, message);
   }
   return { problems, render: shape.source, startLine };
 }
