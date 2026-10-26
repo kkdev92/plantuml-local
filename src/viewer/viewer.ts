@@ -67,6 +67,11 @@ export interface ViewerDeps {
    */
   exportPng(uri: string, line: number): Promise<void>;
   /**
+   * Copies the diagram that starts on `line` of the file at `uri` to the
+   * clipboard as SVG text, as Copy Diagram as SVG Text does at the cursor.
+   */
+  copySvgText(uri: string, line: number): Promise<void>;
+  /**
    * What copying `diagram` of the file at `uri` puts on the clipboard: the
    * PNG Export Diagram as PNG would write, for the page to draw, or why
    * there is none.
@@ -80,6 +85,7 @@ export type ViewerRequest =
   | { type: 'ready' }
   | { type: 'select'; index: number }
   | { type: 'exportPng' }
+  | { type: 'copySvg' }
   | { type: 'copyPng'; id: number };
 
 /** Reads a message from the page, which is untrusted, against `count` diagrams. */
@@ -88,7 +94,7 @@ export function parseRequest(message: unknown, count: number): ViewerRequest | n
     return null;
   }
   const { type, index, id } = message as { type?: unknown; index?: unknown; id?: unknown };
-  if (type === 'ready' || type === 'exportPng') {
+  if (type === 'ready' || type === 'exportPng' || type === 'copySvg') {
     return { type };
   }
   if (type === 'select' && typeof index === 'number' && Number.isInteger(index)) {
@@ -111,6 +117,8 @@ export interface ToolbarLabels {
   actualSize: string;
   /** The PNG button, which exports the diagram shown. */
   exportPng: string;
+  /** The Copy SVG button, which copies the diagram shown as SVG text. */
+  copySvgText: string;
   /**
    * The Copy button, which copies the diagram shown as the PNG button
    * exports it, and what the page says of a copy.
@@ -153,6 +161,7 @@ export function viewerBody(labels: ToolbarLabels, escape: (text: string) => stri
       ` data-copying="${escape(labels.copy.copying)}" data-copied="${escape(labels.copy.copied)}"` +
       ` data-failed="${escape(labels.copy.failed)}" data-unmade="${escape(labels.copy.unmade)}" data-unwritten="${escape(labels.copy.unwritten)}">` +
       `${escape(labels.copy.text)}</button>`,
+    `<button id="copy-svg" type="button" aria-label="${escape(labels.copySvgText)}" title="${escape(labels.copySvgText)}">Copy SVG</button>`,
     '</div>',
     '</div>',
     '</header>',
@@ -210,10 +219,12 @@ export class DiagramViewer {
   async receive(message: unknown, text: string): Promise<void> {
     const diagrams = findFileDiagrams(text, this.fileName);
     const request = parseRequest(message, diagrams.length);
-    if (request?.type === 'exportPng') {
+    if (request?.type === 'exportPng' || request?.type === 'copySvg') {
       const diagram = diagrams[this.indexIn(diagrams)];
       if (diagram !== undefined) {
-        await this.deps.exportPng(this.uri, diagram.openLine);
+        await (request.type === 'exportPng'
+          ? this.deps.exportPng(this.uri, diagram.openLine)
+          : this.deps.copySvgText(this.uri, diagram.openLine));
       }
       return;
     }

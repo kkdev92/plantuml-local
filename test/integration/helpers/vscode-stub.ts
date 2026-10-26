@@ -376,7 +376,12 @@ export interface VscodeStub {
     joinPath: (base: UriStub | { toString(): string }, ...parts: string[]) => UriStub;
     file: (path: string) => UriStub;
   };
-  env: { uiKind: number; language: string };
+  env: {
+    uiKind: number;
+    language: string;
+    /** Records what is written (see `_test.clipboardWrites`); fails while `_test.failClipboard` is set. */
+    clipboard: { writeText(value: string): Promise<void>; readText(): Promise<string> };
+  };
   window: {
     activeColorTheme: { kind: number };
     activeTextEditor: TextEditorStub | undefined;
@@ -524,6 +529,10 @@ export interface VscodeStub {
     modals: ModalStub[];
     /** Makes `workspace.fs.rename` fail, as a write that cannot complete would. */
     failRename: boolean;
+    /** Texts `env.clipboard.writeText` was given, in order. */
+    clipboardWrites: string[];
+    /** Makes `env.clipboard.writeText` reject, as a clipboard another application holds would. */
+    failClipboard: boolean;
     /** URIs passed to `workspace.fs.writeFile`, in order. */
     fileWrites: string[];
     /** Completion providers registered, in order. */
@@ -722,7 +731,9 @@ export function createVscodeStub(): VscodeStub {
     notificationReply: null as string | null,
     modals: [] as ModalStub[],
     failRename: false,
+    failClipboard: false,
   };
+  const clipboardWrites: string[] = [];
 
   class FileSystemError extends Error {
     constructor(
@@ -992,7 +1003,19 @@ export function createVscodeStub(): VscodeStub {
       // As VS Code builds one: forward slashes, and a leading slash before a drive.
       file: (path: string) => makeUri(`file://${path.replace(/\\/g, '/').replace(/^(?!\/)/, '/')}`),
     },
-    env: { uiKind: 1, language: 'en' },
+    env: {
+      uiKind: 1,
+      language: 'en',
+      clipboard: {
+        writeText: async (value) => {
+          if (hooks.failClipboard) {
+            throw new Error('The clipboard is held by another application.');
+          }
+          clipboardWrites.push(value);
+        },
+        readText: async () => clipboardWrites.at(-1) ?? '',
+      },
+    },
     window: {
       get activeColorTheme() {
         return theme;
@@ -1365,6 +1388,13 @@ export function createVscodeStub(): VscodeStub {
       },
       set failRename(value: boolean) {
         hooks.failRename = value;
+      },
+      clipboardWrites,
+      get failClipboard() {
+        return hooks.failClipboard;
+      },
+      set failClipboard(value: boolean) {
+        hooks.failClipboard = value;
       },
       fileWrites,
       completionProviders,

@@ -2264,6 +2264,120 @@ describe('naming a diagram (dist)', () => {
   });
 });
 
+describe('copying SVG text (dist)', () => {
+  const copies = (): string[] => vscodeStub._test.clipboardWrites;
+  const run = async (...args: unknown[]): Promise<void> => {
+    await vscodeStub._test.registeredCommands.get('plantumlLocal.copySvgText')?.(...args);
+  };
+
+  it('copies the block under the cursor as the SVG export writes it, without writing a file', async () => {
+    const editor = makeEditor('file:///c/copy/design.md', `intro\n\n${NAMED_BLOCK}`, 3);
+    vscodeStub._test.setActiveEditor(editor);
+    const written = vscodeStub._test.writtenFiles.size;
+    const count = copies().length;
+    const infos = vscodeStub._test.notifications.info.length;
+    try {
+      await run();
+      expect(copies()).toHaveLength(count + 1);
+      const svg = copies().at(-1) ?? '';
+      expect(svg).toMatch(/^<svg/);
+      expect(svg).toContain('hi');
+      expect(svg).toContain('fill="#FFFFFF"');
+      expect(svg).not.toMatch(/<script/i);
+      expect(vscodeStub._test.writtenFiles.size).toBe(written);
+      expect(vscodeStub._test.notifications.info.slice(infos)).toEqual(['Copied the diagram as SVG text.']);
+
+      // The same text the export writes.
+      await vscodeStub._test.registeredCommands.get('plantumlLocal.exportSvg')?.();
+      expect(vscodeStub._test.writtenFiles.get('file:///c/copy/images/orders.svg')).toBe(svg);
+    } finally {
+      vscodeStub._test.setActiveEditor(undefined);
+    }
+  });
+
+  it('copies from an untitled document and in a restricted workspace, where nothing is written', async () => {
+    const count = copies().length;
+    const warnings = vscodeStub._test.notifications.warn.length;
+    vscodeStub._test.setActiveEditor(makeEditor('untitled:Untitled-1', NAMED_BLOCK, 1, { isUntitled: true }));
+    try {
+      await run();
+      expect(copies()).toHaveLength(count + 1);
+      expect(copies().at(-1)).toContain('hi');
+
+      vscodeStub.workspace.isTrusted = false;
+      await run();
+      expect(copies()).toHaveLength(count + 2);
+    } finally {
+      vscodeStub.workspace.isTrusted = true;
+      vscodeStub._test.setActiveEditor(undefined);
+    }
+    // Neither the export's refusal of an untitled document nor Restricted Mode's.
+    expect(vscodeStub._test.notifications.warn.slice(warnings)).toEqual([]);
+  });
+
+  it('copies the diagram a file and a line name, as the .puml preview asks, wherever the cursor is', async () => {
+    const flows = makeEditor('file:///c/copyview/flows.puml', '@startuml(id=orders)\nAlice -> Bob : named\n@enduml\n\n@startuml\nC -> D : second\n@enduml', 0, {
+      languageId: 'plantuml',
+    });
+    vscodeStub._test.openDocument(flows.document);
+    vscodeStub._test.setActiveEditor(makeEditor('file:///c/copyview/other.md', NAMED_BLOCK, 1));
+    const count = copies().length;
+    try {
+      await run({ uri: 'file:///c/copyview/flows.puml', line: 4 });
+    } finally {
+      vscodeStub._test.setActiveEditor(undefined);
+      vscodeStub._test.closeDocument(flows.document);
+    }
+    expect(copies()).toHaveLength(count + 1);
+    expect(copies().at(-1)).toContain('second');
+    expect(copies().at(-1)).not.toContain('named');
+  });
+
+  it('copies nothing for a diagram the engine rejects, and points to the Problems panel', async () => {
+    vscodeStub._test.setActiveEditor(
+      makeEditor('file:///c/copybad/design.md', ['```plantuml', '@startuml', 'Alice -> Bob', 'this is not valid ;;; [[[', '@enduml', '```'].join('\n'), 2)
+    );
+    const count = copies().length;
+    const errors = vscodeStub._test.notifications.error.length;
+    try {
+      await run();
+    } finally {
+      vscodeStub._test.setActiveEditor(undefined);
+    }
+    expect(copies()).toHaveLength(count);
+    expect(vscodeStub._test.notifications.error.slice(errors)).toEqual([
+      expect.stringMatching(/^Could not copy the diagram: PlantUML error on line 4: /) as unknown,
+    ]);
+  });
+
+  it('says when the clipboard does not take the text, and asks where to put the cursor', async () => {
+    vscodeStub._test.setActiveEditor(makeEditor('file:///c/copyheld/design.md', `intro\n\n${NAMED_BLOCK}`, 3));
+    const count = copies().length;
+    const errors = vscodeStub._test.notifications.error.length;
+    const warnings = vscodeStub._test.notifications.warn.length;
+    vscodeStub._test.failClipboard = true;
+    try {
+      await run();
+    } finally {
+      vscodeStub._test.failClipboard = false;
+    }
+    expect(copies()).toHaveLength(count);
+    expect(vscodeStub._test.notifications.error.slice(errors)).toEqual([
+      'Could not copy the diagram: The clipboard did not take the text. Try again, or export the diagram as SVG.',
+    ]);
+
+    // Outside the block, with two blocks to choose between: nothing to copy.
+    vscodeStub._test.setActiveEditor(makeEditor('file:///c/copyheld/two.md', [NAMED_BLOCK, '', NAMED_BLOCK.replace('orders', 'billing')].join('\n'), 5));
+    try {
+      await run();
+    } finally {
+      vscodeStub._test.setActiveEditor(undefined);
+    }
+    expect(copies()).toHaveLength(count);
+    expect(vscodeStub._test.notifications.warn.slice(warnings)).toEqual(['Place the cursor inside the PlantUML code block you want to export.']);
+  });
+});
+
 describe('diagram lenses (dist)', () => {
   const FLOWS = ['@startuml(id=first)', 'Alice -> Bob : first', '@enduml', '', '@startuml(id=second)', 'Carol -> Dave : second', '@enduml', ''].join(
     '\n'
@@ -2539,6 +2653,25 @@ describe('viewer (dist)', () => {
       { uri: 'file:///c/viewpng/flows.puml', line: 4 },
       { uri: 'file:///c/viewpng/flows.puml', line: 0 },
     ]);
+  });
+
+  it('runs Copy Diagram as SVG Text for the diagram shown when its Copy SVG button is pressed', async () => {
+    vscodeStub._test.setActiveEditor(makeEditor('file:///c/viewsvg/flows.puml', FLOWS, 5, { languageId: 'plantuml' }));
+    const before = vscodeStub._test.webviewPanels.length;
+    await run('plantumlLocal.openPreviewToSide');
+    const panel = vscodeStub._test.webviewPanels[before]!;
+    expect(panel.webview.html).toContain(
+      '<button id="copy-svg" type="button" aria-label="Copy Diagram as SVG Text" title="Copy Diagram as SVG Text">Copy SVG</button>'
+    );
+    panel.receive({ type: 'ready' });
+    await waitFor(() => posted(panel, 'render').length > 0);
+    const asked = (): unknown[] =>
+      vscodeStub._test.commandCalls.filter((call) => call.id === 'plantumlLocal.copySvgText').map((call) => call.args[0]);
+    const count = asked().length;
+
+    panel.receive({ type: 'copySvg' });
+    await waitFor(() => asked().length > count);
+    expect(asked().slice(count)).toEqual([{ uri: 'file:///c/viewsvg/flows.puml', line: 4 }]);
   });
 
   it('answers the Copy button with what the PNG button would export, or why there is none', async () => {

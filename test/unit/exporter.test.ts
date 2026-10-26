@@ -11,6 +11,8 @@ import {
   isPngOfSize,
   PNG_LIMITS,
   preparePng,
+  prepareSvg,
+  SVG_TEXT_LIMIT,
   svgSize,
   writeDocuments,
   type ExporterDeps,
@@ -85,6 +87,7 @@ function makeDeps(
     pngTooLargeMessage: (width: number, height: number, fits: number | null): string =>
       `too large: ${String(width)}×${String(height)}, fits ${String(fits)}`,
     pngFailedMessage: 'no PNG',
+    svgTooLargeMessage: (bytes: number): string => `too long: ${String(bytes)}`,
     sameFileMessage: 'same file',
     changedMessage: 'changed meanwhile',
     ...overrides,
@@ -651,6 +654,50 @@ describe('preparePng', () => {
     expect(await preparePng(makeDeps({ render: vi.fn(() => Promise.resolve(rendered('<svg><g/></svg>'))) }), block!)).toMatchObject({
       error: 'no PNG',
     });
+  });
+});
+
+describe('prepareSvg', () => {
+  // No name: a copy needs none.
+  const [block] = findPlantUmlBlocks('```plantuml\nx\n```');
+
+  it('gives the SVG an export would write, with its background, without writing it', async () => {
+    const deps = makeDeps();
+
+    expect(await prepareSvg(deps, block!)).toEqual({
+      svg: '<svg><rect width="100%" height="100%" fill="#FFFFFF"/>x</svg>',
+      notes: [],
+    });
+    expect(deps.render).toHaveBeenCalledWith('x', false);
+    expect(deps.writeFile).not.toHaveBeenCalled();
+    expect(deps.toPng).not.toHaveBeenCalled();
+  });
+
+  it('uses the export palette, and notes what the engine draws the diagram without', async () => {
+    const dark = makeDeps({ isDark: () => true });
+    expect(await prepareSvg(dark, block!)).toMatchObject({ svg: expect.stringContaining('fill="#1b1b1b"') as unknown });
+    expect(dark.render).toHaveBeenCalledWith('x', true);
+
+    const [formula] = findPlantUmlBlocks('```plantuml\n@startuml\nA -> B : <math>x</math>\n@enduml\n```');
+    expect(await prepareSvg(makeDeps(), formula!)).toMatchObject({ notes: ['formula <math>'] });
+  });
+
+  it('refuses what an SVG export refuses, and text past what the clipboard is given', async () => {
+    const [remote] = findPlantUmlBlocks('```plantuml\n@startuml\n!include https://example.com/x.puml\n@enduml\n```');
+    const [broken] = findPlantUmlBlocks('```plantuml\n@startuml\nAlice -> Bob\nthis is not valid ;;; [[[\n@enduml\n```');
+    const engineError = makeDeps({ render: vi.fn(() => Promise.resolve(rendered(engineOutput('syntax-error')))) });
+
+    expect(await prepareSvg(makeDeps(), remote!)).toMatchObject({ error: 'remote references are not supported', cause: 'source' });
+    expect(await prepareSvg(engineError, broken!)).toMatchObject({
+      error: 'engine: Syntax Error? (Assumed diagram type: sequence) @ 4',
+      cause: 'source',
+    });
+    // The size of a PNG is no condition; the text is what counts, in UTF-8
+    // bytes: two per character here.
+    const huge = makeDeps({ render: vi.fn(() => Promise.resolve(rendered(`<svg>${'é'.repeat(SVG_TEXT_LIMIT / 2)}</svg>`))), pngScale: () => 4 });
+    expect(await prepareSvg(huge, block!)).toMatchObject({ error: expect.stringMatching(/^too long: 3355\d{4}$/) as unknown, cause: 'text' });
+    const fits = makeDeps({ render: vi.fn(() => Promise.resolve(rendered(`<svg>${'a'.repeat(SVG_TEXT_LIMIT - 64)}</svg>`))) });
+    expect(await prepareSvg(fits, block!)).toMatchObject({ notes: [] });
   });
 });
 

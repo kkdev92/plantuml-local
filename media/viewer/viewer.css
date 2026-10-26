@@ -60,7 +60,8 @@ select {
 
 #tools button,
 #export-png,
-#copy-png {
+#copy-png,
+#copy-svg {
 	min-width: 1.75rem;
 	padding: 0.1rem 0.5rem;
 	color: var(--vscode-button-secondaryForeground);
@@ -73,7 +74,8 @@ select {
 
 #tools button:hover:not(:disabled),
 #export-png:hover,
-#copy-png:hover {
+#copy-png:hover,
+#copy-svg:hover {
 	background: var(--vscode-button-secondaryHoverBackground);
 }
 

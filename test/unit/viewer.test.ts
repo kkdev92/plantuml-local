@@ -33,6 +33,7 @@ function makeDeps(
     resolvePalette: (_source: string, dark: boolean) => Promise.resolve(dark),
     isDark: () => false,
     exportPng: vi.fn(() => Promise.resolve()),
+    copySvgText: vi.fn(() => Promise.resolve()),
     copyPng: vi.fn((_uri: string, diagram: { source: string }) =>
       Promise.resolve({ svg: `<svg>${diagram.source}</svg>`, width: 20, height: 10, background: '#FFFFFF' })
     ),
@@ -71,9 +72,10 @@ const of = (sent: unknown[], type: string): unknown[] =>
   sent.filter((message) => (message as { type: string }).type === type);
 
 describe('parseRequest', () => {
-  it('accepts a ready page, a choice among the diagrams, and the PNG and Copy buttons', () => {
+  it('accepts a ready page, a choice among the diagrams, and the PNG, Copy and Copy SVG buttons', () => {
     expect(parseRequest({ type: 'ready' }, 2)).toEqual({ type: 'ready' });
     expect(parseRequest({ type: 'exportPng' }, 2)).toEqual({ type: 'exportPng' });
+    expect(parseRequest({ type: 'copySvg' }, 2)).toEqual({ type: 'copySvg' });
     expect(parseRequest({ type: 'select', index: 1 }, 2)).toEqual({ type: 'select', index: 1 });
     expect(parseRequest({ type: 'copyPng', id: 3 }, 2)).toEqual({ type: 'copyPng', id: 3 });
   });
@@ -166,6 +168,21 @@ describe('DiagramViewer', () => {
 
     await viewer.receive({ type: 'exportPng' }, FLOWS.replace('(id=orders)', '(id=renamed)'));
     expect(deps.exportPng).toHaveBeenCalledTimes(2);
+  });
+
+  it('copies the diagram shown as SVG text when the page asks, and none in place of one that has gone', async () => {
+    const deps = makeDeps();
+    const viewer = new DiagramViewer(makePanel(), deps, 'flows', 'file:///flows.puml');
+    viewer.select(FLOWS, 5);
+    await viewer.receive({ type: 'copySvg' }, FLOWS);
+    expect(deps.copySvgText).toHaveBeenLastCalledWith('file:///flows.puml', 4);
+    expect(deps.exportPng).not.toHaveBeenCalled();
+    await viewer.receive({ type: 'select', index: 0 }, FLOWS);
+    await viewer.receive({ type: 'copySvg' }, FLOWS);
+    expect(deps.copySvgText).toHaveBeenLastCalledWith('file:///flows.puml', 0);
+    // The named diagram shown is gone: nothing is copied in its place.
+    await viewer.receive({ type: 'copySvg' }, FLOWS.replace('(id=orders)', '(id=renamed)'));
+    expect(deps.copySvgText).toHaveBeenCalledTimes(2);
   });
 
   it('answers a copy with what to draw of the diagram shown, under the number the page gave it', async () => {
@@ -430,6 +447,7 @@ describe('viewerBody', () => {
         fit: 'Fit to Window',
         actualSize: 'Actual Size',
         exportPng: 'Export Diagram as PNG',
+        copySvgText: 'Copy Diagram as SVG Text',
         copy,
       },
       escape
@@ -443,12 +461,13 @@ describe('viewerBody', () => {
     expect(body).toContain('<button id="fit" type="button" aria-label="Fit to Window" title="Fit to Window (0)" aria-pressed="true">Fit to Window</button>');
     expect(body).toContain('<button id="actual" type="button" aria-label="Actual Size" title="Actual Size (1)">100%</button>');
     // Beside the zoom, not in it, and kept together: the PNG button, then
-    // Copy, which carries what the page says of a copy.
+    // Copy, which carries what the page says of a copy, then Copy SVG.
     expect(body).toContain('<div id="bar"><div id="tools" role="toolbar"');
     expect(body).toContain(
       '</div><div id="actions"><button id="export-png" type="button" aria-label="Export Diagram as PNG" title="Export Diagram as PNG">PNG</button>' +
         '<button id="copy-png" type="button" aria-label="Copy Diagram as PNG" title="Copy Diagram as PNG"' +
-        ' data-copying="Copying…" data-copied="Copied." data-failed="Could not copy: {0}" data-unmade="No PNG." data-unwritten="Not taken.">Copy</button></div></div></header>'
+        ' data-copying="Copying…" data-copied="Copied." data-failed="Could not copy: {0}" data-unmade="No PNG." data-unwritten="Not taken.">Copy</button>' +
+        '<button id="copy-svg" type="button" aria-label="Copy Diagram as SVG Text" title="Copy Diagram as SVG Text">Copy SVG</button></div></div></header>'
     );
     expect(body).toContain('<main id="stage" tabindex="0">');
   });
@@ -463,6 +482,7 @@ describe('viewerBody', () => {
         fit: '<b>',
         actualSize: 'x',
         exportPng: '<i>',
+        copySvgText: '<svg>',
         copy: { text: '<u>', label: '"><s>', copying: '<em>', copied: '"x"', failed: '<q>{0}', unmade: '<p>', unwritten: '<ol>' },
       },
       escape

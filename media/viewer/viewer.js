@@ -269,6 +269,12 @@
     vscode.postMessage({ type: 'exportPng' });
   });
 
+  // Copy SVG puts the SVG text on the clipboard, which the extension writes
+  // itself: the text needs no drawing, so the page has nothing to add.
+  document.getElementById('copy-svg').addEventListener('click', () => {
+    vscode.postMessage({ type: 'copySvg' });
+  });
+
   // Copy puts on the clipboard the PNG the PNG button would write. The
   // extension has no clipboard for images, so the page writes it: the write
   // starts at once, while the page has the focus, and takes the PNG once the
