@@ -29,6 +29,7 @@ export const COMMANDS = {
   INSERT_TEMPLATE: `${EXTENSION_ID}.insertTemplate`,
   DIAGRAM_ACTION: `${EXTENSION_ID}.diagramAction`,
   COPY_SVG_TEXT: `${EXTENSION_ID}.copySvgText`,
+  GO_TO_DIAGRAM: `${EXTENSION_ID}.goToDiagram`,
 } as const;
 
 /** The view type of the diagram viewer's panels. */

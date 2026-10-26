@@ -12,6 +12,7 @@
   "command.addMissingEnd.title": "Add Missing End Line",
   "command.diagramAction.title": "Run Diagram Action",
   "command.insertTemplate.title": "Insert Diagram Template",
+  "command.goToDiagram.title": "Go to Diagram in Document…",
   "command.openPreview.title": "Open Diagram Preview",
   "command.openPreviewToSide.title": "Open Diagram Preview to the Side",
   "config.theme.description": "Colour scheme for diagram previews. Use \"auto\" to follow the VS Code colour theme, or choose \"light\" or \"dark\". If a diagram's theme or Azure icons would be hard to read, the extension switches that diagram to the other colour scheme.",

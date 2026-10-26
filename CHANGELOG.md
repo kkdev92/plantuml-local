@@ -61,6 +61,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `puml-json` and `puml-yaml` join the six templates, in the completion where
   a diagram can start and in *Insert Diagram Template*. Each draws as it is
   with the bundled engine, its placeholders at their defaults.
+- **A list of a Markdown file's diagrams to go to.** *Go to Diagram in
+  Document…* lists the diagram blocks of the Markdown file in the editor —
+  named or not, drawn or not, in a block quote or a list item — with their
+  line, the kind their start line declares, the heading above them and their
+  title or first line, filters on all of that, and moves the cursor to the
+  block picked. Edited while the list is open, the file is read again, so a
+  pick lands where the block is then. Nothing is drawn for the list, and VS
+  Code's outline of the headings is as it was.
 
 ### Changed
 

@@ -85,6 +85,7 @@ import {
 import { templatePlace } from './language/templates';
 import { missingEndAt, namesDiagram, unnamedAt, withName } from './language/code-actions';
 import { diagramLenses, diagramTarget, targetBlock, type DiagramAction, type DiagramTarget } from './language/code-lens';
+import { listDiagrams } from './language/diagram-list';
 import { foldingRanges } from './language/folding';
 import { declarations, type Declaration } from './language/symbols';
 import {
@@ -230,6 +231,14 @@ export const AddMissingEnd = defineCommandContract<readonly unknown[], void>({
  */
 export const RunDiagramAction = defineCommandContract<readonly unknown[], void>({
   id: COMMANDS.DIAGRAM_ACTION,
+});
+
+/**
+ * Lists the diagram blocks of the Markdown document in the active editor
+ * and moves to the one picked (src/language/diagram-list.ts).
+ */
+export const GoToDiagram = defineCommandContract<readonly [], void>({
+  id: COMMANDS.GO_TO_DIAGRAM,
 });
 
 /** Inserts a diagram template where a diagram can start (src/language/templates.ts). */
@@ -2995,6 +3004,73 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
       undoStopAfter: true,
       keepWhitespace: true,
     });
+  });
+
+  module.commands.handle(GoToDiagram, async (context: OperationContext): Promise<void> => {
+    const editor = vscode.window.activeTextEditor;
+    if (editor?.document.languageId !== 'markdown') {
+      void context.notify.warn(context.l10n.t('Open a Markdown file to go to one of its diagrams.'));
+      return;
+    }
+    const document = editor.document;
+    const names = templateNames(context.l10n);
+    // Each block as the list shows it: its name, its line and declared
+    // kind, the heading above it and its title or first line, all of which
+    // the filter reads. Nothing is drawn for it.
+    const itemsOf = (): (vscode.QuickPickItem & { line: number })[] =>
+      listDiagrams(document.getText()).map((entry) => ({
+        label: entry.name ?? context.l10n.t('Diagram without a name'),
+        description: [
+          context.l10n.t('line {0}', String(entry.line + 1)),
+          ...(entry.kind === null ? [] : [names[entry.kind] ?? entry.kind]),
+        ].join(' · '),
+        detail: [entry.heading, entry.title ?? entry.summary].filter((part): part is string => part !== null && part !== '').join(' › '),
+        line: entry.line,
+      }));
+    let items = itemsOf();
+    if (items.length === 0) {
+      void context.notify.info(context.l10n.t('No diagrams found in this file.'));
+      return;
+    }
+
+    const pick = vscode.window.createQuickPick<(typeof items)[number]>();
+    pick.title = context.l10n.t('Go to Diagram in Document');
+    pick.placeholder = context.l10n.t('Select a diagram to go to its source');
+    pick.matchOnDescription = true;
+    pick.matchOnDetail = true;
+    pick.items = items;
+    // The list is of the document as it was when it opened. Edited meanwhile,
+    // the blocks may have moved: the list is read again, rather than a pick
+    // from the old one taken to its old line.
+    let version = document.version;
+    const refresh = (): void => {
+      items = itemsOf();
+      version = document.version;
+      pick.items = items;
+    };
+    const changes = vscode.workspace.onDidChangeTextDocument((event) => {
+      if (event.document.uri.toString() === document.uri.toString()) {
+        refresh();
+      }
+    });
+    const chosen = await new Promise<{ line: number } | undefined>((resolve) => {
+      pick.onDidAccept(() => {
+        if (document.version !== version) {
+          refresh();
+          return;
+        }
+        resolve(pick.selectedItems[0]);
+        pick.hide();
+      });
+      pick.onDidHide(() => resolve(undefined));
+      pick.show();
+    });
+    changes.dispose();
+    pick.dispose();
+    if (chosen === undefined) {
+      return;
+    }
+    await vscode.window.showTextDocument(document, { selection: new vscode.Range(chosen.line, 0, chosen.line, 0) });
   });
 
   module.commands.handle(AssignDiagramName, async (context: OperationContext, args): Promise<void> => {

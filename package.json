@@ -196,6 +196,11 @@
         "category": "PlantUML Local"
       },
       {
+        "command": "plantumlLocal.goToDiagram",
+        "title": "%command.goToDiagram.title%",
+        "category": "PlantUML Local"
+      },
+      {
         "command": "plantumlLocal.openPreview",
         "title": "%command.openPreview.title%",
         "category": "PlantUML Local"
@@ -279,6 +284,10 @@
         {
           "command": "plantumlLocal.insertTemplate",
           "when": "(editorLangId == markdown || editorLangId == plantuml) && !notebookEditorFocused"
+        },
+        {
+          "command": "plantumlLocal.goToDiagram",
+          "when": "editorLangId == markdown && !notebookEditorFocused"
         }
       ]
     },
