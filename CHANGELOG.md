@@ -69,6 +69,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   block picked. Edited while the list is open, the file is read again, so a
   pick lands where the block is then. Nothing is drawn for the list, and VS
   Code's outline of the headings is as it was.
+- **A colour picker on the colours a diagram sets.** A swatch sits beside the
+  value of a `skinparam`, the colour at the end of an element's declaration
+  and a colour property in a `<style>` block — `#ABC`, `#AABBCC` or a name
+  the bundled engine knows — in `.puml` files and Markdown blocks, in block
+  quotes and list items too. Clicking it opens VS Code's colour picker, and
+  a pick is written back as `#RRGGBB` in place of the token; a pick with an
+  alpha is offered nothing, as the token cannot carry it. A gradient, a
+  colour with a style modifier or an alpha, and a `#` in a comment, a string
+  or a URL get no swatch. The names and the positions are the ones the
+  bundled engine was seen to draw. VS Code's own default swatches, which
+  marked any hex-like token in a `.puml` file and offered CSS forms a
+  diagram cannot take, step back for these. VS Code's
+  `editor.colorDecorators` turns the swatches off.
 
 ### Changed
 

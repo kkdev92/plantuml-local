@@ -199,6 +199,39 @@ export interface CodeLensRegistrationStub {
   };
 }
 
+/** A `vscode.Color`: components in `[0, 1]`. */
+export interface ColorStub {
+  red: number;
+  green: number;
+  blue: number;
+  alpha: number;
+}
+
+/** A `vscode.ColorInformation` as the extension builds it. */
+export interface ColorInformationStub {
+  range: { start: PositionStub; end: PositionStub };
+  color: ColorStub;
+}
+
+/** A `vscode.ColorPresentation` as the extension builds it. */
+export interface ColorPresentationStub {
+  label: string;
+  textEdit?: unknown;
+}
+
+/** A colour provider as registered, with what it was registered for. */
+export interface ColorRegistrationStub {
+  selector: unknown;
+  provider: {
+    provideDocumentColors(document: TextEditorStub['document'], token: { isCancellationRequested: boolean }): ColorInformationStub[] | undefined;
+    provideColorPresentations(
+      color: ColorStub,
+      context: { document: TextEditorStub['document']; range: { start: PositionStub; end: PositionStub } },
+      token: { isCancellationRequested: boolean }
+    ): ColorPresentationStub[] | undefined;
+  };
+}
+
 /** A definition provider as registered, with what it was registered for. */
 export interface DefinitionRegistrationStub {
   selector: unknown;
@@ -336,7 +369,11 @@ export interface VscodeStub {
       selector: unknown,
       provider: CodeLensRegistrationStub['provider']
     ) => { dispose(): void };
+    registerColorProvider: (selector: unknown, provider: ColorRegistrationStub['provider']) => { dispose(): void };
   };
+  Color: new (red: number, green: number, blue: number, alpha: number) => ColorStub;
+  ColorInformation: new (range: ColorInformationStub['range'], color: ColorStub) => ColorInformationStub;
+  ColorPresentation: new (label: string) => ColorPresentationStub;
   CodeAction: new (title: string, kind: string) => CodeActionStub;
   CodeLens: new (range: CodeLensStub['range'], command?: CodeLensStub['command']) => CodeLensStub;
   CodeActionKind: Record<'QuickFix', string>;
@@ -547,6 +584,8 @@ export interface VscodeStub {
     definitionProviders: DefinitionRegistrationStub[];
     /** Code lens providers registered, in order. */
     codeLensProviders: CodeLensRegistrationStub[];
+    /** Colour providers registered, in order. */
+    colorProviders: ColorRegistrationStub[];
     /** Webview panels created, in order. */
     webviewPanels: WebviewPanelStub[];
     /** Panel serializers registered, by view type. */
@@ -841,6 +880,25 @@ export function createVscodeStub(): VscodeStub {
     }
   }
   const codeLensProviders: CodeLensRegistrationStub[] = [];
+  class Color implements ColorStub {
+    constructor(
+      public red: number,
+      public green: number,
+      public blue: number,
+      public alpha: number
+    ) {}
+  }
+  class ColorInformation implements ColorInformationStub {
+    constructor(
+      public range: ColorInformationStub['range'],
+      public color: ColorStub
+    ) {}
+  }
+  class ColorPresentation implements ColorPresentationStub {
+    textEdit?: unknown;
+    constructor(public label: string) {}
+  }
+  const colorProviders: ColorRegistrationStub[] = [];
 
   const webviewPanels: WebviewPanelStub[] = [];
   const webviewSerializers = new Map<
@@ -942,6 +1000,9 @@ export function createVscodeStub(): VscodeStub {
     DocumentSymbol,
     CodeAction,
     CodeLens,
+    Color,
+    ColorInformation,
+    ColorPresentation,
     // A string here, where VS Code has a CodeActionKind; tests compare it as one.
     CodeActionKind: { QuickFix: 'quickfix' },
     SymbolKind: { Module: 1, Namespace: 2, Package: 3, Class: 4, Enum: 9, Interface: 10, Object: 18 },
@@ -983,6 +1044,10 @@ export function createVscodeStub(): VscodeStub {
       registerCodeLensProvider: (selector, provider) => {
         codeLensProviders.push({ selector, provider });
         return track('languages.registerCodeLensProvider');
+      },
+      registerColorProvider: (selector, provider) => {
+        colorProviders.push({ selector, provider });
+        return track('languages.registerColorProvider');
       },
     },
     EndOfLine: { LF: 1, CRLF: 2 },
@@ -1403,6 +1468,7 @@ export function createVscodeStub(): VscodeStub {
       actionProviders,
       definitionProviders,
       codeLensProviders,
+      colorProviders,
       webviewPanels,
       webviewSerializers,
       // Restored panels come with whatever options were saved: none here.

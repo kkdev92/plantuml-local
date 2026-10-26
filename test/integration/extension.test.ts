@@ -9,6 +9,8 @@ import {
   createVscodeStub,
   type CodeActionStub,
   type CodeLensStub,
+  type ColorInformationStub,
+  type ColorRegistrationStub,
   type CompletionItemStub,
   type DiagnosticStub,
   type DocumentSymbolStub,
@@ -2285,6 +2287,58 @@ describe('naming a diagram (dist)', () => {
     const lines = editor.document.getText().split('\n');
     expect(lines[3]).toBe('@startuml(id=second)');
     expect(lines[6]).toBe('@startmindmap(id=mind)');
+  });
+});
+
+describe('colours (dist)', () => {
+  const provider = (): ColorRegistrationStub['provider'] => {
+    const registration = vscodeStub._test.colorProviders[0];
+    if (registration === undefined) {
+      throw new Error('no colour provider registered');
+    }
+    return registration.provider;
+  };
+  const token = { isCancellationRequested: false };
+  const summary = (info: ColorInformationStub): [number, number, number, string] => [
+    info.range.start.line,
+    info.range.start.character,
+    info.range.end.character,
+    `${Math.round(info.color.red * 255)},${Math.round(info.color.green * 255)},${Math.round(info.color.blue * 255)},${String(info.color.alpha)}`,
+  ];
+
+  it('is registered for Markdown and PlantUML files', () => {
+    expect(vscodeStub._test.colorProviders).toHaveLength(1);
+    expect(vscodeStub._test.colorProviders[0]?.selector).toEqual([{ language: 'markdown' }, { language: 'plantuml' }]);
+  });
+
+  it('shows the colours of a block in a quote where they are in the document, and none in a heading, a comment or a URL', () => {
+    const text = [
+      '# ABC',
+      '',
+      '> ```plantuml',
+      '> skinparam backgroundColor #ABC',
+      "> ' class Hidden #DEF",
+      '> class Foo #pink',
+      '> Foo -> Bar : [[http://example.com/#123]]',
+      '> ```',
+    ].join('\n');
+    const colors = provider().provideDocumentColors(makeEditor('file:///c/colors/doc.md', text, 0).document, token) ?? [];
+    expect(colors.map(summary)).toEqual([
+      [3, 28, 32, '170,187,204,1'],
+      [5, 12, 17, '255,192,203,1'],
+    ]);
+  });
+
+  it('shows the colours of a PlantUML file with its own columns, and offers a pick as #RRGGBB unless it has an alpha', () => {
+    const document = makeEditor('file:///c/colors/flows.puml', '@startuml\nclass Foo #pink\n@enduml', 0, { languageId: 'plantuml' }).document;
+    const colors = provider().provideDocumentColors(document, token) ?? [];
+    expect(colors.map(summary)).toEqual([[1, 10, 15, '255,192,203,1']]);
+
+    const range = colors[0]!.range;
+    const opaque = provider().provideColorPresentations(new vscodeStub.Color(1, 0.5, 0, 1), { document, range }, token) ?? [];
+    expect(opaque.map((presentation) => presentation.label)).toEqual(['#FF8000']);
+    const translucent = provider().provideColorPresentations(new vscodeStub.Color(1, 0.5, 0, 0.5), { document, range }, token) ?? [];
+    expect(translucent).toEqual([]);
   });
 });
 
