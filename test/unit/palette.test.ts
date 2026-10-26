@@ -38,6 +38,12 @@ describe('themeLines', () => {
     expect(themeLines(source)).toEqual(['!theme cerulean', '!theme plain', '!theme\tcyborg']);
   });
 
+  it('reads the lines of a file that ends them with a lone CR', () => {
+    const source = ['@startuml', '!theme cerulean', '!theme plain', 'Alice -> Bob', '@enduml'].join(String.fromCharCode(13));
+
+    expect(themeLines(source)).toEqual(['!theme cerulean', '!theme plain']);
+  });
+
   it('ignores lines that are not the directive', () => {
     const source = [
       "' !theme cerulean",

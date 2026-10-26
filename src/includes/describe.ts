@@ -1,5 +1,6 @@
 import { MAX_SEARCH_FOLDERS, type SearchFoldersProblem } from './resolver';
 import type { IncludeFailure, IncludeFailureReason } from './session';
+import { splitLines } from '../core/lines';
 import { splitErrorLocation } from '../core/messages';
 
 /**
@@ -25,12 +26,12 @@ const asksForLocalFile = (line: string): boolean => LOCAL_FILE_LINES.some((patte
 
 /** Whether `source` may include a local file. */
 export function hasLocalInclude(source: string): boolean {
-  return source.split(/\r?\n/).some(asksForLocalFile);
+  return splitLines(source).some(asksForLocalFile);
 }
 
 /** The line (from 0) of the first line of `source` that may include a local file, or -1. */
 export function firstLocalIncludeLine(source: string): number {
-  return source.split(/\r?\n/).findIndex(asksForLocalFile);
+  return splitLines(source).findIndex(asksForLocalFile);
 }
 
 /**

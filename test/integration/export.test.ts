@@ -346,4 +346,26 @@ describe('export (dist worker)', () => {
     expect(billing).toContain('second diagram');
     expect(billing).not.toContain('first diagram');
   });
+
+  it('writes every diagram of a PlantUML file whose lines end with a lone CR', async () => {
+    // Saved with the classic Mac OS line ending and never opened: the folder
+    // export reads such a file from disk as it is.
+    const document = join(workspace, 'docs/classic.puml');
+    const text = [
+      '@startuml(id=first)',
+      'Alice -> Bob : first diagram',
+      '@enduml',
+      '@startuml(id=second)',
+      'Carol -> Dave : second diagram',
+      '@enduml',
+      '',
+    ].join(String.fromCharCode(13));
+
+    const outcome = await exportAll(deps, document, 'images', findFileDiagrams(text, 'classic'));
+
+    expect(outcome?.failed).toHaveLength(0);
+    expect(outcome?.written.map((r) => r.name)).toEqual(['first', 'second']);
+    expect(readFileSync(join(workspace, 'docs/images/first.svg'), 'utf8')).toContain('first diagram');
+    expect(readFileSync(join(workspace, 'docs/images/second.svg'), 'utf8')).toContain('second diagram');
+  });
 });

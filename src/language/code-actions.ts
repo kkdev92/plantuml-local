@@ -10,6 +10,7 @@
  * are counted from 0.
  */
 
+import { splitLines } from '../core/lines';
 import { findFileDiagrams, findPlantUmlBlocks, isValidBlockName } from '../export/blocks';
 
 /** A block's opening fence, up to its language, and the word after it. */
@@ -35,7 +36,7 @@ export function unnamedAt(
   plantUml: boolean,
   fileName: string
 ): { current: string | null } | undefined {
-  const written = (plantUml ? START : FENCE).exec(text.split(/\r?\n/)[line] ?? '');
+  const written = (plantUml ? START : FENCE).exec(splitLines(text)[line] ?? '');
   if (written === null) {
     return undefined;
   }

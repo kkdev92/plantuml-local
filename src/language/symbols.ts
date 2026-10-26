@@ -16,6 +16,7 @@
  * dependency on the `vscode` module. Lines are counted from 0.
  */
 
+import { splitLines } from '../core/lines';
 import { END, START } from '../core/shape';
 import { DECLARED_ID } from '../export/blocks';
 import { DATA, PROCEDURE, textEnd } from './folding';
@@ -81,7 +82,7 @@ function declarationAt(line: string, index: number): Declaration | null {
 }
 
 export function declarations(source: string): Declaration[] {
-  const lines = source.split(/\r?\n/);
+  const lines = splitLines(source);
   const top: Declaration[] = [];
   let diagram: Declaration | null = null;
   // The `{` lines still open, each with the declaration it begins, if any.

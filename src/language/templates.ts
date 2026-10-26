@@ -10,6 +10,7 @@
  * Lines are counted from 0.
  */
 
+import { splitLines } from '../core/lines';
 import { findPlantUmlBlocks, isProseLine } from '../export/blocks';
 import { lineContext } from './completion';
 
@@ -84,7 +85,7 @@ export function templatePlace(
   kind: string,
   diagram: string
 ): TemplatePlace {
-  const lines = text.split(/\r\n|\r|\n/);
+  const lines = splitLines(text);
   const at = isEmpty(lines[line]) ? line : line + 1;
 
   if (plantUml) {

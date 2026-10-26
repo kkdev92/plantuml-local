@@ -2,6 +2,8 @@
  * Shared constants for the PlantUML Local extension.
  */
 
+import { splitLines } from './lines';
+
 /** Extension identifier used for configuration keys and commands. */
 export const EXTENSION_ID = 'plantumlLocal';
 
@@ -208,7 +210,7 @@ export function hasRemoteReference(source: string): boolean {
 /** The line (counting from 0) of the first such directive, or null. */
 export function remoteReferenceLine(source: string): number | null {
   let inBlockComment = false;
-  const lines = source.split(/\r?\n/);
+  const lines = splitLines(source);
   for (const [index, line] of lines.entries()) {
     const trimmed = line.trim();
     if (inBlockComment || trimmed.startsWith("/'")) {

@@ -1,4 +1,5 @@
 import { INCLUDE_LIMITS } from '../core/constants';
+import { splitLines } from '../core/lines';
 import { forEachCodeLine } from '../core/shape';
 import type { IncludedFile, IncludeLoader } from '../core/types';
 import { includesAzure, themeLines } from '../render/palette';
@@ -153,7 +154,7 @@ export class IncludeSession {
  * file's first line is `---`.
  */
 function themeContent(text: string): string[] {
-  const all = text.split(/\r?\n/);
+  const all = splitLines(text);
   let start = 0;
   if (all[0] === '---') {
     const end = all.indexOf('---', 1);
