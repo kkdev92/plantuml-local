@@ -29,20 +29,38 @@ Open the folder in VS Code and press `F5`. An Extension Development Host starts 
 
 ```text
 src/
-├── core/            constants and shared types (message protocol, log surface)
-├── export/          SVG export: finds the diagram blocks in a Markdown file and
-│                    writes one file per diagram
-├── grammar/         syntax highlighting for ```plantuml fences: TextMate
-│                    grammars written as TypeScript, built into dist/syntaxes/
+├── core/            constants, shared types and the source checks the previews,
+│                    the Problems panel and the export share
+├── diagnostics/     the problems of each diagram, for the Problems panel
+├── export/          finds the diagram blocks of a Markdown or PlantUML file and
+│                    writes them as SVG or PNG files — one, a file's or a
+│                    folder's — with the image links and the record of the
+│                    files written
+├── grammar/         syntax highlighting for PlantUML files and ```plantuml
+│                    fences: TextMate grammars written as TypeScript, built
+│                    into dist/syntaxes/
+├── includes/        local !include, !includesub and !theme … from: which file
+│                    may be read, reading and watching it, and the editor's
+│                    path completion and Go to Definition
+├── language/        editing help: completion, templates, folding, symbols, the
+│                    actions above each diagram, quick fixes, Go to Diagram
 ├── preview/         markdown-it plugin: fence dispatch + cache-and-refresh cycle
 │                    (dependency-injected, no `vscode` import — unit-testable)
-├── render/          extension-host side of the worker (request/response, restart)
+├── render/          extension-host side of the worker (request/response,
+│                    restart), shared renders, engine errors, the palette
+├── viewer/          the .puml preview panel; its page is in media/viewer/
 ├── worker/          render worker: DOM shims, engine loading, serial queue,
-│                    SVG sanitiser, approximate text metrics
-└── extension.ts     wiring only: vscode + @kkdev92/vscode-ext-kit + the above
+│                    SVG sanitiser, approximate text metrics, include loader,
+│                    network guard, bundled libraries
+└── extension.ts     commands and wiring: vscode + @kkdev92/vscode-ext-kit + the
+                     above
+media/               the pages of the .puml preview and of the PNG panel, and the
+                     Markdown preview's stylesheet
+l10n/                Japanese strings of the extension; the manifest's are in
+                     package.nls.ja.json
 scripts/
-├── build.mjs        esbuild bundling + engine copy + happy-dom cert stub +
-│                    grammar JSON
+├── build.mjs        esbuild bundling + engine copy + `!theme` table rebuild +
+│                    stdlib copy + happy-dom stubs + licence check + grammar JSON
 ├── extract-grammar-checklist.mjs  lists what the bundled engine accepts, from
 │                    the upstream PlantUML sources (run by hand; the output is
 │                    committed)
@@ -149,7 +167,7 @@ Use [Conventional Commits](https://www.conventionalcommits.org/): `feat:`, `fix:
 
 ## Reporting Issues
 
-Use the issue templates. For rendering problems, include the smallest PlantUML source that reproduces the issue and the output of *Output → PlantUML Local* with the level set to Debug via **Developer: Set Log Level**.
+Use the issue templates. For rendering problems, include the smallest PlantUML source that reproduces the issue and the output of *Output → PlantUML Local* with the level set to Debug via **Developer: Set Log Level** and `plantumlLocal.logLevel` set to `debug`.
 
 For security reports, **do not open a public issue** — see [SECURITY.md](SECURITY.md).
 

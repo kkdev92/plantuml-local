@@ -47,8 +47,9 @@ Your diagram source is processed locally and is not sent to a rendering service.
 - **Problems Panel**: Errors, warnings and unsupported syntax in the diagrams of open Markdown and PlantUML files are listed with their line, preview or not
 - **Writing Help**: Completion for start lines, directives, themes and icons, templates for sixteen kinds of diagram, and quick fixes that name a diagram for export and add a missing end line
 - **Actions Above Each Diagram**: *Preview*, *Export SVG* and *Export PNG* sit above the first line of each diagram, in `.puml` files and Markdown alike, and act on that diagram
+- **Go to Diagram**: *Go to Diagram in Document…* lists the diagram blocks of a Markdown file — with the heading above each, its kind and its title or first line — and moves the cursor to the one picked
 - **Colours**: A swatch beside each colour a diagram sets — a `skinparam` value, an element's colour, a `<style>` property — opens VS Code's colour picker, which writes the pick back as `#RRGGBB`
-- **Export**: Diagrams can be written to SVG or PNG files — one, a whole document or a whole folder — and referenced from the Markdown, for hosts such as GitHub that do not draw PlantUML
+- **Export**: Diagrams can be written to SVG files — one, a whole document or a whole folder — or to PNG files, one or a whole folder, and referenced from the Markdown, for hosts such as GitHub that do not draw PlantUML
 - **Multi-Diagram Pages**: Any number of diagrams per page; renders are serialised so results never mix
 - **Dark-Mode Aware**: Diagrams re-render to match your colour theme, or pin the palette via settings
 - **Full-Width Text Support**: Japanese and other full-width characters are measured and laid out correctly
@@ -96,7 +97,7 @@ npm run install-local
    ````
 
 3. Open the preview: the preview button at the top right of the editor, or **Markdown: Open Preview** (`Ctrl+Shift+V` by default)
-4. The block renders as a diagram — edit and save, and it follows
+4. The block renders as a diagram — edit it, and the diagram follows as you type
 
 See [sample.md](sample.md) for a tour of diagram types, including error handling, and [sample.puml](sample.puml) for a PlantUML file of its own.
 
@@ -133,10 +134,10 @@ PlantUML Local renders most diagram types available in the bundled PlantUML
 browser engine, including sequence, use-case, class, state, activity and
 component diagrams.
 
-The first render after startup is the slow one — around 0.4 s on a typical
-development machine while the WebAssembly engine initialises. Later renders are
-considerably faster, though timings depend on the machine and on how complex the
-diagram is.
+The first render after startup is the slow one — around half a second on a
+typical development machine while the WebAssembly engine initialises. Later
+renders are considerably faster, though timings depend on the machine and on
+how complex the diagram is.
 
 If a diagram looks stale, run `PlantUML Local: Clear Render Cache and Re-render`
 from the Command Palette.
@@ -229,7 +230,9 @@ as one with an error or one past the size limit of a PNG, is not copied either.
 *Copy SVG* puts the diagram's SVG on the clipboard as text instead — what
 *Export Diagram as SVG* would write, to paste into a file or a tool that takes
 SVG — and a notice says when it is there, or why it is not. The size limit of
-a PNG does not apply to it.
+a PNG does not apply to it; an SVG over 32 MiB is not copied, and the notice
+then offers *Export as SVG*, as it does when the clipboard does not take the
+text.
 
 The panel shows the SVG as an image, so nothing in it can run, and loads
 nothing but its own script and stylesheet.
@@ -479,8 +482,11 @@ the command palette while the preview has focus, they use the only open
 Markdown document, or ask which one when several are open. The message each
 export ends with offers *Show in Explorer*, which selects the file it
 wrote, or the first of them, in the Explorer. One that reports a problem
-offers a way on instead: *Show Problems* for a diagram with an error, *Export
-as SVG* for a PNG that cannot be made, *Open Settings* for a setting to change,
+offers a way on instead: *Show Problems* for a diagram with an error (*Show
+Output* when the Problems panel does not list it), *Export as SVG* for a PNG
+that cannot be made, *Open Settings* for a setting to change, *Show in
+Explorer* for a file that could not be written, *Choose Folder…* for a folder
+too large to export at once, *Manage Workspace Trust* in Restricted Mode,
 *Show Output* for the reasons a bulk export lists there, and *Name Diagram…*
 when blocks were left out for want of a name.
 
@@ -616,8 +622,9 @@ and would show the referenced image as a second copy.
 - A diagram wider or taller than 8192 pixels is not drawn; an error is shown
   instead
 - Only the first error in a diagram is reported
-- Start and end lines must be lowercase and begin with `@`: `@StartUml` and
-  `\startuml` fail
+- Start and end lines must begin with a lowercase `@start` or `@end`:
+  `@StartUml`, `@EndUml` and `\startuml` fail, while the name after it may
+  take capitals, as in `@startUML`
 - Four `!theme` themes are not bundled: `mars`, `sunlust`, `toy` and `vibrant`
 - Features excluded from the bundled PlantUML browser build are unavailable.
   Among them: embedded diagrams (`{{ … }}` inside a note, a legend or a class
@@ -734,8 +741,9 @@ For the full threat model and for vulnerability reporting, see
 That's it — no Java runtime, no Graphviz install, no external tools.
 
 > **Upgrading?** The minimum is now 1.138 — it was 1.137 from 0.9.0, 1.136 from
-> 0.8.0, 1.134 from 0.7.0, 1.125 from 0.4.0, and 1.101 before that. Older
-> installations keep the version they have and stop receiving updates.
+> 0.8.0, 1.134 from 0.7.0, 1.125 from 0.4.0, 1.101 from 0.3.0, and 1.96 before
+> that. Older installations keep the version they have and stop receiving
+> updates.
 
 CI runs the test suite on Windows, macOS and Linux (x64 on Windows and Linux,
 ARM64 on macOS). The extension is plain JavaScript and WebAssembly, so other
@@ -759,7 +767,7 @@ clipboard. No rendering service is involved either way.
 - **Colours look wrong after switching themes**: Backgrounds follow the palette the diagram was *rendered* with. If you pinned `plantumlLocal.theme`, that palette wins by design
 - **Exported images have different colours from the preview**: Exports, the PNG, Copy and Copy SVG buttons of the `.puml` preview included, use the light palette by default, whatever the editor theme (`plantumlLocal.exportTheme`). Set it to `preview` to export in the palette the preview uses, or set `plantumlLocal.theme` to `light` to preview diagrams in the colours they are exported in
 - **Layout differs from plantuml.com**: Text is measured with approximate metrics in the Node renderer, so box widths, line wrapping and element placement can differ slightly
-- **Setting `logLevel: debug` shows nothing new**: The channel is a `LogOutputChannel` now, and VS Code decides what one of those shows — an extension cannot raise its own channel's level. Run **Developer: Set Log Level** and pick *PlantUML Local*; that choice is per channel and survives a restart. `plantumlLocal.logLevel` is a floor on top of it for the rendering entries, so it can only make those quieter
+- **Setting `logLevel: debug` shows nothing new**: The channel is a `LogOutputChannel` now, and VS Code decides what one of those shows — an extension cannot raise its own channel's level. Run **Developer: Set Log Level**, pick *PlantUML Local* and choose a level; the choice lasts until VS Code closes, and the *Set as Default Log Level* button beside a level keeps it. `plantumlLocal.logLevel` is a floor on top of it for the rendering entries: at its default, `info`, it holds back their Debug entries, so to see those, set the channel to Debug and `plantumlLocal.logLevel` to `debug`
 
 ---
 
@@ -781,7 +789,7 @@ Helpful things when reporting bugs:
 
 - OS / architecture / VS Code version
 - The smallest PlantUML source that reproduces the issue
-- Output from *Output → PlantUML Local*, with the level set to Debug via **Developer: Set Log Level**
+- Output from *Output → PlantUML Local*, with the level set to Debug via **Developer: Set Log Level** and `plantumlLocal.logLevel` set to `debug`
 
 Security-related reports should follow [SECURITY.md](SECURITY.md).
 Really appreciate you using PlantUML Local 💛
@@ -792,7 +800,7 @@ Really appreciate you using PlantUML Local 💛
 
 PlantUML Local is licensed under the MIT License — see [LICENSE](LICENSE).
 
-The bundled engine `@plantuml/core` is MIT-licensed from version 1.2026.6 onwards (earlier versions are GPL-3.0-or-later). This extension's dependency range for it starts no lower than 1.2026.6 (see `package.json`), so it only ever resolves to MIT-licensed releases; the exact version a build used is recorded in `package-lock.json`.
+The bundled engine `@plantuml/core` is MIT-licensed from version 1.2026.6 onwards (earlier versions are GPL-3.0-or-later). This extension pins it to one exact version, never earlier than 1.2026.6 (see `package.json`), so it only ever ships an MIT-licensed release.
 
 Copyright and licence notices for the third-party code shipped inside the VSIX are collected in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 

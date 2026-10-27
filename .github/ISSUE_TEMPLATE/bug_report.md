@@ -18,7 +18,7 @@ A clear description of the bug.
 
 ## Minimal PlantUML Source
 
-The smallest ` ```plantuml ` block that reproduces the issue:
+The smallest ` ```plantuml ` block, or `.puml` file, that reproduces the issue:
 
 ````markdown
 ```plantuml
@@ -38,7 +38,7 @@ What actually happened (broken layout, error box, stuck on "Rendering diagram…
 
 ## Logs
 
-Run **Developer: Set Log Level**, pick *PlantUML Local* and choose Debug, reproduce, and paste relevant lines from *View → Output → PlantUML Local*. (`plantumlLocal.logLevel` can only make the log quieter, so leave it at its default.)
+Run **Developer: Set Log Level**, pick *PlantUML Local* and choose Debug, and set `plantumlLocal.logLevel` to `debug` (its default, `info`, holds back the rendering entries at Debug). Reproduce, and paste relevant lines from *View → Output → PlantUML Local*.
 
 ## Additional Context
 
