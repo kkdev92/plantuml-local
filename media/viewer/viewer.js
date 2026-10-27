@@ -57,6 +57,12 @@
   let zoom = 1;
   /** Where the image's top-left corner is in the scrolled area. */
   let at = { left: 0, top: 0 };
+  /**
+   * The stage's size when the page last put the view in place, and the
+   * scroll that left until the user scrolls: a scroll event with another
+   * size, or with that scroll, is not the user's (the scroll listener).
+   */
+  let placed = { width: 0, height: 0, left: NaN, top: NaN };
   let shown = null;
   let latest = null;
   let drag = null;
@@ -159,6 +165,7 @@
       stage.scrollLeft = at.left + view.x * zoom - stage.clientWidth / 2;
       stage.scrollTop = at.top + view.y * zoom - stage.clientHeight / 2;
     }
+    placed = { width: stage.clientWidth, height: stage.clientHeight, left: stage.scrollLeft, top: stage.scrollTop };
     indicate();
   }
 
@@ -389,13 +396,27 @@
     }
   });
 
-  // However the view moved, the new centre is kept once it stops.
+  // However the user moved the view, the new centre is kept once it stops.
+  // A scroll event is told at the next frame, before the ResizeObserver: as
+  // the panel resizes, one comes for the scroll the page made to keep the
+  // view, or the browser made to keep it in the stage, once the stage has
+  // taken its next size, and the centre measured then would move the view a
+  // little each time. Those are left to the ResizeObserver, which keeps the
+  // centre meant.
   stage.addEventListener('scroll', () => {
-    if (size !== null && view.fit !== true) {
-      view = { fit: false, zoom, ...centre() };
-      clearTimeout(saving);
-      saving = setTimeout(remember, 200);
+    if (size === null || view.fit === true) {
+      return;
     }
+    if (stage.clientWidth !== placed.width || stage.clientHeight !== placed.height) {
+      return;
+    }
+    if (Math.abs(stage.scrollLeft - placed.left) < 0.5 && Math.abs(stage.scrollTop - placed.top) < 0.5) {
+      return;
+    }
+    placed = { ...placed, left: NaN, top: NaN };
+    view = { fit: false, zoom, ...centre() };
+    clearTimeout(saving);
+    saving = setTimeout(remember, 200);
   });
 
   // The panel resized, or scroll bars came or went: fitted again, or around the same centre.
