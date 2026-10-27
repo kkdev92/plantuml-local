@@ -3,14 +3,20 @@
  * preprocessor directives, the bundled themes after `!theme` and the
  * OpenIconic names after `<&`. Only what the bundled engine has is offered:
  * no diagram type it cannot draw, no directive it ignores, no theme or icon
- * it does not ship.
+ * it does not ship. Elsewhere in a diagram: the aliases it declares, its
+ * words, and the snippets of its type where that type can be told.
  *
  * Like the exporter, this has no dependency on the `vscode` module: the
  * caller finds the line, and whether it lies in a diagram.
  */
 
+import { splitLines } from '../core/lines';
 import { END, START, forEachCodeLine } from '../core/shape';
 import { SUPPORTED_DIAGRAMS } from '../grammar/plantuml';
+import { diagramKind, inBodies, type DiagramKind } from './diagram-kind';
+import { DATA } from './folding';
+import { protect, protectedAt } from './protected';
+import { aliasesOf, wordAt, wordsOf } from './words';
 
 /**
  * The directives offered after `!`. Left out: `!includeurl`, since URLs
@@ -440,6 +446,135 @@ export function suggest(
   }
 
   return null;
+}
+
+/** A snippet of syntax: what the list shows, and the text it inserts in snippet syntax. */
+export interface Snippet {
+  label: string;
+  body: string;
+}
+
+/**
+ * The snippets of each diagram type that can be told from its lines
+ * (src/language/diagram-kind.ts): the groups of a sequence diagram and the
+ * control flow of an activity diagram. Each draws as it is inserted, with
+ * its placeholders at their defaults, in a diagram of its type only
+ * (test/integration/worker.test.ts draws each with the bundled engine).
+ */
+export const SNIPPETS: Readonly<Record<DiagramKind, readonly Snippet[]>> = {
+  sequence: [
+    { label: 'alt', body: 'alt ${1:condition}\n  $2\nelse ${3:otherwise}\n  $4\nend' },
+    { label: 'opt', body: 'opt ${1:condition}\n  $2\nend' },
+    { label: 'loop', body: 'loop ${1:condition}\n  $2\nend' },
+    { label: 'par', body: 'par ${1:first}\n  $2\nelse ${3:second}\n  $4\nend' },
+    { label: 'ref', body: 'ref over ${1:participant}\n  ${2:reference}\nend ref' },
+    { label: 'note', body: 'note ${1|over,left of,right of|} ${2:participant}\n  ${3:text}\nend note' },
+  ],
+  activity: [
+    { label: 'if', body: 'if (${1:condition}) then (${2:yes})\n  $3\nelse (${4:no})\n  $5\nendif' },
+    { label: 'while', body: 'while (${1:condition}) is (${2:yes})\n  $3\nendwhile (${4:no})' },
+    { label: 'repeat', body: 'repeat\n  $1\nrepeat while (${2:condition}) is (${3:yes}) not (${4:no})' },
+    { label: 'fork', body: 'fork\n  $1\nfork again\n  $2\nend fork' },
+  ],
+};
+
+/** A snippet's text with each placeholder at its default: its text, its first choice, or nothing. */
+export function expandSnippet(body: string): string {
+  return body.replace(
+    /\$\{\d+:([^}]*)\}|\$\{\d+\|([^,|]*)[^}]*\}|\$\d+/g,
+    (_placeholder, text?: string, choice?: string) => text ?? choice ?? ''
+  );
+}
+
+/** What the list offers at a position in a diagram where nothing else is offered. */
+export interface NameSuggestions {
+  /** The aliases the diagram declares, each with the name it stands for. */
+  aliases: readonly { name: string; display: string }[];
+  /** The diagram's other words. */
+  words: readonly string[];
+  /** The snippets of the diagram's type, on a line of their own. */
+  snippets: readonly Snippet[];
+  /** Columns of the line: where the word at the cursor begins and ends. */
+  start: number;
+  end: number;
+  /** The indentation of the line, which the lines of a snippet after its first go on with. */
+  lead: string;
+}
+
+/**
+ * The diagram line `line` of `source` lies in: its lines after the start
+ * line, from `from` up to `to`, the kind its start line names, and whether
+ * it is data. Null on a start or end line, and outside a diagram. With
+ * `bare`, a source without a start line is one diagram, as the engine draws
+ * a Markdown block without one.
+ */
+function diagramAt(
+  source: string,
+  line: number,
+  bare: boolean
+): { from: number; to: number; open: string; data: boolean } | null {
+  const bounds: { index: number; start: RegExpExecArray | null; text: string }[] = [];
+  forEachCodeLine(source, (text, index) => {
+    const start = START.exec(text);
+    if (start !== null || END.test(text)) {
+      bounds.push({ index, start, text });
+    }
+  });
+  const last = bounds.filter(({ index }) => index <= line).at(-1);
+  const to = bounds.find(({ index }) => index > line)?.index ?? splitLines(source).length;
+  if (last === undefined) {
+    return bare && bounds.every(({ start }) => start === null) ? { from: 0, to, open: 'uml', data: false } : null;
+  }
+  if (last.index === line || last.start === null) {
+    return null;
+  }
+  return { from: last.index + 1, to, open: last.start[2] ?? 'uml', data: DATA.test(last.text) };
+}
+
+/**
+ * The aliases, words and snippets for the cursor at `column` of line `line`
+ * of `source`, taken from the diagram the line lies in only; null where
+ * there are none, or the cursor is in protected text or on a preprocessor
+ * line. `bare` is a Markdown block, which is a diagram without a start
+ * line. `words` says when the diagram's words are offered: `always`;
+ * `beside` aliases or snippets only, so that there is nothing to offer
+ * where the words are all there would be; or `never`.
+ */
+export function suggestNames(
+  source: string,
+  line: number,
+  column: number,
+  options: { bare: boolean; words: 'always' | 'beside' | 'never' }
+): NameSuggestions | null {
+  const diagram = diagramAt(source, line, options.bare);
+  if (diagram === null) {
+    return null;
+  }
+  const lines = splitLines(source).slice(diagram.from, diagram.to);
+  const code = protect(lines, diagram.data);
+  const here = line - diagram.from;
+  const text = lines[here] ?? '';
+  const current = code[here];
+  if (current === undefined || protectedAt(current, column) || /^\s*!/.test(text)) {
+    return null;
+  }
+
+  // As VS Code lists words: without the one at the cursor.
+  const typed = wordAt(text, column);
+  const declared = aliasesOf(lines, code);
+  const names = new Set(declared.map(({ name }) => name));
+  const aliases = declared.filter(({ name }) => name !== typed.word);
+  const words =
+    options.words === 'never' ? [] : wordsOf(code).filter((word) => word !== typed.word && !names.has(word));
+
+  const alone = text.slice(0, typed.start).trim() === '' && text.slice(typed.end).trim() === '';
+  const kind = diagram.open === 'uml' && alone && inBodies(code)[here] === false ? diagramKind(code, here) : null;
+  const snippets = kind === null ? [] : SNIPPETS[kind];
+
+  if (aliases.length === 0 && snippets.length === 0 && (options.words !== 'always' || words.length === 0)) {
+    return null;
+  }
+  return { aliases, words, snippets, start: typed.start, end: typed.end, lead: /^\s*/.exec(text)?.[0] ?? '' };
 }
 
 /**

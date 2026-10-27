@@ -8,7 +8,9 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { NAMED_COLORS, findColors } from '../../src/core/colors';
 import { EMOJI_UNAVAILABLE } from '../../src/core/constants';
 import type { RenderResponseMessage } from '../../src/core/types';
-import { TEMPLATES } from '../../src/language/completion';
+import { expandSnippet, SNIPPETS, TEMPLATES } from '../../src/language/completion';
+import { diagramKind, type DiagramKind } from '../../src/language/diagram-kind';
+import { protect } from '../../src/language/protected';
 import { recognizeEngineError } from '../../src/render/engine-error';
 import {
   choosePalette,
@@ -776,4 +778,149 @@ describe('diagram templates (dist)', () => {
       }
     }
   );
+});
+
+// The snippets of syntax are offered in a diagram whose type its lines tell
+// (src/language/diagram-kind.ts). That rests on how the bundled engine reads
+// a @startuml diagram: it draws it as the first type that reads every line.
+// So it is re-checked on every engine update: each snippet draws in its type
+// only, and each marker line draws in its type and turns every other type
+// into an error. Every source here is under ten lines: from ten on, the
+// engine tries the type it drew last before the others.
+describe('snippets and the lines that tell a diagram type (dist, re-check on every engine update)', () => {
+  /** The diagram `lines` draw, or null when the engine draws an error. */
+  const drawn = async (lines: readonly string[]): Promise<string | null> => {
+    const source = ['@startuml', ...lines, '@enduml'];
+    expect(source.length).toBeLessThan(10);
+    try {
+      const svg = await render(source.join('\n'));
+      return recognizeEngineError(svg) === null ? svg : null;
+    } catch {
+      return null;
+    }
+  };
+  const OTHER: Record<DiagramKind, DiagramKind> = { sequence: 'activity', activity: 'sequence' };
+  /** The smallest diagram of each type, with `text` in it. */
+  const SMALLEST: Record<DiagramKind, (text: string) => string[]> = {
+    sequence: (text) => ['A -> B : request', ...text.split('\n')],
+    activity: (text) => ['start', ...text.split('\n'), 'stop'],
+  };
+  /** Whether an SVG is drawn as a sequence diagram, the class family, or the old activity syntax. */
+  const looksLike = (svg: string): string =>
+    /participant-head/.test(svg)
+      ? 'sequence'
+      : /class="entity"/.test(svg)
+        ? 'entity'
+        : /start_entity/.test(svg)
+          ? 'old activity'
+          : 'other';
+
+  it.each(
+    (Object.entries(SNIPPETS) as [DiagramKind, (typeof SNIPPETS)[DiagramKind]][]).flatMap(([kind, snippets]) =>
+      snippets.map(({ label, body }) => [kind, label, body] as const)
+    )
+  )('draws the %s snippet %s as inserted, in its type only', async (kind, _label, body) => {
+    // At its defaults, and with each choice of a choice placeholder.
+    const choices = /\$\{\d+\|([^}|]*)\|\}/.exec(body)?.[1]?.split(',') ?? [];
+    const texts = [body, ...choices.map((choice) => body.replace(/\$\{\d+\|[^}|]*\|\}/, choice))].map(expandSnippet);
+    const defaults = [...body.matchAll(/\$\{\d+:([^}]*)\}/g)].map((match) => match[1] ?? '');
+    for (const text of texts) {
+      const svg = await drawn(SMALLEST[kind](text));
+      expect(svg, text).not.toBeNull();
+      expect(looksLike(svg ?? ''), text).toBe(kind === 'sequence' ? 'sequence' : 'other');
+      // As text of its own, or in the brackets a group's condition is drawn in.
+      for (const value of defaults) {
+        expect(svg, `${value} in\n${text}`).toMatch(new RegExp(`>\\[?${value}\\]?<`));
+      }
+    }
+    expect(await drawn(SMALLEST[OTHER[kind]](expandSnippet(body))), expandSnippet(body)).toBeNull();
+  });
+
+  /** A line of each other type, which draws alone as that type. */
+  const OTHERS: Record<string, readonly string[]> = {
+    sequence: ['participant P'],
+    activity: ['start'],
+    class: ['class C'],
+    'old activity': ['(*) --> "a"'],
+    'use case': ['usecase U'],
+    component: ['[K]'],
+    state: ['state S'],
+    timing: ['concise "T" as t', '@0', 't is On'],
+  };
+
+  it.each(Object.entries(OTHERS))('draws the %s line on its own', async (_name, lines) => {
+    expect(await drawn(lines)).not.toBeNull();
+  });
+
+  // Each form of marker: its type, its line, and a diagram of that type it draws in.
+  const sequence = (marker: string, ...closing: string[]): readonly [DiagramKind, string, readonly string[]] => [
+    'sequence',
+    marker,
+    ['A -> B : m', marker, ...closing],
+  ];
+  const activity = (marker: string, ...closing: string[]): readonly [DiagramKind, string, readonly string[]] => [
+    'activity',
+    marker,
+    [':a;', marker, ...closing],
+  ];
+  const MARKERS: readonly (readonly [DiagramKind, string, readonly string[]])[] = [
+    sequence('participant A'),
+    sequence('create participant C'),
+    sequence('activate A'),
+    sequence('deactivate A'),
+    sequence('destroy A'),
+    sequence('autonumber'),
+    sequence('alt x', 'end'),
+    sequence('alt#Gold #LightBlue x', 'end'),
+    sequence('opt x', 'end'),
+    sequence('loop x', 'end'),
+    sequence('par x', 'end'),
+    sequence('critical x', 'end'),
+    sequence('ref over A : x'),
+    sequence('note over A : x'),
+    sequence('== x =='),
+    sequence('return x'),
+    sequence('box "x"', 'end box'),
+    sequence('hnote over A : x'),
+    sequence('rnote over A : x'),
+    sequence('[-> A'),
+    sequence('A ->]'),
+    activity('start'),
+    activity('stop'),
+    activity(':b;'),
+    activity('if (x) then (yes)', 'endif'),
+    activity('while (x)', 'endwhile'),
+    activity('repeat', 'repeat while (x)'),
+    activity('fork', 'fork again', 'end fork'),
+    activity('split', 'split again', 'end split'),
+    activity('switch (x)', 'case (a)', 'endswitch'),
+    // A swimlane comes before the first action.
+    ['activity', '|L|', ['|L|', ':a;']],
+    ['activity', '|#pink|L|', ['|#pink|L|', ':a;']],
+    activity('detach'),
+    activity('kill'),
+  ];
+
+  it.each(MARKERS)('reads the %s marker %s in that type only', async (kind, marker, lines) => {
+    expect(diagramKind(protect([marker], false))).toBe(kind);
+    const svg = await drawn(lines);
+    expect(svg).not.toBeNull();
+    expect(looksLike(svg ?? '')).toBe(kind === 'sequence' ? 'sequence' : 'other');
+    for (const [name, lines] of Object.entries(OTHERS)) {
+      if (name !== kind) {
+        expect(await drawn([...lines, marker]), name).toBeNull();
+      }
+    }
+  });
+
+  it('reads the lines a group goes on with as markers, each in that type only', async () => {
+    for (const marker of ['fork again', 'split again', 'repeat while (x)']) {
+      expect(diagramKind(protect([marker], false))).toBe('activity');
+      for (const [name, lines] of Object.entries(OTHERS)) {
+        if (name !== 'activity') {
+          expect(await drawn([...lines, marker]), `${marker} with ${name}`).toBeNull();
+        }
+      }
+    }
+  });
 });

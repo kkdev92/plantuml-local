@@ -2029,6 +2029,168 @@ describe('completion (dist)', () => {
       end: { line: 2, character: 5 },
     });
   });
+
+  describe('aliases, words and snippets', () => {
+    /** As VS Code asks while a word is typed, or on Ctrl+Space. */
+    const invoke = (document: TextEditorStub['document'], line: number, character: number): CompletionItemStub[] | undefined =>
+      vscodeStub._test.completionProviders[0]?.provider.provideCompletionItems(
+        document,
+        new vscodeStub.Position(line, character),
+        undefined,
+        { triggerKind: vscodeStub.CompletionTriggerKind.Invoke }
+      );
+    const labelOf = (item: CompletionItemStub): string => (typeof item.label === 'string' ? item.label : item.label.label);
+    const inserted = (item: CompletionItemStub | undefined): string =>
+      typeof item?.insertText === 'object' ? item.insertText.value : String(item?.insertText);
+    const flows = [
+      '@startuml',
+      'participant "注文係" as A',
+      'participant Server as B',
+      'A -> B : hello',
+      '',
+      '@enduml',
+      '@startuml',
+      'participant "Other" as O',
+      'O -> P : elsewhere',
+      '@enduml',
+    ].join('\n');
+
+    it('offers the aliases with what they stand for, then the snippets of the diagram type, then its words', () => {
+      const document = makeEditor('file:///c/names/flows.puml', flows, 0, { languageId: 'plantuml' }).document;
+
+      const items = invoke(document, 4, 0) ?? [];
+      expect(items.map(labelOf)).toEqual([
+        'A',
+        'alt',
+        'opt',
+        'loop',
+        'par',
+        'ref',
+        'note',
+        'participant',
+        'as',
+        'Server',
+        'B',
+        'hello',
+      ]);
+      expect(items[0]).toMatchObject({
+        label: { label: 'A', description: '注文係' },
+        kind: vscodeStub.CompletionItemKind.Variable,
+        detail: 'Alias in this diagram',
+      });
+      expect(items[1]).toMatchObject({
+        label: { label: 'alt', description: 'Alternative paths' },
+        kind: vscodeStub.CompletionItemKind.Snippet,
+        keepWhitespace: true,
+      });
+      expect(inserted(items[1])).toBe('alt ${1:condition}\n  $2\nelse ${3:otherwise}\n  $4\nend');
+      expect(items.at(-1)).toMatchObject({ kind: vscodeStub.CompletionItemKind.Text, detail: 'Word in this diagram' });
+      // VS Code sorts by sortText after how well the typed word matches.
+      const sorted = [...items].sort((a, b) => String(a.sortText).localeCompare(String(b.sortText)));
+      expect(sorted.slice(0, 7).map(labelOf)).toEqual(['A', 'alt', 'opt', 'loop', 'par', 'ref', 'note']);
+      expect(items[0]?.range).toEqual({
+        inserting: { start: { line: 4, character: 0 }, end: { line: 4, character: 0 } },
+        replacing: { start: { line: 4, character: 0 }, end: { line: 4, character: 0 } },
+      });
+    });
+
+    it('replaces the whole word at the cursor, and leaves it out of the words', () => {
+      const document = makeEditor('file:///c/names/typed.md', '```plantuml\n@startuml\nA -> Server\nSerXY\n@enduml\n```', 0)
+        .document;
+
+      const items = invoke(document, 3, 3) ?? [];
+      expect(items.map(labelOf)).toEqual(['A', 'Server']);
+      expect(items[0]?.range).toEqual({
+        inserting: { start: { line: 3, character: 0 }, end: { line: 3, character: 3 } },
+        replacing: { start: { line: 3, character: 0 }, end: { line: 3, character: 5 } },
+      });
+    });
+
+    it('leaves a list of words alone to VS Code in a PlantUML file, unless word suggestions are on there', () => {
+      const source = '@startuml\nA -> Server\nSe\n@enduml';
+      const file = makeEditor('file:///c/names/alone.puml', source, 0, { languageId: 'plantuml' }).document;
+      const markdown = makeEditor('file:///c/names/alone.md', ['```plantuml', source, '```'].join('\n'), 0).document;
+
+      // By default VS Code lists no words while inline suggestions are on, which cannot be told.
+      expect(invoke(file, 2, 2)).toBeUndefined();
+      // In Markdown it lists them, and the list opens only when asked for.
+      expect(invoke(markdown, 3, 2)?.map(labelOf)).toEqual(['A', 'Server']);
+      try {
+        for (const value of ['currentDocument', 'matchingDocuments', 'allDocuments']) {
+          vscodeStub._test.setLanguageConfiguration('plantuml', 'editor.wordBasedSuggestions', value);
+          expect(invoke(file, 2, 2)?.map(labelOf), value).toEqual(['A', 'Server']);
+        }
+      } finally {
+        vscodeStub._test.setLanguageConfiguration('plantuml', 'editor.wordBasedSuggestions', undefined);
+      }
+    });
+
+    it('offers what follows a trigger character only, and nothing else on one', () => {
+      const document = makeEditor('file:///c/names/space.puml', flows, 0, { languageId: 'plantuml' }).document;
+
+      const typed = vscodeStub._test.completionProviders[0]?.provider.provideCompletionItems(
+        document,
+        new vscodeStub.Position(3, 5),
+        undefined,
+        { triggerKind: vscodeStub.CompletionTriggerKind.TriggerCharacter, triggerCharacter: ' ' }
+      );
+      expect(typed).toBeUndefined();
+      expect(invoke(document, 3, 5)?.map(labelOf)).toContain('Server');
+    });
+
+    it('takes the words of the Markdown block only, and carries its quote markers into a snippet', () => {
+      const document = makeEditor(
+        'file:///c/names/quote.md',
+        ['# Prose words', '> ```plantuml', '> @startuml', '> participant A', '>   al', '> ```', 'tail'].join('\n'),
+        0
+      ).document;
+
+      const items = invoke(document, 4, 6) ?? [];
+      expect(items.map(labelOf)).toEqual(['alt', 'opt', 'loop', 'par', 'ref', 'note', 'participant', 'A']);
+      expect(inserted(items[0])).toBe('alt ${1:condition}\n>     $2\n>   else ${3:otherwise}\n>     $4\n>   end');
+      expect(items[0]?.range?.replacing).toEqual({
+        start: { line: 4, character: 4 },
+        end: { line: 4, character: 6 },
+      });
+      // Outside the block: VS Code's own suggestions.
+      expect(invoke(document, 0, 7)).toBeUndefined();
+      expect(invoke(document, 6, 4)).toBeUndefined();
+    });
+
+    it('offers nothing in a comment, in quoted text, or where nothing is found', () => {
+      const document = makeEditor(
+        'file:///c/names/quiet.puml',
+        ['@startuml', "' a comment", 'participant "Web" as W', '@enduml', '@startuml', '', '@enduml'].join('\n'),
+        0,
+        { languageId: 'plantuml' }
+      ).document;
+
+      expect(invoke(document, 1, 5)).toBeUndefined();
+      expect(invoke(document, 2, 15)).toBeUndefined();
+      expect(invoke(document, 5, 0)).toBeUndefined();
+    });
+
+    it('leaves out the words where word suggestions are turned off for PlantUML, in a Markdown block too', () => {
+      const file = makeEditor('file:///c/names/off.puml', flows, 0, { languageId: 'plantuml' }).document;
+      const markdown = makeEditor('file:///c/names/off.md', ['```plantuml', flows, '```'].join('\n'), 0).document;
+      try {
+        vscodeStub._test.setLanguageConfiguration('markdown', 'editor.wordBasedSuggestions', 'off');
+        // In a block, VS Code reads the settings of the language at the cursor.
+        expect(invoke(markdown, 5, 0)?.map(labelOf)).toContain('hello');
+
+        vscodeStub._test.setLanguageConfiguration('plantuml', 'editor.wordBasedSuggestions', 'off');
+        for (const [document, line] of [
+          [file, 4],
+          [markdown, 5],
+        ] as const) {
+          expect(invoke(document, line, 0)?.map(labelOf)).toEqual(['A', 'alt', 'opt', 'loop', 'par', 'ref', 'note']);
+        }
+      } finally {
+        vscodeStub._test.setLanguageConfiguration('markdown', 'editor.wordBasedSuggestions', undefined);
+        vscodeStub._test.setLanguageConfiguration('plantuml', 'editor.wordBasedSuggestions', undefined);
+      }
+    });
+  });
 });
 
 describe('templates (dist)', () => {
@@ -2091,6 +2253,7 @@ describe('templates (dist)', () => {
     ).document;
 
     expect(inserted(complete(document, 3, 2)?.[0])).toMatch(/^@startuml\n/);
+    // Inside a diagram: no template, and its words alone are left to VS Code by default.
     expect(complete(document, 1, 2)).toBeUndefined();
   });
 });

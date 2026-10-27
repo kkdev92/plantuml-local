@@ -79,6 +79,7 @@ import {
   mightSuggest,
   readCompletionData,
   suggest,
+  suggestNames,
   suggestTemplates,
   TEMPLATES,
   type CompletionData,
@@ -267,6 +268,22 @@ function templateNames(l10n: { t(message: string): string }): Record<string, str
     salt: l10n.t('Salt wireframe'),
     json: l10n.t('JSON data'),
     yaml: l10n.t('YAML data'),
+  };
+}
+
+/** What each snippet of syntax is shown as, in the display language. */
+function snippetNames(l10n: { t(message: string): string }): Record<string, string> {
+  return {
+    alt: l10n.t('Alternative paths'),
+    opt: l10n.t('Optional path'),
+    loop: l10n.t('Loop'),
+    par: l10n.t('Parallel paths'),
+    ref: l10n.t('Reference to another diagram'),
+    note: l10n.t('Note'),
+    if: l10n.t('Branch on a condition'),
+    while: l10n.t('Loop that tests its condition first'),
+    repeat: l10n.t('Loop that tests its condition last'),
+    fork: l10n.t('Parallel actions'),
   };
 }
 
@@ -2786,11 +2803,28 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
     bind: ({ registrations }, { l10n }): undefined => {
       // Suggestions in the diagrams of Markdown documents and PlantUML files
       // (src/language/completion.ts). Markdown turns quick suggestions off,
-      // so there they open on the characters a suggestion starts after.
+      // so there they open on the characters a suggestion starts after, and
+      // on Ctrl+Space.
       let data: CompletionData | undefined;
       let scanned = '';
       let blocks: readonly PlantUmlBlock[] = [];
       const names = templateNames(l10n);
+      const snippets = snippetNames(l10n);
+
+      /** The PlantUML block of a Markdown document that `position` lies in. */
+      const blockAt = (document: vscode.TextDocument, position: vscode.Position): PlantUmlBlock | undefined => {
+        const stamp = `${document.uri.toString()}#${String(document.version)}`;
+        if (stamp !== scanned) {
+          blocks = findPlantUmlBlocks(document.getText());
+          scanned = stamp;
+        }
+        return blocks.find(
+          (candidate) =>
+            position.line > candidate.openLine &&
+            (position.line < candidate.closeLine ||
+              (!candidate.closed && position.line === candidate.closeLine))
+        );
+      };
 
       /** What the list offers at `position`, from where on its line. */
       const find = (
@@ -2805,17 +2839,7 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
           return { found: where === null ? null : inDiagram(before, after, where.open), offset: 0 };
         }
 
-        const stamp = `${document.uri.toString()}#${String(document.version)}`;
-        if (stamp !== scanned) {
-          blocks = findPlantUmlBlocks(document.getText());
-          scanned = stamp;
-        }
-        const block = blocks.find(
-          (candidate) =>
-            position.line > candidate.openLine &&
-            (position.line < candidate.closeLine ||
-              (!candidate.closed && position.line === candidate.closeLine))
-        );
+        const block = blockAt(document, position);
         if (block === undefined) {
           // The text of the document: a whole diagram block can start here.
           const fits = isProseLine(document.getText(), position.line);
@@ -2848,17 +2872,132 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         );
       };
 
-      const provide = (
+      /**
+       * The diagram source the line at `position` is read in: the PlantUML
+       * file, or the Markdown block the line lies in without its quote
+       * markers, with the line's index in it and the width of the markers on
+       * the line. Null in the text of a Markdown document.
+       */
+      const sourceAt = (
         document: vscode.TextDocument,
-        position: vscode.Position
+        position: vscode.Position,
+        text: string
+      ): { source: string; line: number; offset: number; bare: boolean } | null => {
+        if (document.languageId === 'plantuml') {
+          return { source: document.getText(), line: position.line, offset: 0, bare: false };
+        }
+        const block = blockAt(document, position);
+        if (block === undefined) {
+          return null;
+        }
+        const container = block.container;
+        const lines: string[] = [];
+        for (let at = block.openLine + 1; at <= (block.closed ? block.closeLine - 1 : block.closeLine); at++) {
+          const body = document.lineAt(at).text;
+          lines.push(body.startsWith(container) ? body.slice(container.length) : body);
+        }
+        const offset = text.startsWith(container) ? container.length : 0;
+        return { source: lines.join('\n'), line: position.line - block.openLine - 1, offset, bare: true };
+      };
+
+      /**
+       * The aliases, words and snippets of the diagram at `position`. They
+       * take the place of VS Code's word suggestions, which come from every
+       * open document, and follow its setting for them: no words with `off`.
+       * By default VS Code lists no words in a PlantUML file while inline
+       * suggestions are on there, which an extension cannot tell; so a list
+       * of words alone is left to VS Code in one. In a Markdown document it
+       * lists words by default, and the list opens only when asked for. In a
+       * Markdown block, VS Code reads the setting for PlantUML too.
+       */
+      const namesAt = (
+        document: vscode.TextDocument,
+        position: vscode.Position,
+        text: string
       ): vscode.CompletionItem[] | undefined => {
-        const text = document.lineAt(position.line).text;
-        if (!mightSuggest(text.slice(0, position.character))) {
+        const where = sourceAt(document, position, text);
+        if (where === null) {
           return undefined;
         }
-        const { found, offset } = find(document, position, text);
+        // The default of every VS Code the extension runs on.
+        const setting =
+          vscode.workspace
+            .getConfiguration('editor', { uri: document.uri, languageId: 'plantuml' })
+            .get<string>('wordBasedSuggestions') ?? 'offWithInlineSuggestions';
+        const found = suggestNames(where.source, where.line, position.character - where.offset, {
+          bare: where.bare,
+          words:
+            setting === 'off'
+              ? 'never'
+              : setting === 'offWithInlineSuggestions' && document.languageId === 'plantuml'
+                ? 'beside'
+                : 'always',
+        });
         if (found === null) {
           return undefined;
+        }
+
+        const start = new vscode.Position(position.line, where.offset + found.start);
+        const range = {
+          inserting: new vscode.Range(start, position),
+          replacing: new vscode.Range(start, new vscode.Position(position.line, where.offset + found.end)),
+        };
+        // The lines of a snippet after its first go on with the line's quote markers and indent.
+        const lead = text.slice(0, where.offset) + found.lead;
+        const item = (
+          label: string | vscode.CompletionItemLabel,
+          kind: vscode.CompletionItemKind,
+          sortText: string
+        ): vscode.CompletionItem => {
+          const made = new vscode.CompletionItem(label, kind);
+          made.range = range;
+          made.sortText = sortText;
+          return made;
+        };
+        // The aliases first, then the snippets, then the words.
+        return [
+          ...found.aliases.map(({ name, display }, index) => {
+            const alias = item(
+              { label: name, description: display },
+              vscode.CompletionItemKind.Variable,
+              `0${String(index).padStart(4, '0')}`
+            );
+            alias.detail = l10n.t('Alias in this diagram');
+            return alias;
+          }),
+          ...found.snippets.map(({ label, body }, index) => {
+            const snippet = item(
+              { label, description: snippets[label] ?? label },
+              vscode.CompletionItemKind.Snippet,
+              `1${String(index).padStart(4, '0')}`
+            );
+            snippet.insertText = new vscode.SnippetString(body.replace(/\n/g, `\n${lead}`));
+            snippet.keepWhitespace = true;
+            return snippet;
+          }),
+          ...found.words.map((word) => {
+            const plain = item(word, vscode.CompletionItemKind.Text, `2${word}`);
+            plain.detail = l10n.t('Word in this diagram');
+            return plain;
+          }),
+        ];
+      };
+
+      const provide = (
+        document: vscode.TextDocument,
+        position: vscode.Position,
+        _token?: vscode.CancellationToken,
+        context?: vscode.CompletionContext
+      ): vscode.CompletionItem[] | undefined => {
+        const text = document.lineAt(position.line).text;
+        const { found, offset } = mightSuggest(text.slice(0, position.character))
+          ? find(document, position, text)
+          : { found: null, offset: 0 };
+        if (found === null) {
+          // A trigger character asks for what follows it only.
+          return context?.triggerKind === vscode.CompletionTriggerKind.TriggerCharacter
+            ? undefined
+            : namesAt(document, position, text);
         }
 
         const start = new vscode.Position(position.line, offset + found.start);

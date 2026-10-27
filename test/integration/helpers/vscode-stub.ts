@@ -244,6 +244,7 @@ export interface DefinitionRegistrationStub {
 export interface CompletionItemStub {
   label: string | { label: string; description?: string };
   kind?: number;
+  detail?: string;
   insertText?: string | { value: string };
   keepWhitespace?: boolean;
   range?: { inserting: { start: PositionStub; end: PositionStub }; replacing: { start: PositionStub; end: PositionStub } };
@@ -257,7 +258,9 @@ export interface CompletionRegistrationStub {
   provider: {
     provideCompletionItems(
       document: TextEditorStub['document'],
-      position: PositionStub
+      position: PositionStub,
+      token?: unknown,
+      context?: { triggerKind: number; triggerCharacter?: string }
     ): CompletionItemStub[] | undefined;
   };
 }
@@ -388,7 +391,8 @@ export interface VscodeStub {
   FoldingRange: new (start: number, end: number, kind?: number) => FoldingRangeStub;
   FoldingRangeKind: Record<'Comment' | 'Imports' | 'Region', number>;
   CompletionItem: new (label: CompletionItemStub['label'], kind?: number) => CompletionItemStub;
-  CompletionItemKind: Record<'Keyword' | 'Value' | 'Snippet' | 'File' | 'Folder', number>;
+  CompletionItemKind: Record<'Text' | 'Variable' | 'Keyword' | 'Value' | 'Snippet' | 'File' | 'Folder', number>;
+  CompletionTriggerKind: Record<'Invoke' | 'TriggerCharacter' | 'TriggerForIncompleteCompletions', number>;
   SnippetString: new (value: string) => { value: string };
   UIKind: Record<'Desktop' | 'Web', number>;
   ProgressLocation: Record<'SourceControl' | 'Window' | 'Notification', number>;
@@ -553,6 +557,13 @@ export interface VscodeStub {
      */
     setConfiguration(key: string, value: unknown, folder?: string): void;
     /**
+     * Sets (or, with undefined, clears) a value of a language's settings,
+     * as `"[plantuml]": { "editor.wordBasedSuggestions": "off" }` does: the
+     * key with its section. A read scoped to that language (a scope with a
+     * `languageId`) gets it ahead of the other values.
+     */
+    setLanguageConfiguration(language: string, key: string, value: unknown): void;
+    /**
      * The button title a modal message answers with; `null`, or a title not
      * offered, dismisses it. Defaults to dismissal.
      */
@@ -684,6 +695,16 @@ export function createVscodeStub(): VscodeStub {
   const configuration = new Map<string, unknown>();
   /** Folder URI → that folder's own values. */
   const folderConfiguration = new Map<string, Map<string, unknown>>();
+  /** Language ID → its values, by their keys with the section. */
+  const languageConfiguration = new Map<string, Map<string, unknown>>();
+  /** The resource and the language a configuration scope stands for. */
+  const scopeOf = (scope: unknown): { resource?: string; language?: string } => {
+    if (typeof scope === 'object' && scope !== null && 'languageId' in scope) {
+      const { uri, languageId } = scope as { uri?: unknown; languageId: string };
+      return { resource: uri === undefined ? undefined : String(uri), language: languageId };
+    }
+    return { resource: scope === undefined ? undefined : String(scope) };
+  };
   const configurationListeners: ((event: unknown) => void)[] = [];
   const fileWrites: string[] = [];
   const diagnostics = new Map<string, readonly DiagnosticStub[]>();
@@ -993,7 +1014,8 @@ export function createVscodeStub(): VscodeStub {
     RelativePattern,
     Diagnostic,
     CompletionItem,
-    CompletionItemKind: { Keyword: 13, Value: 11, Snippet: 14, File: 16, Folder: 18 },
+    CompletionItemKind: { Text: 0, Variable: 5, Keyword: 13, Value: 11, Snippet: 14, File: 16, Folder: 18 },
+    CompletionTriggerKind: { Invoke: 0, TriggerCharacter: 1, TriggerForIncompleteCompletions: 2 },
     SnippetString,
     FoldingRange,
     FoldingRangeKind: { Comment: 1, Imports: 2, Region: 3 },
@@ -1240,9 +1262,14 @@ export function createVscodeStub(): VscodeStub {
       },
     },
     workspace: {
-      getConfiguration: (_section, scope) => ({
+      getConfiguration: (section, scope) => ({
         get: <T>(key: string, fallback?: T) => {
-          const resource = scope === undefined ? undefined : String(scope);
+          const { resource, language } = scopeOf(scope);
+          const languageValues = language === undefined ? undefined : languageConfiguration.get(language);
+          const sectioned = section === undefined ? key : `${section}.${key}`;
+          if (languageValues?.has(sectioned) === true) {
+            return languageValues.get(sectioned) as T;
+          }
           for (const [folder, values] of folderConfiguration) {
             if (resource?.startsWith(`${folder}/`) === true && values.has(key)) {
               return values.get(key) as T;
@@ -1251,7 +1278,7 @@ export function createVscodeStub(): VscodeStub {
           return configuration.has(key) ? (configuration.get(key) as T) : fallback;
         },
         inspect: <T>(key: string) => {
-          const resource = scope === undefined ? undefined : String(scope);
+          const { resource } = scopeOf(scope);
           let workspaceFolderValue: T | undefined;
           for (const [folder, values] of folderConfiguration) {
             if (resource?.startsWith(`${folder}/`) === true && values.has(key)) {
@@ -1481,6 +1508,18 @@ export function createVscodeStub(): VscodeStub {
           values = folderConfiguration.get(folder) ?? new Map<string, unknown>();
           folderConfiguration.set(folder, values);
         }
+        if (value === undefined) {
+          values.delete(key);
+        } else {
+          values.set(key, value);
+        }
+        for (const listener of configurationListeners) {
+          listener({ affectsConfiguration: () => true });
+        }
+      },
+      setLanguageConfiguration: (language, key, value) => {
+        const values = languageConfiguration.get(language) ?? new Map<string, unknown>();
+        languageConfiguration.set(language, values);
         if (value === undefined) {
           values.delete(key);
         } else {

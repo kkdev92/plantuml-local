@@ -71,6 +71,30 @@ function namesOf(text: string): { name: string; detail: string } | null {
   return { name, detail: detail === name ? '' : detail };
 }
 
+/**
+ * The alias the names at the start of `text` declare, and the name shown
+ * for it: the identifier on one side of `as`, with a quoted or bracketed
+ * name on the other. 'undecided' when the two names are of one form, so
+ * that either could be the alias; null when `text` starts with no two
+ * names joined by `as`.
+ */
+export function declaredAlias(text: string): { alias: string; display: string } | 'undecided' | null {
+  const first = NAME.exec(text);
+  const as = first === null ? null : AS.exec(text.slice(first[0].length));
+  const second = first === null || as === null ? null : NAME.exec(text.slice(first[0].length + as[0].length));
+  if (first === null || as === null || second === null) {
+    return null;
+  }
+  if (!AFTER_NAMES.test(text.slice(first[0].length + as[0].length + second[0].length))) {
+    return null;
+  }
+  if ((first[6] === undefined) === (second[6] === undefined)) {
+    return 'undecided';
+  }
+  const [alias, display] = second[6] === undefined ? [valueOf(first), valueOf(second)] : [valueOf(second), valueOf(first)];
+  return alias === '' || display === '' ? null : { alias, display };
+}
+
 function declarationAt(line: string, index: number): Declaration | null {
   const declared = DECLARATION.exec(line);
   const names = declared === null ? null : namesOf(declared[2] ?? '');
