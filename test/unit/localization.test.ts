@@ -112,7 +112,8 @@ describe('renderer error messages', () => {
     'Empty description (Assumed diagram type: sequence)',
     'Cannot import',
     'Cannot load theme missing-theme',
-    'cannot include <C4/C4_Context>',
+    'cannot include <aws/AWSCommon>',
+    'cannot include <C4/C4_Nope>',
     "This syntax is deprecated, you must add <<#pink>> at the end of the line, after the ';'",
     'Diagram not supported by this release of PlantUML',
     'Diagram not supported by this release of PlantUML: "@startdot" is not recognized',
@@ -208,8 +209,18 @@ describe('renderer error messages', () => {
     expect(errorMessage(syntax, ja)).toContain('（docs (draft)/parent.puml の 8 行目）');
   });
 
-  it('distinguishes an unavailable library from a missing entry in the bundled Azure library', () => {
-    expect(errorMessage('cannot include <C4/C4_Context>', ja)).toContain('標準ライブラリ C4 はこの拡張機能に含まれていません。');
+  it('distinguishes an unavailable library, a file the C4 library leaves out and a missing entry in the Azure library', () => {
+    expect(errorMessage('cannot include <aws/AWSCommon>', ja)).toBe(
+      '標準ライブラリ aws はこの拡張機能に含まれていません。同梱している標準ライブラリは azure, C4 です。'
+    );
+    expect(errorMessage('cannot include <c4/C4_Nope>', english)).toBe(
+      'The C4 library bundled with this extension does not include <c4/C4_Nope>. ' +
+        'It includes C4, C4_Context, C4_Container, C4_Component, C4_Dynamic, C4_Deployment, C4_Sequence.'
+    );
+    expect(errorMessage('cannot include <C4/themes/C4_united>', ja)).toBe(
+      'この拡張機能に同梱の C4 ライブラリに <C4/themes/C4_united> はありません。' +
+        '同梱しているのは C4, C4_Context, C4_Container, C4_Component, C4_Dynamic, C4_Deployment, C4_Sequence です。'
+    );
     expect(errorMessage('cannot include <azure/NoSuchThing>', ja)).toContain('<azure/NoSuchThing> を読み込めません。');
   });
 

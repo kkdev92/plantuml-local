@@ -159,7 +159,7 @@ describe('ThemePalettes', () => {
     expect(await palettes.resolve(diagram('!theme for-white-page'), false)).toBe(false);
   });
 
-  it('draws a diagram with the Azure icons in the light palette, without measuring', async () => {
+  it('draws a diagram with a bundled library in the light palette, without measuring', async () => {
     const render = engine();
     const palettes = new ThemePalettes(render);
 
@@ -167,27 +167,36 @@ describe('ThemePalettes', () => {
       '!include <azure/AzureCommon>',
       '  !include_once <azure/Compute/AzureFunction>',
       '!include<azure/AzureCommon>',
+      '!include <C4/C4_Context>',
+      '!include_many <C4/C4_Container>',
+      // The engine reads a library's name in any case.
+      '!include <Azure/AzureCommon>',
+      '!include <c4/C4_Component>',
     ]) {
-      expect(await palettes.resolve(diagram(include), true)).toBe(false);
-      expect(await palettes.resolve(diagram(include), false)).toBe(false);
+      expect(await palettes.resolve(diagram(include), true), include).toBe(false);
+      expect(await palettes.resolve(diagram(include), false), include).toBe(false);
     }
-    // Not an include the engine reads: a comment, a label, a capitalised directive.
+    // Not an include the engine reads: a comment, a label, a capitalised
+    // directive. Nor one of a library that is not bundled, which fails.
     for (const line of [
       "' !include <azure/AzureCommon>",
       'note: !include <azure/AzureCommon>',
       '!INCLUDE <azure/AzureCommon>',
+      "/' !include <C4/C4_Context> '/",
+      '!include <aws/AWSCommon>',
     ]) {
-      expect(await palettes.resolve(diagram(line), true)).toBe(true);
+      expect(await palettes.resolve(diagram(line), true), line).toBe(true);
     }
     expect(render).not.toHaveBeenCalled();
   });
 
-  it('measures a diagram with the Azure icons that picks a theme, like any other', async () => {
+  it('measures a diagram with a bundled library that picks a theme, like any other', async () => {
     const render = engine();
     const palettes = new ThemePalettes(render);
 
     // The theme colours the text, the same in either palette.
     expect(await palettes.resolve(diagram('!theme for-dark-page', '!include <azure/AzureCommon>'), false)).toBe(true);
+    expect(await palettes.resolve(diagram('!theme for-dark-page', '!include <C4/C4_Context>'), false)).toBe(true);
     expect(render).toHaveBeenCalled();
   });
 
@@ -255,25 +264,25 @@ describe('ThemePalettes', () => {
 describe('paletteLines', () => {
   it('takes the theme lines of the included files where the first local include is', () => {
     const source = ['@startuml', '!theme a', '!include styles.puml', '!theme c', 'A -> B', '@enduml'].join('\n');
-    expect(paletteLines(source, { themes: ['!theme b'], azure: false })).toEqual(['!theme a', '!theme b', '!theme c']);
+    expect(paletteLines(source, { themes: ['!theme b'], whitePageLibrary: false })).toEqual(['!theme a', '!theme b', '!theme c']);
   });
 
   it('keeps the diagram’s own lines when the files it included set no theme', () => {
     expect(paletteLines('@startuml\n!theme a\n@enduml')).toEqual(['!theme a']);
-    expect(paletteLines('@startuml\n!theme a\n@enduml', { themes: [], azure: true })).toEqual(['!theme a']);
+    expect(paletteLines('@startuml\n!theme a\n@enduml', { themes: [], whitePageLibrary: true })).toEqual(['!theme a']);
   });
 
   it('puts the lines of a theme read from a folder in place of the line that names it', () => {
     const source = ['@startuml', '!theme local from themes', '!theme b from <lib/themes>', 'A -> B', '@enduml'].join('\n');
     expect(paletteLines(source)).toEqual(['!theme local from themes', '!theme b from <lib/themes>']);
-    expect(paletteLines(source, { themes: ['skinparam backgroundColor #FEDCBA'], azure: false })).toEqual([
+    expect(paletteLines(source, { themes: ['skinparam backgroundColor #FEDCBA'], whitePageLibrary: false })).toEqual([
       'skinparam backgroundColor #FEDCBA',
       '!theme b from <lib/themes>',
     ]);
   });
 
   it('does the same for a theme an included file reads from a folder', () => {
-    const included = { themes: ['!theme local from themes', 'skinparam backgroundColor #FEDCBA'], azure: false };
+    const included = { themes: ['!theme local from themes', 'skinparam backgroundColor #FEDCBA'], whitePageLibrary: false };
     expect(paletteLines('@startuml\n!include style.iuml\n@enduml', included)).toEqual([
       'skinparam backgroundColor #FEDCBA',
     ]);
@@ -288,18 +297,18 @@ describe('ThemePalettes and what a diagram included', () => {
   it('measures the theme an included file picks', async () => {
     const palettes = new ThemePalettes(render);
     expect(await palettes.resolve(diagram, true)).toBe(true);
-    expect(await palettes.resolve(diagram, true, { themes: ['!theme for-white-page'], azure: false })).toBe(false);
-    expect(await palettes.resolve(diagram, false, { themes: ['!theme for-dark-page'], azure: false })).toBe(true);
+    expect(await palettes.resolve(diagram, true, { themes: ['!theme for-white-page'], whitePageLibrary: false })).toBe(false);
+    expect(await palettes.resolve(diagram, false, { themes: ['!theme for-dark-page'], whitePageLibrary: false })).toBe(true);
   });
 
-  it('draws in the light palette a diagram whose included file brings the Azure icons and no theme', async () => {
+  it('draws in the light palette a diagram whose included file brings a bundled library and no theme', async () => {
     const palettes = new ThemePalettes(render);
-    expect(await palettes.resolve(diagram, true, { themes: [], azure: true })).toBe(false);
+    expect(await palettes.resolve(diagram, true, { themes: [], whitePageLibrary: true })).toBe(false);
   });
 });
 
 describe('drawReadable', () => {
-  const drawn = (palette: boolean, includedStyle?: { themes: string[]; azure: boolean }) => ({
+  const drawn = (palette: boolean, includedStyle?: { themes: string[]; whitePageLibrary: boolean }) => ({
     svg: String(palette),
     failedIncludes: new Map<string, string>(),
     dependencies: [],
@@ -315,7 +324,7 @@ describe('drawReadable', () => {
   });
 
   it('draws once more in the other palette when what it included turns the choice, and takes that', async () => {
-    const style = { themes: ['!theme for-white-page'], azure: false };
+    const style = { themes: ['!theme for-white-page'], whitePageLibrary: false };
     const draw = vi.fn((palette: boolean) => Promise.resolve(drawn(palette, style)));
     const resolve = vi.fn((_source: string, dark: boolean, included?: unknown) =>
       Promise.resolve(included === undefined ? dark : false)
@@ -326,7 +335,7 @@ describe('drawReadable', () => {
   });
 
   it('keeps the first drawing when the choice holds', async () => {
-    const style = { themes: ['!theme cerulean'], azure: false };
+    const style = { themes: ['!theme cerulean'], whitePageLibrary: false };
     const draw = vi.fn((palette: boolean) => Promise.resolve(drawn(palette, style)));
     const resolve = vi.fn((_source: string, dark: boolean) => Promise.resolve(dark));
     expect(await drawReadable('src', false, resolve, draw)).toMatchObject({ palette: false });

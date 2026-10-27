@@ -14,6 +14,7 @@ const LABELS: ProblemLabels = {
   beforeStart: (start) => `above ${start}`,
   formula: (tag) => `formula ${tag}`,
   embeddedDiagram: 'embedded',
+  image: 'image',
   themeFrom: 'bundled themes only',
   libraryNotBundled: (library) => `${library} not bundled`,
   emojiUnavailable: 'emoji',
@@ -75,11 +76,24 @@ describe('checkSource', () => {
   });
 
   it('warns about notation the engine draws blank or leaves out, on its line, and renders anyway', () => {
-    const block = blockOf('@startuml', 'Alice -> Bob : <math>x^2</math>', 'note left', '{{', 'C -> D', '}}', 'end note', '@enduml');
+    const block = blockOf(
+      '@startuml',
+      'Alice -> Bob : <math>x^2</math>',
+      'note left',
+      '{{',
+      'C -> D',
+      '}}',
+      'end note',
+      'Alice -> Bob : <img:pic.png>',
+      // The one image the engine draws.
+      'Alice -> Bob : <img:data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91Jpz>',
+      '@enduml'
+    );
     const check = checkSource(block, LABELS);
     expect(check.problems).toEqual([
       { line: 4, severity: 'warning', code: PROBLEM_CODES.CAP001, message: 'formula <math>' },
       { line: 6, severity: 'warning', code: PROBLEM_CODES.CAP001, message: 'embedded' },
+      { line: 10, severity: 'warning', code: PROBLEM_CODES.CAP001, message: 'image' },
     ]);
     expect(check.render).toBe(block.source);
   });
@@ -172,17 +186,29 @@ describe('renderProblems', () => {
   });
 
   it('names a standard library that is not bundled', () => {
-    const { block, check } = at('@startuml', '!include <C4/C4_Context>', '@enduml');
-    expect(renderProblems(block, check, { svg: errorImage(2, 'cannot include &lt;C4/C4_Context&gt;') }, LABELS)).toEqual([
-      { line: 4, severity: 'error', code: PROBLEM_CODES.CAP001, message: 'C4 not bundled' },
+    const { block, check } = at('@startuml', '!include <aws/AWSCommon>', '@enduml');
+    expect(renderProblems(block, check, { svg: errorImage(2, 'cannot include &lt;aws/AWSCommon&gt;') }, LABELS)).toEqual([
+      { line: 4, severity: 'error', code: PROBLEM_CODES.CAP001, message: 'aws not bundled' },
     ]);
-    // Azure is bundled: an entry it does not have is the engine's own error.
+    // Azure is bundled whole: an entry it does not have is the engine's own error.
     const azure = at('@startuml', '!include <azure/NoSuchThing>', '@enduml');
     expect(
       renderProblems(azure.block, azure.check, { svg: errorImage(2, 'cannot include &lt;azure/NoSuchThing&gt;') }, LABELS)
     ).toEqual([
       { line: 4, severity: 'error', code: PROBLEM_CODES.SYN001, message: 'cannot include <azure/NoSuchThing>' },
     ]);
+  });
+
+  it('says a file of the C4 library is not bundled, not that the library is not, in either case of its name', () => {
+    for (const library of ['C4', 'c4']) {
+      const { block, check } = at('@startuml', `!include <${library}/C4_Nope>`, '@enduml');
+      expect(
+        renderProblems(block, check, { svg: errorImage(2, `cannot include &lt;${library}/C4_Nope&gt;`) }, LABELS)
+      ).toEqual([
+        // Worded by errorMessage, as the preview words it (src/core/messages.ts).
+        { line: 4, severity: 'error', code: PROBLEM_CODES.CAP001, message: `cannot include <${library}/C4_Nope>` },
+      ]);
+    }
   });
 
   it('puts an error on a line the extension added on the diagram’s start line', () => {

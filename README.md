@@ -43,6 +43,7 @@ Your diagram source is processed locally and is not sent to a rendering service.
 - **Local Includes**: `!include`, `!includesub` and `!theme … from` read shared definitions, sections and themes from the files of your workspace folder, in a trusted workspace; their paths complete, and Ctrl+Click opens the file
 - **Syntax Highlighting**: ```` ```plantuml ```` blocks and `.puml` files are coloured in the editor, following the syntax the bundled engine accepts
 - **Offline Rendering**: No Java, no PlantUML server, no network connection required — nothing to install besides the extension
+- **C4 and Azure Libraries**: `!include <C4/C4_Container>` and the other C4 modules, and the Azure icons with `!include <azure/…>`, ship inside the extension and render offline
 - **Fault-Tolerant**: A syntax error shows up inline at the broken diagram; the rest of the page stays intact
 - **Problems Panel**: Errors, warnings and unsupported syntax in the diagrams of open Markdown and PlantUML files are listed with their line, preview or not
 - **Writing Help**: Completion for start lines, directives, themes and icons, templates for sixteen kinds of diagram, and quick fixes that name a diagram for export and add a missing end line
@@ -321,8 +322,10 @@ the line it is on:
 - the engine's errors and warnings;
 - an included file that is not read, and why (see
   [Including files](#including-files));
-- what the bundled engine cannot do: a library other than `azure`, a URL, emoji,
-  a formula in `<math>` or `<latex>` tags, a diagram embedded with `{{ … }}`;
+- what the bundled engine cannot do: a library other than `azure` and `C4`, or
+  a file of C4 that is not bundled, a URL, emoji, an image other than a PNG
+  written inline, a formula in `<math>` or `<latex>` tags, a diagram embedded
+  with `{{ … }}`;
 - content the bundled engine does not render: a second diagram in a block,
   the pages after `newpage`;
 - a diagram with no `@enduml` line, which is drawn anyway — a quick fix on that
@@ -432,9 +435,14 @@ directly into the diagram with `sprite $name […] { … }` work too.
 Azure is the only icon set bundled. The AWS and GCP libraries both place their
 icons under CC-BY-ND 2.0 with only the macros under MIT, and this extension
 ships nothing but MIT / BSD / EPL; Azure-PlantUML has no such split. Other
-`!include <…>` libraries report that they are unavailable rather than being
-fetched — but their sprite definitions can be pasted into the diagram, which
-renders identically.
+`!include <…>` libraries, apart from C4 (below), report that they are
+unavailable rather than being fetched — but their sprite definitions can be
+pasted into the diagram, which renders identically.
+
+An image is drawn only when it is a PNG written into the diagram
+(`<img:data:image/png;base64,…>`). One from a file or a URL, or inline data of
+another kind, is drawn as the text `[img TBD…]`, and the Problems panel, the
+previews and the export say so.
 
 PlantUML's own icons and themes ship as well: the OpenIconic icons creole draws
 with `<&check>`, and the `!theme` library (`!theme cerulean`) — all of it but
@@ -442,6 +450,40 @@ four themes, `mars`, `toy` and `vibrant` (Apache License 2.0) and `sunlust`
 (GPL 3+), for which the engine reports that it cannot load the theme. Emoji
 (`<:smile:>`) do not ship: their images, from Twemoji, are under CC-BY 4.0, so
 a diagram using one shows a message saying emoji are not supported.
+
+### C4 diagrams
+
+The C4 library of PlantUML's standard library —
+[C4-PlantUML](https://github.com/plantuml-stdlib/C4-PlantUML) 2.14.0 — ships
+inside the extension too, so C4 models render with their usual includes:
+
+````markdown
+```plantuml
+@startuml
+!include <C4/C4_Container>
+
+Person(customer, "Customer")
+System_Boundary(shop, "Online shop") {
+  Container(web, "Web app", "TypeScript", "Serves the shop")
+  ContainerDb(db, "Database", "PostgreSQL", "Holds orders")
+}
+Rel(customer, web, "Places orders", "HTTPS")
+Rel(web, db, "Reads and writes", "SQL")
+SHOW_LEGEND()
+@enduml
+```
+````
+
+`C4_Context`, `C4_Container`, `C4_Component`, `C4_Dynamic`, `C4_Deployment`
+and `C4_Sequence` are bundled, with the `C4` definitions they share. The
+library's themes are not: `!theme … from <C4/themes>` reports that the theme
+cannot be loaded, and an include of another file of the library shows an
+error that lists the files bundled. A sprite given as an image
+(`$sprite="img:…"`) is drawn only when it is a PNG written inline
+(`img:data:image/png;base64,…`); any other is drawn as placeholder text, and
+the Problems panel says so on its line. C4's colours are made for a white
+page, so a C4 diagram that picks no theme is drawn in the light palette (see
+[Configuration](#configuration)).
 
 ### Exporting for GitHub and other hosts
 
@@ -603,14 +645,17 @@ and would show the referenced image as a second copy.
 
 ## Known Limitations
 
-- Only the `azure` standard-library entry is bundled; other `!include <…>`
-  libraries are unavailable
+- Only the `azure` and `C4` standard-library entries are bundled — of C4, the
+  six diagram modules and the definitions they share, not its themes; other
+  `!include <…>` libraries are unavailable
 - `!include` of a URL is not supported: URL-based directives are rejected with
   an inline message. Files are included only from the document's workspace
   folder, in a trusted workspace (see [Including files](#including-files))
 - Remote themes and other network resources are not supported
-- Images (`<img:…>`) are not loaded, local or remote: the engine draws an
-  `[img TBD…]` placeholder in their place
+- Images (`<img:…>`, and C4's `$sprite="img:…"`) are not loaded, local or
+  remote: the engine draws an `[img TBD…]` placeholder in their place, and the
+  Problems panel, the previews and the export say so. Only a PNG written into
+  the diagram (`data:image/png;base64,…`) is drawn
 - Emoji (`<:smile:>`) are not supported: their images are not bundled, and a
   diagram using one shows an inline message instead
 - A block draws one diagram, on one page: a block holding a second
@@ -669,14 +714,16 @@ themes paint no background of their own, leaving the diagram on the backdrop
 of the palette. When the theme's text would be hard to read on that backdrop,
 the diagram is drawn in the other palette instead — a theme made for a white
 page, such as `plain` or `cerulean`, gets the light palette in a dark editor.
-So does a diagram with the Azure icons and no theme, whose boxes are white
-whatever the palette, and one whose own colours — set with `skinparam`, a
-style, or on an element as in `class Foo #pink` — leave its text hard to read
-in the dark palette: a diagram drawn in the dark palette is looked at once
-drawn, and drawn in the light one when that reads better. This applies to the
-preview and to exports alike, and counts a theme or the Azure icons that a
-diagram gets from a file it includes: such a diagram is drawn once more in the
-other palette when that file turns the choice. The `.puml` preview says when
+So does a diagram with the Azure icons or the C4 library and no theme, whose
+colours are made for a white page whatever the palette — Azure's boxes are
+white, C4 writes the names of boundaries and relations in grey — and one whose
+own colours — set with `skinparam`, a style, or on an element as in
+`class Foo #pink` — leave its text hard to read in the dark palette: a diagram
+drawn in the dark palette is looked at once drawn, and drawn in the light one
+when that reads better. This applies to the preview and to exports alike, and
+counts a theme, the Azure icons or the C4 library that a diagram gets from a
+file it includes: such a diagram is drawn once more in the other palette when
+that file turns the choice. The `.puml` preview says when
 it shows a diagram in the other palette. In the dark palette, links (`[[…]]`)
 are drawn in a light blue, as the engine's own blue is hard to read there.
 

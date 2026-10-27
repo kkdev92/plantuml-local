@@ -25,6 +25,7 @@ in [`third-party/`](third-party).
 | [punycode.js](https://github.com/mathiasbynens/punycode.js) | 2.3.1 | MIT | [punycode-LICENSE.txt](third-party/punycode-LICENSE.txt) |
 | [uc.micro](https://github.com/markdown-it/uc.micro) | 2.1.0 | MIT | [uc-micro-LICENSE.txt](third-party/uc-micro-LICENSE.txt) |
 | [Azure-PlantUML](https://github.com/plantuml-stdlib/Azure-PlantUML) | 2.1.0 | MIT | [azure-plantuml-LICENSE.txt](third-party/azure-plantuml-LICENSE.txt) |
+| [C4-PlantUML](https://github.com/plantuml-stdlib/C4-PlantUML) | 2.14.0 | MIT | [c4-plantuml-LICENSE.txt](third-party/c4-plantuml-LICENSE.txt) |
 | [Open Iconic](https://github.com/iconic/open-iconic) | (in `@plantuml/core`) | MIT | [open-iconic-LICENSE.txt](third-party/open-iconic-LICENSE.txt) |
 | [puml-themes](https://github.com/bschwarz/puml-themes) | (in `@plantuml/core`) | MIT | [puml-themes-LICENSE.txt](third-party/puml-themes-LICENSE.txt) |
 | [RedDress-PlantUML](https://github.com/Drakemor/RedDress-PlantUML) | (in `@plantuml/core`) | MIT | (stated in the project's README; no licence file) |
@@ -70,15 +71,35 @@ object code form:
 - Graphviz is licensed under the Eclipse Public License, Version 1.0
 - Expat is licensed under the MIT License
 
-## Azure-PlantUML
+## The PlantUML standard library
+
+`dist/stdlib/` holds two libraries of the PlantUML standard library, generated
+by `npm run generate:stdlib` from
+[plantuml/plantuml-stdlib](https://github.com/plantuml/plantuml-stdlib) at
+commit `a31ac1a87cbdaa3339d1a551dc971c85f8359d5d`. The engine reads them in
+place of the network, so `!include <azure/…>` and `!include <C4/…>` resolve
+offline. The generator records the hash of every file it reads in
+`assets/stdlib-sources.json` in the repository.
+
+### Azure-PlantUML
 
 Copyright (c) 2018-2019 Ricardo Niepel, 2021-2022 Ricardo Niepel and
 contributors. Licensed under the MIT License.
 
 The `dist/` tree of the upstream repository — the Azure icon sprites and the
-`AzureCommon` macros — is baked into `dist/stdlib/azure.json` and served to the
-engine as the `azure` standard-library entry, so `!include <azure/…>` resolves
-without a network request. Regenerate it with `npm run generate:stdlib`.
+`AzureCommon` macros — as the standard library carries it in `stdlib/azure`,
+baked into `dist/stdlib/azure.json`.
+
+### C4-PlantUML
+
+(c) 2018-2020 Ricardo Niepel, 2021-2026 Ricardo Niepel, kirchsth and
+contributors. Licensed under the MIT License.
+
+`C4`, `C4_Context`, `C4_Container`, `C4_Component`, `C4_Dynamic`,
+`C4_Deployment` and `C4_Sequence` of C4-PlantUML 2.14.0, as the standard
+library carries them in `stdlib/C4` — each including the others from the
+library rather than from the network — baked into `dist/stdlib/c4.json`.
+The themes and examples of the library are not included.
 
 ## happy-dom
 

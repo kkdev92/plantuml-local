@@ -17,8 +17,9 @@
  */
 
 import { EMOJI_UNAVAILABLE, remoteReferenceLine } from '../core/constants';
+import { bundledLibrary } from '../core/libraries';
 import { splitLines } from '../core/lines';
-import { unsupportedNotations } from '../core/notation';
+import { notationLabel, unsupportedNotations } from '../core/notation';
 import { diagramShape } from '../core/shape';
 import type { PlantUmlBlock } from '../export/blocks';
 import { withIncludeReason } from '../includes/describe';
@@ -71,6 +72,8 @@ export interface ProblemLabels {
   formula(tag: string): string;
   /** A diagram embedded with `{{ … }}`, which the engine leaves out. */
   embeddedDiagram: string;
+  /** An image the engine does not draw, writing placeholder text in its place. */
+  image: string;
   /** Follows the engine's "Cannot load theme … in …" for a theme no file was asked for: from a library or a URL. */
   themeFrom: string;
   libraryNotBundled(library: string): string;
@@ -126,10 +129,9 @@ export function checkSource(block: PlantUmlBlock, labels: ProblemLabels): Source
   if (shape.addedEnd !== null) {
     problem(startLine, 'warning', PROBLEM_CODES.DOC002, labels.missingEnd(shape.addedEnd));
   }
-  // Drawn, but with the formula or the embedded diagram left out.
+  // Drawn, but with the formula, the embedded diagram or the image left out.
   for (const use of unsupportedNotations(block.source)) {
-    const message = use.kind === 'embedded' ? labels.embeddedDiagram : labels.formula(use.kind === 'math' ? '<math>' : '<latex>');
-    problem(at(use.line), 'warning', PROBLEM_CODES.CAP001, message);
+    problem(at(use.line), 'warning', PROBLEM_CODES.CAP001, notationLabel(use.kind, labels));
   }
   return { problems, render: shape.source, startLine };
 }
@@ -190,12 +192,16 @@ function classify(
     return { code: PROBLEM_CODES.RUN002, message };
   }
   // A standard library the engine cannot read is one that is not bundled.
-  // Azure is: there, the entry does not exist, as the engine says.
+  // Azure is, whole: there, the entry does not exist, as the engine says.
+  // C4 is bundled in part, so a file it lacks may be one left out
+  // (errorMessage says which are bundled).
   const library = /^cannot include <([^/>]+)/.exec(message)?.[1];
   if (library !== undefined) {
-    return library.toLowerCase() === 'azure'
-      ? { code: PROBLEM_CODES.SYN001, message }
-      : { code: PROBLEM_CODES.CAP001, message: labels.libraryNotBundled(library) };
+    const bundled = bundledLibrary(library);
+    if (bundled === undefined) {
+      return { code: PROBLEM_CODES.CAP001, message: labels.libraryNotBundled(library) };
+    }
+    return { code: bundled.files === undefined ? PROBLEM_CODES.SYN001 : PROBLEM_CODES.CAP001, message };
   }
   if (message === 'Cannot import') {
     return { code: PROBLEM_CODES.CAP001, message };

@@ -2,7 +2,7 @@ import { INCLUDE_LIMITS } from '../core/constants';
 import { splitLines } from '../core/lines';
 import { forEachCodeLine } from '../core/shape';
 import type { IncludedFile, IncludeLoader } from '../core/types';
-import { includesAzure, themeLines } from '../render/palette';
+import { includesWhitePageLibrary, themeLines } from '../render/palette';
 import { parseIncludePath, type PathRefusal } from './path-policy';
 import { readIncludeFile, type ReadRefusal } from './reader';
 import { includeCandidates, isWithin, type IncludeScope, type SearchFoldersProblem } from './resolver';
@@ -67,8 +67,8 @@ export class IncludeSession {
    * read from a folder of the workspace.
    */
   readonly themes: string[] = [];
-  /** Whether a file delivered includes the bundled Azure library. */
-  azure = false;
+  /** Whether a file delivered includes a bundled library made for a white page. */
+  whitePageLibrary = false;
 
   private files = 0;
   private bytes = 0;
@@ -140,7 +140,7 @@ export class IncludeSession {
       // A theme-shaped filename can also be an ordinary include. Only the
       // engine knows which operation requested it; selection stays there too.
       this.themes.push(...(kind === 'theme' ? themeContent(outcome.text) : themeLines(outcome.text)));
-      this.azure ||= includesAzure(outcome.text);
+      this.whitePageLibrary ||= includesWhitePageLibrary(outcome.text);
       const file: IncludedFile = { id: outcome.id, text: outcome.text };
       return file;
     }

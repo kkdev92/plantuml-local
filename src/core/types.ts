@@ -78,8 +78,8 @@ export interface DiagramRender {
 export interface IncludedStyle {
   /** Their `!theme` lines, trimmed, in the order they were included. */
   themes: readonly string[];
-  /** Whether one of them includes the bundled Azure library. */
-  azure: boolean;
+  /** Whether one of them includes a bundled library made for a white page. */
+  whitePageLibrary: boolean;
 }
 
 /**

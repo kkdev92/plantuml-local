@@ -1,3 +1,5 @@
+import { BUNDLED_LIBRARIES, bundledLibrary } from './libraries';
+
 /** Localises known renderer errors and warnings, preserving unknown details. */
 export interface MessageLocalizer {
   t(message: string, ...args: string[]): string;
@@ -129,9 +131,22 @@ function translateDetail(detail: string, l10n: MessageLocalizer): string {
   }
 
   // Include failure reasons have already been localised by the include loader.
-  const library = /^cannot include <([^/>]+)/.exec(detail)?.[1];
-  if (library !== undefined && library.toLowerCase() !== 'azure') {
-    return l10n.t('The {0} standard library is not included with this extension. Only the azure library is available.', library);
+  const library = /^cannot include (<([^/>]+)[^>]*>)/.exec(detail);
+  if (library !== null) {
+    const bundled = bundledLibrary(library[2] ?? '');
+    if (bundled === undefined) {
+      return libraryNotBundled(library[2] ?? '', l10n);
+    }
+    // Only some files of such a library are bundled, so the one asked for
+    // may be one left out rather than a name that does not exist.
+    if (bundled.files !== undefined) {
+      return l10n.t(
+        'The {0} library bundled with this extension does not include {1}. It includes {2}.',
+        bundled.label,
+        library[1] ?? '',
+        bundled.files.join(', ')
+      );
+    }
   }
   const include = /^cannot include (.+?)(?:: (.+))?$/.exec(detail);
   if (include !== null) {
@@ -159,6 +174,15 @@ function translateDetail(detail: string, l10n: MessageLocalizer): string {
     return l10n.t('Theme {0} is not available. Check the name or choose a bundled theme.', missingTheme[1] ?? '');
   }
   return detail;
+}
+
+/** What to say about an include of a standard library the extension does not bundle. */
+export function libraryNotBundled(library: string, l10n: MessageLocalizer): string {
+  return l10n.t(
+    'The {0} standard library is not included with this extension. The bundled standard libraries are {1}.',
+    library,
+    BUNDLED_LIBRARIES.map((bundled) => bundled.label).join(', ')
+  );
 }
 
 /** The common diagram types in engine errors; unknown type names stay intact. */

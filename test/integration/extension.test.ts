@@ -292,15 +292,13 @@ describe('extension (dist)', () => {
     }
   });
 
-  it('draws a diagram with the Azure icons in the light palette in a dark theme, unless it picks a theme', async () => {
+  it.each([
+    ['the Azure icons', ['!include <azure/AzureCommon>', '!include <azure/Compute/AzureFunction>', 'AzureFunction(fn, "Orders", "Functions")']],
+    ['the C4 library', ['!include <C4/C4_Container>', 'Container(orders, "Orders", "TypeScript")']],
+  ])('draws a diagram with %s in the light palette in a dark theme, unless it picks a theme', async (_what, body) => {
     const md = makeMd(() => '<pre></pre>');
     api.extendMarkdownIt(md);
-    const lines = [
-      '!include <azure/AzureCommon>',
-      '!include <azure/Compute/AzureFunction>',
-      'AzureFunction(fn, "Orders", "Functions")',
-      '@enduml',
-    ];
+    const lines = [...body, '@enduml'];
     const source = ['@startuml', ...lines].join('\n');
     // A theme made for a dark page keeps the dark one.
     const themed = ['@startuml', '!theme cyborg', ...lines].join('\n');
@@ -569,6 +567,45 @@ describe('export (dist)', () => {
       }
       // Closing the document takes its problems away.
       expect(vscodeStub._test.diagnostics.has(uri)).toBe(false);
+    });
+
+    it('warns about an image the engine does not draw, and names the file the C4 library leaves out', async () => {
+      const uri = 'file:///c/diag/c4.md';
+      const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEUlEQVR4nGP4z8DwnwGMgRQAH+4D/dJQfRoAAAAASUVORK5CYII=';
+      const text = [
+        '```plantuml images',
+        '@startuml',
+        '!include <C4/C4_Context>',
+        'Person(customer, "Customer", $sprite="img:customer.png")',
+        `System(shop, "Online shop", $sprite="img:${png}")`,
+        'Rel(customer, shop, "Places orders")',
+        '@enduml',
+        '```',
+        '',
+        '```plantuml left-out',
+        '@startuml',
+        '!include <C4/C4_Nope>',
+        '@enduml',
+        '```',
+      ].join('\n');
+      const document = makeEditor(uri, text, 0).document;
+      vscodeStub._test.openDocument(document);
+      try {
+        const found = await problemsOf(uri, (items) => items.length >= 2);
+        expect(found.map((p) => [p.line, p.code, p.severity])).toEqual([
+          [3, 'PLLOCAL-CAP001', vscodeStub.DiagnosticSeverity.Warning],
+          [11, 'PLLOCAL-CAP001', vscodeStub.DiagnosticSeverity.Error],
+        ]);
+        expect(found[0]?.message).toBe(
+          'The bundled engine draws only images written inline as PNG (data:image/png;base64,…); any other image is drawn as placeholder text.'
+        );
+        expect(found[1]?.message).toBe(
+          'The C4 library bundled with this extension does not include <C4/C4_Nope>. ' +
+            'It includes C4, C4_Context, C4_Container, C4_Component, C4_Dynamic, C4_Deployment, C4_Sequence.'
+        );
+      } finally {
+        vscodeStub._test.closeDocument(document);
+      }
     });
 
     it('drops a document’s problems as soon as it changes, then checks it again', async () => {

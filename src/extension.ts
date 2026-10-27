@@ -72,7 +72,7 @@ import { findColors, hexOf, rgbOf } from './core/colors';
 import { splitLines } from './core/lines';
 import { documentColumnOf, documentLineOf } from './core/positions';
 import { hasStartLine } from './core/shape';
-import { errorMessage } from './core/messages';
+import { errorMessage, libraryNotBundled } from './core/messages';
 import { lineAfterEdits, planReferenceEdits, type ReferenceEdit } from './export/references';
 import {
   lineContext,
@@ -1002,6 +1002,7 @@ function drawingDeps(
     ),
     formulaMessage: (tag) => l10n.t('The bundled engine does not draw {0} formulas; the formula is left out of the diagram.', tag),
     embeddedDiagramMessage: l10n.t('The bundled engine does not draw a diagram embedded with {{ … }}; it is left out of the diagram.'),
+    imageMessage: l10n.t('The bundled engine draws only images written inline as PNG (data:image/png;base64,…); any other image is drawn as placeholder text.'),
     engineErrorMessage: (message, line) => engineErrorMessage(l10n, message, line),
     pngTooLargeMessage: (width, height, fits) =>
       fits === null
@@ -1217,8 +1218,8 @@ async function reportOutcome(
   if (outcome.written.length > 0) {
     messages.push(context.l10n.t('Diagrams exported: {0}', String(outcome.written.length)));
   }
-  // Diagrams written without a formula or an embedded diagram the engine
-  // does not draw: counted here, named in the output.
+  // Diagrams written without a formula, an embedded diagram or an image the
+  // engine does not draw: counted here, named in the output.
   const leftOut = outcome.written.filter((result) => (result.notes?.length ?? 0) > 0);
   if (leftOut.length > 0) {
     messages.push(
@@ -1522,6 +1523,7 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
           beforeStart: (start) => l10n.t('Lines before {0} are ignored when rendering this diagram.', start),
           formula: (tag) => l10n.t('The bundled engine does not draw {0} formulas; the formula is left out of the diagram.', tag),
           embeddedDiagram: l10n.t('The bundled engine does not draw a diagram embedded with {{ … }}; it is left out of the diagram.'),
+          image: l10n.t('The bundled engine draws only images written inline as PNG (data:image/png;base64,…); any other image is drawn as placeholder text.'),
           notUpdated: (mode) => notUpdatedNote(l10n, mode),
           includeFailed: (path, reason) => l10n.t('Could not include {0}: {1}', path, reason),
         },
@@ -1573,6 +1575,7 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
           ),
           formula: (tag) => l10n.t('The bundled engine does not draw {0} formulas; the formula is left out of the diagram.', tag),
           embeddedDiagram: l10n.t('The bundled engine does not draw a diagram embedded with {{ … }}; it is left out of the diagram.'),
+          image: l10n.t('The bundled engine draws only images written inline as PNG (data:image/png;base64,…); any other image is drawn as placeholder text.'),
           engineError: (message, line) =>
             line === null
               ? l10n.t('PlantUML error: {0}', errorMessage(message, l10n))
@@ -2557,9 +2560,9 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         beforeStart: (start) => l10n.t('Lines before {0} are ignored when rendering this diagram.', start),
         formula: (tag) => l10n.t('The bundled engine does not draw {0} formulas; the formula is left out of the diagram.', tag),
         embeddedDiagram: l10n.t('The bundled engine does not draw a diagram embedded with {{ … }}; it is left out of the diagram.'),
+        image: l10n.t('The bundled engine draws only images written inline as PNG (data:image/png;base64,…); any other image is drawn as placeholder text.'),
         themeFrom: l10n.t('Use a bundled theme or a theme file in your workspace.'),
-        libraryNotBundled: (library) =>
-          l10n.t('The {0} standard library is not included with this extension. Only the azure library is available.', library),
+        libraryNotBundled: (library) => libraryNotBundled(library, l10n),
         emojiUnavailable: l10n.t('Emoji syntax (<:name:>) is not supported because emoji images are not included with this extension.'),
       };
       const timers = new Map<string, NodeJS.Timeout>();

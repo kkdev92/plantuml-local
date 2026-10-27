@@ -64,11 +64,14 @@ scripts/
 ├── extract-grammar-checklist.mjs  lists what the bundled engine accepts, from
 │                    the upstream PlantUML sources (run by hand; the output is
 │                    committed)
-├── generate-stdlib.mjs  regenerates assets/stdlib/ from PlantUML's standard
-│                    library (run by hand; the output is committed)
+├── generate-stdlib.mjs  regenerates assets/ from PlantUML's standard library
+│                    (run by hand; the output is committed)
 └── verify-vsix.mjs  VSIX content check + packaged-worker render smoke test
 assets/
-└── stdlib/          bundled standard-library data (the Azure icons)
+├── stdlib/          bundled standard-library data (the Azure icons and the C4
+│                    library)
+└── stdlib-sources.json  where that data came from: the upstream commit and the
+                     SHA-256 of each file read and written
 test/
 ├── unit/            vitest against src/ (no build needed); grammar/ holds the
 │                    grammar cases and the checklist

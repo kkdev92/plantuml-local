@@ -59,6 +59,7 @@ const deps: ExporterDeps = {
   pagesMessage: 'Pages after newpage cannot be drawn.',
   formulaMessage: (tag) => `Formulas in ${tag} are not drawn.`,
   embeddedDiagramMessage: 'Embedded diagrams are not drawn.',
+  imageMessage: 'Images other than inline PNG are not drawn.',
   engineErrorMessage: (message, line) =>
     line === null ? `PlantUML reported an error: ${message}` : `PlantUML reported an error at line ${String(line)}: ${message}`,
   pngTooLargeMessage: (width, height) => `The PNG would be ${String(width)}×${String(height)} pixels.`,
@@ -210,7 +211,8 @@ describe('export (dist worker)', () => {
     ['a local include', ['@startuml', '!include shared.puml', 'Alice -> Bob', '@enduml'], /at line 4: cannot include shared\.puml/],
     ['an empty diagram', ['@startuml', '@enduml'], /at line 4: Empty description/],
     ['a diagram type it does not draw', ['@startdot', 'digraph { a -> b }', '@enddot'], /error: Diagram not supported by this release of PlantUML/],
-    ['a library that is not bundled', ['@startuml', '!include <C4/C4_Context>', '@enduml'], /at line 4: cannot include <C4\/C4_Context>/],
+    ['a library that is not bundled', ['@startuml', '!include <aws/AWSCommon>', '@enduml'], /at line 4: cannot include <aws\/AWSCommon>/],
+    ['a file the C4 library leaves out', ['@startuml', '!include <C4/C4_Nope>', '@enduml'], /at line 4: cannot include <C4\/C4_Nope>/],
     ['unreadable JSON', ['@startjson', '{ "a": ', '@endjson'], /error: Your data does not sound like JSON data/],
     ['an EBNF syntax error', ['@startebnf', 'rule = "a" | ;;;', '@endebnf'], /error: Syntax error!/],
   ])('refuses the drawing the engine makes for %s instead of writing it', async (_what, lines, reason) => {
