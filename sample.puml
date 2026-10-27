@@ -5,9 +5,9 @@
 ' view lists them too, with what each declares, and each diagram folds from
 ' its start line. Above that line, Preview, Export SVG and Export PNG act on
 ' that diagram, and an error in any of them is listed in the Problems panel.
-' Export All Diagrams as SVG writes one file per diagram, named by its id:
-' images/checkout.svg and so on, beside this file. Export Diagram as PNG
-' writes the one under the cursor.
+' Export All Diagrams in File as SVG writes one file per diagram, named by
+' its id: images/checkout.svg and so on, beside this file. Export Diagram as
+' PNG writes the one under the cursor.
 
 @startuml(id=checkout)
 actor Customer

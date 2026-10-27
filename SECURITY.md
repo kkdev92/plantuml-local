@@ -36,7 +36,7 @@ State the limits up front, so the guarantees below are read for what they are:
 ### No network I/O
 
 - The rendering engine (`@plantuml/core`), the Graphviz WebAssembly and all runtime assets ship inside the VSIX and are loaded from disk.
-- **Network APIs are disabled inside the render worker**: `fetch`, `XMLHttpRequest`, `WebSocket` and `EventSource` are replaced with throwing stubs before the engine loads (`src/worker/network-guard.ts`). The engine files contain a small number of network call sites — one `XMLHttpRequest` in `plantuml.js` (the browser build's URL-include loader), plus the `fetch`/`XMLHttpRequest` fallbacks Emscripten emits in `viz-global.cjs` for loading a WebAssembly binary that is in practice embedded in the file. With the guard in place, reaching any of them fails the render instead of making a request.
+- **Network APIs are disabled inside the render worker**: `fetch`, `XMLHttpRequest`, `WebSocket` and `EventSource` are replaced with throwing stubs before the engine loads (`src/worker/network-guard.ts`). The engine files contain two places that could load something: in `plantuml.js`, the `<script>` element it adds for a library it has not been given, which the worker answers before the element is made (see *The standard library is served from the package* below); and in `viz-global.cjs`, the `fetch` Emscripten emits for loading a WebAssembly binary that is in practice embedded in the file. With these measures in place, reaching either fails the render instead of making a request.
 - Neither bundle contains a rendering-service URL; `scripts/verify-vsix.mjs` checks every package for `plantuml.com/plantuml` / `kroki.io` references and CI runs it on each build.
 - There is no telemetry of any kind.
 
@@ -74,7 +74,7 @@ PlantUML draws `sprite` definitions — the mechanism behind icon sets such as A
 
 #### The `.puml` preview panel
 
-The preview of a `.puml` file is a webview of this extension's own, and runs one script, `media/viewer/viewer.js`. It receives the same sanitised SVG and shows it through an `<img>` holding a Blob URL, so the SVG is treated as an image: nothing in it can run, even something the sanitiser missed. The panel's Content-Security-Policy is `default-src 'none'` with scripts allowed by nonce only and images from the panel's own source, `data:` and `blob:`; it may load files from `media/viewer` only, and has forms disabled. The page acts only on messages carrying its own origin, which is how VS Code's frame around it delivers the extension's messages. The messages it sends back are untrusted input: only a ready notice and a choice among the file's diagrams are acted on. So is the state it keeps for a restart — the file's URI and the diagram's name, which the extension reads, and each diagram's zoom, which only the page does: a panel whose state does not hold a URI that opens is closed rather than restored, and a restored panel's options are set again rather than taken from the saved session.
+The preview of a `.puml` file is a webview of this extension's own, and runs one script, `media/viewer/viewer.js`. It receives the same sanitised SVG and shows it through an `<img>` holding a Blob URL, so the SVG is treated as an image: nothing in it can run, even something the sanitiser missed. The PNG its Copy button puts on the clipboard is drawn the same way: the page reads the SVG as an image from a Blob URL, draws it onto a canvas and writes the PNG to the clipboard. The panel's Content-Security-Policy is `default-src 'none'` with scripts allowed by nonce only and images from the panel's own source, `data:` and `blob:`; it may load files from `media/viewer` only, and has forms disabled. The page acts only on messages carrying its own origin, which is how VS Code's frame around it delivers the extension's messages. The messages it sends back are untrusted input: only a ready notice, a choice among the file's diagrams, and the requests of its PNG, Copy and Copy SVG buttons are acted on; a request names no file and no path, and acts on the diagram the panel shows, as found in the file's current text. So is the state it keeps for a restart — the file's URI and the diagram's name, which the extension reads, and each diagram's zoom, which only the page does: a panel whose state does not hold a URI that opens is closed rather than restored, and a restored panel's options are set again rather than taken from the saved session.
 
 #### The PNG panel
 
@@ -86,13 +86,13 @@ The preview of a `.puml` file is a webview of this extension's own, and runs one
 
 ### Included files are chosen by the extension
 
-The engine reads no file itself. For each local `!include`, `!include_once` and `!include_many` it runs, it asks the host through `PLANTUML_FILE_LOADER`, and the worker passes the request to the extension host, which decides (`src/includes/`). A file is delivered only when all of these hold:
+The engine reads no file itself. For each local `!include`, `!include_once`, `!include_many` and `!includesub` it runs, and each `!theme … from` a folder, it asks the host through `PLANTUML_FILE_LOADER`, and the worker passes the request to the extension host, which decides (`src/includes/`). A file is delivered only when all of these hold:
 
 - the workspace is trusted, and the document is a saved file on disk in a workspace folder;
 - the path, as the engine hands it over, is relative: an absolute path, a drive, a share, a URI or `~` is refused, as are a device name, a name ending in a dot or a space, a `:` in a name, a control character and a `.git`, `.hg` or `.svn` folder, and nothing in the path is decoded or expanded;
 - the path is looked for next to the including file, then in the folders of `plantumlLocal.includePaths`, and every place looked at lies inside the document's workspace folder, taken by its real path; one that leaves it stops the include rather than letting a file elsewhere stand in;
 - no name between the workspace folder and the file is a symbolic link or a junction, checked with `lstat` name by name, and the file's real path lies inside the workspace folder too;
-- it is a regular file ending in `.puml`, `.plantuml`, `.pu`, `.iuml`, `.wsd`, `.inc` or `.txt`, holding valid UTF-8 without a NUL, and it holds no second diagram and no command outside its diagram, which the bundled engine would not render;
+- it is a regular file ending in `.puml`, `.plantuml`, `.pu`, `.iuml`, `.wsd`, `.inc` or `.txt`, holding valid UTF-8 without a NUL;
 - one diagram's includes stay within 32 levels, 2048 files and 16 MiB in all.
 
 `plantumlLocal.includePaths` is declared a restricted setting, so a workspace's own value is not used in Restricted Mode. A document open in the editor is delivered with its unsaved changes. The checks bound which files are read; they do not judge what is in them, and anything in a readable file of the workspace folder can end up in a diagram.
@@ -109,7 +109,7 @@ Exporting is the one path that writes files: the export commands write SVG and P
 
 ### Supply chain notes
 
-- `@plantuml/core` is required at a range that starts no lower than 1.2026.6, the first MIT-licensed release (see `package.json`), and its engine files are copied into the package (no CDN at build or run time): `plantuml.js`, `viz-global.cjs` and the OpenIconic icons verbatim, and the `!theme` library rebuilt without the themes this extension does not ship. `package-lock.json` records the exact version each build used.
+- `@plantuml/core` is pinned to one exact version, never earlier than 1.2026.6, the first MIT-licensed release (see `package.json`), and its engine files are copied into the package (no CDN at build or run time): `plantuml.js`, `viz-global.cjs` and the OpenIconic icons verbatim, and the `!theme` library rebuilt without the themes this extension does not ship.
 - Copyright and licence notices for every third-party component shipped in the VSIX are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md), with full licence texts under `third-party/`.
 - happy-dom ships a self-signed TLS certificate (private key included) for HTTPS emulation in its fetch stack. This extension never uses that stack; the build replaces the certificate module with an empty stub, and `verify-vsix` fails the build if key material reappears in the bundle.
 
@@ -121,6 +121,6 @@ Input can also make Graphviz crash, and the WebAssembly Graphviz then fails ever
 
 ## Known Limitations
 
-- The engine itself is a large compiled artifact (TeaVM output); we treat it as trusted upstream code and constrain its version range.
+- The engine itself is a large compiled artifact (TeaVM output); we treat it as trusted upstream code and pin its version.
 - A hostile document can still waste CPU in 30-second increments (one worker thread at a time); it cannot block the editor.
 - Text metrics in the worker are approximated, so rendered layout can differ slightly from a browser rendering of the same diagram. This is a fidelity limitation, not a security one, but it is worth knowing when comparing output against plantuml.com.
