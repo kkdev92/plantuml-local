@@ -372,8 +372,13 @@
         outline(reach);
       }
     } else if (drag !== null) {
-      stage.scrollLeft = drag.left - (event.clientX - drag.x);
-      stage.scrollTop = drag.top - (event.clientY - drag.y);
+      if ((event.buttons & 1) === 0) {
+        // The same for a drag that moves the view: it ends where it is.
+        stopDrag();
+      } else {
+        stage.scrollLeft = drag.left - (event.clientX - drag.x);
+        stage.scrollTop = drag.top - (event.clientY - drag.y);
+      }
     }
   });
   const stopDrag = () => {
@@ -393,11 +398,13 @@
   // Let go outside the panel, the button can come up with no pointerup for
   // the page, which hears of it only when the pointer comes back, by the
   // capture it has lost. The area then ends where the pointer last was with
-  // the button down, kept to what is in sight, as it would have on pointerup.
+  // the button down, kept to what is in sight, as it would have on pointerup;
+  // a drag that moves the view ends where it is.
   stage.addEventListener('lostpointercapture', () => {
     if (mark !== null) {
       zoomToMark(reach);
     }
+    stopDrag();
   });
 
   // However the user moved the view, the new centre is kept once it stops.
