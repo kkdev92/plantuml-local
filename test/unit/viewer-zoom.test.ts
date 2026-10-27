@@ -26,6 +26,16 @@ interface View {
   x: number;
   y: number;
 }
+interface Size {
+  width: number;
+  height: number;
+}
+interface Fit {
+  client: Size;
+  box: Size;
+  size: Size;
+  margin: number;
+}
 
 /**
  * media/viewer/zoom.js, which the viewer's page runs before its own script,
@@ -34,7 +44,7 @@ interface View {
 const viewerZoom = runInNewContext(
   `${readFileSync(join(__dirname, '../../media/viewer/zoom.js'), 'utf8')}\n;viewerZoom`,
   {}
-) as { clamp(value: number): number; toArea(area: Area): View | null };
+) as { clamp(value: number): number; toArea(area: Area): View | null; toFit(fit: Fit): number };
 
 /**
  * A stage of 400 × 300 CSS pixels, scrolled to the top left, with a diagram
@@ -217,6 +227,66 @@ describe('viewerZoom.toArea', () => {
     }
     // Some of them come to a view, so the checks above were made.
     expect(views).toBeGreaterThan(100);
+  });
+});
+
+describe('viewerZoom.toFit', () => {
+  const whole = (width: number, height: number): Pick<Fit, 'client' | 'box'> => ({
+    client: { width, height },
+    box: { width, height },
+  });
+
+  it('fits the whole diagram in the stage less the margin each side', () => {
+    const wide = viewerZoom.toFit({ ...whole(400, 300), size: { width: 1000, height: 500 }, margin: 16 });
+    const tall = viewerZoom.toFit({ ...whole(400, 300), size: { width: 500, height: 1000 }, margin: 16 });
+
+    expect(wide).toBeCloseTo(368 / 1000, 10);
+    expect(tall).toBeCloseTo(268 / 1000, 10);
+  });
+
+  it('never zooms past 100%', () => {
+    expect(viewerZoom.toFit({ ...whole(400, 300), size: { width: 100, height: 50 }, margin: 16 })).toBe(1);
+  });
+
+  it('keeps the diagram inside a stage a fraction of a pixel high or wide, whichever way clientWidth and clientHeight round it', () => {
+    // Heights measured under a toolbar 21.854 px high, a width measured
+    // beside them and one that rounds up; the client size is the box
+    // rounded, up or down.
+    const fractions = [762.812, 750.812, 724.958, 761.479, 699.104, 543.3, 543.7];
+    let fitted = 0;
+    for (const length of fractions) {
+      for (const client of [Math.floor(length), Math.ceil(length)]) {
+        for (const size of [
+          { width: 300, height: 2000 },
+          { width: 2000, height: 300 },
+        ]) {
+          const tall = size.height > size.width;
+          const fit = {
+            client: tall ? { width: 1000, height: client } : { width: client, height: 1000 },
+            box: tall ? { width: 1000, height: length } : { width: length, height: 1000 },
+            size,
+            margin: 16,
+          };
+          const zoom = viewerZoom.toFit(fit);
+          const along = tall ? size.height * zoom + 32 : size.width * zoom + 32;
+          expect(along).toBeLessThanOrEqual(length);
+          // Rounded down, not by more: less than a pixel is given up.
+          expect(along).toBeGreaterThan(length - 1);
+          fitted += 1;
+        }
+      }
+    }
+    expect(fitted).toBe(fractions.length * 4);
+  });
+
+  it('fits to the client size where a scroll bar takes from the box', () => {
+    const zoom = viewerZoom.toFit({
+      client: { width: 528, height: 725 },
+      box: { width: 543.3, height: 724.958 },
+      size: { width: 2000, height: 300 },
+      margin: 16,
+    });
+    expect(zoom).toBeCloseTo((528 - 32) / 2000, 10);
   });
 });
 

@@ -79,6 +79,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   half a second; a zoomed-in view could end up moved to one side, and stay
   there. The point at the centre of the view is now kept however quickly
   the panel resizes, and a view scrolled to an edge comes back to it.
+- **A diagram fitted to the `.puml` preview fits inside it.** At some panel
+  sizes, *Fit to Window* left the diagram a fraction of a pixel larger than
+  the panel, which then showed a scroll bar and scrolled by a hair. The
+  diagram is now fitted to the panel's size rounded down.
 
 ## [0.16.0] - 2026-10-27
 
