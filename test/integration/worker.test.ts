@@ -12,6 +12,7 @@ import { expandSnippet, SNIPPETS, TEMPLATES } from '../../src/language/completio
 import { diagramKind, type DiagramKind } from '../../src/language/diagram-kind';
 import { protect } from '../../src/language/protected';
 import { recognizeEngineError } from '../../src/render/engine-error';
+import { drawnTitle } from '../../src/render/title';
 import {
   choosePalette,
   labelContrast,
@@ -922,5 +923,61 @@ describe('snippets and the lines that tell a diagram type (dist, re-check on eve
         }
       }
     }
+  });
+});
+
+// The .puml preview names a diagram after the title the engine draws
+// (src/render/title.ts). That rests on how the bundled engine draws a title:
+// in a group of its own, as text with its markup applied. So it is
+// re-checked on every engine update, in each type of diagram.
+describe('the title a screen reader is told (dist, re-check on every engine update)', () => {
+  /** A diagram of each type, its title in place of `{title}`. */
+  const KINDS: Record<string, string> = {
+    sequence: '@startuml\ntitle {title}\nA -> B\n@enduml',
+    class: '@startuml\ntitle {title}\nclass Foo\n@enduml',
+    activity: '@startuml\ntitle {title}\nstart\n:a;\nstop\n@enduml',
+    'old activity': '@startuml\ntitle {title}\n(*) --> "a"\n@enduml',
+    'use case': '@startuml\ntitle {title}\nactor U\nU --> (case)\n@enduml',
+    component: '@startuml\ntitle {title}\n[Comp] --> [Other]\n@enduml',
+    state: '@startuml\ntitle {title}\n[*] --> S1\n@enduml',
+    object: '@startuml\ntitle {title}\nobject o1\n@enduml',
+    deployment: '@startuml\ntitle {title}\nnode n1\n@enduml',
+    timing: '@startuml\ntitle {title}\nrobust "R" as R\n@0\nR is idle\n@enduml',
+    C4: '@startuml\n!include <C4/C4_Context>\ntitle {title}\nPerson(p, "P")\n@enduml',
+    gantt: '@startgantt\ntitle {title}\n[Task] lasts 3 days\n@endgantt',
+    mindmap: '@startmindmap\ntitle {title}\n* root\n@endmindmap',
+    wbs: '@startwbs\ntitle {title}\n* root\n** a\n@endwbs',
+    json: '@startjson\ntitle {title}\n{"a": 1}\n@endjson',
+    yaml: '@startyaml\ntitle {title}\na: 1\n@endyaml',
+    salt: '@startsalt\ntitle {title}\n{\n  Login | "x"\n}\n@endsalt',
+    chart: '@startchart\ntitle {title}\nh-axis [a, b]\nv-axis 0 --> 10\nbar "S" [1, 2]\n@endchart',
+    ebnf: '@startebnf\ntitle {title}\nrule = "a";\n@endebnf',
+    regex: '@startregex\ntitle {title}\n/ab+/\n@endregex',
+  };
+
+  it.each(Object.entries(KINDS))('reads the title of a %s diagram as drawn', async (_kind, diagram) => {
+    const titled = (title: string): Promise<string> => render(diagram.replace('{title}', title));
+    expect(drawnTitle(await titled('Order flow'))).toBe('Order flow');
+    // Its markup applied, and a line break between its lines.
+    expect(drawnTitle(await titled('<u>Order</u> **flow** & <b>more</b>\\nsecond'))).toBe('Order flow & more second');
+  });
+
+  it('reads a title however it is written, and nothing that is not one', async () => {
+    const read = async (lines: readonly string[]): Promise<string | null> => drawnTitle(await render(lines.join('\n')));
+    expect(await read(['@startuml', 'title: After a colon', 'A -> B', '@enduml'])).toBe('After a colon');
+    expect(await read(['@startuml', 'TITLE "In quotes"', 'A -> B', '@enduml'])).toBe('In quotes');
+    expect(await read(['@startuml', 'title', '  Over <b>lines</b>', '  of its own', 'end title', 'A -> B', '@enduml'])).toBe(
+      'Over lines of its own'
+    );
+    // The last title is the one drawn.
+    expect(await read(['@startuml', 'title First', 'title Second', 'A -> B', '@enduml'])).toBe('Second');
+    // Text of a note, a name the diagram is given, no title, and an error
+    // the engine drew in place of the diagram.
+    expect(await read(['@startuml', 'A -> B', 'note left of A', '  title not a title', 'end note', '@enduml'])).toBeNull();
+    expect(await read(['@startuml(id=checkout)', 'A -> B', '@enduml'])).toBeNull();
+    expect(await read(['@startuml', 'A -> B', '@enduml'])).toBeNull();
+    const error = await render(['@startuml', 'title Has an error', 'A -> B : x', 'foo bar baz qux', '@enduml'].join('\n'));
+    expect(recognizeEngineError(error)).not.toBeNull();
+    expect(drawnTitle(error)).toBeNull();
   });
 });

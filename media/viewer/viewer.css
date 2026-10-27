@@ -101,11 +101,25 @@ select {
 	font-variant-numeric: tabular-nums;
 }
 
+/* Around the control, as VS Code draws it around its own buttons: inside, on
+   the border, it would be lost on the pressed button, whose background is the
+   colour of the focus in the default themes, and in a high contrast theme it
+   would only change the colour of the border. */
 button:focus-visible,
-select:focus-visible,
+select:focus-visible {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: 2px;
+}
+
 #stage:focus-visible {
 	outline: 1px solid var(--vscode-focusBorder);
 	outline-offset: -1px;
+}
+
+/* What a screen reader is told (viewer.js): read, but not shown. */
+#announcer {
+	position: absolute;
+	left: -999em;
 }
 
 #stage {

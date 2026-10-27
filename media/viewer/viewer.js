@@ -9,6 +9,11 @@
 // 100% is the size the SVG gives itself in its width and height, which is
 // what PlantUML's `scale` sets. The stage scrolls; zooming resizes the
 // image and keeps the point under the pointer, or at the centre, in place.
+//
+// A screen reader is told what comes of things, not what is under way: what
+// a drawing comes to once drawing settles, and only when it is not what it
+// was told last, as the file is drawn again each time it stops changing; the
+// zoom the buttons and keys leave; and what came of a copy.
 (function () {
   const vscode = acquireVsCodeApi();
   const select = document.getElementById('diagrams');
@@ -17,6 +22,7 @@
   const canvas = document.getElementById('canvas');
   const image = document.getElementById('diagram');
   const zoomText = document.getElementById('zoom');
+  const regions = [...document.querySelectorAll('#announcer [role="status"]')];
   const buttons = {
     out: document.getElementById('zoom-out'),
     in: document.getElementById('zoom-in'),
@@ -32,6 +38,10 @@
   const STEP = 1.25;
   /** How many diagrams' views are kept, the least recently shown dropped first. */
   const KEPT = 200;
+  /** How long a drawing's result stands, in milliseconds, before a screen reader is told it. */
+  const SETTLE = 1000;
+  /** How long the zoom stands before a screen reader is told it, so that a held key says it once. */
+  const ZOOM_SETTLE = 500;
 
   const saved = vscode.getState() || {};
   /** What the extension asks to be kept, for a restart. */
@@ -49,6 +59,39 @@
   let latest = null;
   let drag = null;
   let saving = undefined;
+  /** The result of a drawing a screen reader was told last, which it is not told again. */
+  let told = null;
+  let settling = undefined;
+  let zooming = undefined;
+
+  /**
+   * Tells a screen reader `text`. The two regions take turns, so that the
+   * same words said again are said again; the one not used is emptied, which
+   * is not said. VS Code's own announcements do the same.
+   */
+  function announce(text) {
+    const [now, other] = regions[0].textContent === text ? [regions[1], regions[0]] : regions;
+    other.textContent = '';
+    now.textContent = text;
+  }
+
+  /**
+   * Tells a screen reader what a drawing came to, `spoken`, once nothing
+   * newer has come for a while, unless it is what it was told last. Null,
+   * for a drawing under way, tells it nothing: what it comes to will follow.
+   */
+  function settle(spoken) {
+    clearTimeout(settling);
+    if (typeof spoken !== 'string' || spoken === '') {
+      return;
+    }
+    settling = setTimeout(() => {
+      if (spoken !== told) {
+        told = spoken;
+        announce(spoken);
+      }
+    }, SETTLE);
+  }
 
   function isEntry(entry) {
     return (
@@ -128,6 +171,7 @@
     view = { fit: false, zoom, ...centre() };
     indicate();
     remember();
+    tellZoom();
   }
 
   const zoomBy = (factor) => zoomAt(zoom * factor);
@@ -138,7 +182,17 @@
       view = { fit: true };
       apply();
       remember();
+      tellZoom();
     }
+  }
+
+  /**
+   * Tells a screen reader the zoom the buttons, keys or wheel left, once it
+   * stands. Fitting a diagram drawn again is not said: it follows typing.
+   */
+  function tellZoom() {
+    clearTimeout(zooming);
+    zooming = setTimeout(() => announce(zoomText.dataset.spoken.replace('{0}', zoomText.textContent)), ZOOM_SETTLE);
   }
 
   function indicate() {
@@ -307,7 +361,11 @@
 
   // Anything else, such as the clipboard declining the image, is told in the
   // panel's words rather than the browser's.
-  const fail = (error) => say(copyText.failed.replace('{0}', error instanceof Refusal ? error.message : copyText.unwritten), true, false);
+  function fail(error) {
+    const text = copyText.failed.replace('{0}', error instanceof Refusal ? error.message : copyText.unwritten);
+    say(text, true, false);
+    announce(text);
+  }
 
   /** Draws the PNG of a copy, as media/png/png.js draws an exported one. */
   async function toPng(drawing) {
@@ -351,7 +409,12 @@
     say(copyText.copying, false, false);
     // One reason is given: the drawing's, or else the clipboard's.
     written.catch(() => undefined);
-    png.then(() => written).then(() => say(copyText.copied, false, true), fail);
+    png
+      .then(() => written)
+      .then(() => {
+        say(copyText.copied, false, true);
+        announce(copyText.copied);
+      }, fail);
   }
 
   copyButton.addEventListener('click', copy);
@@ -406,6 +469,8 @@
           }
           shown = url;
           image.src = url;
+          image.alt = message.label;
+          stage.setAttribute('aria-label', message.label);
           image.hidden = false;
           image.style.background = message.backdrop;
           image.style.boxShadow = `0 0 0 8px ${message.backdrop}`;
@@ -430,10 +495,12 @@
       said = { text: message.text, error: message.error === true };
       status.textContent = message.text;
       status.classList.toggle('error', message.error === true);
+      settle(message.spoken);
       if (message.clear === true) {
         latest = null;
         size = null;
         image.hidden = true;
+        stage.removeAttribute('aria-label');
         canvas.style.width = '0';
         canvas.style.height = '0';
         indicate();

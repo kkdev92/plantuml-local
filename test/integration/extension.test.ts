@@ -2954,11 +2954,16 @@ describe('viewer (dist)', () => {
     for (const label of ['Zoom Out', 'Zoom In', 'Fit to Window', 'Actual Size']) {
       expect(panel?.webview.html).toContain(`aria-label="${label}"`);
     }
+    // Read out as they change: not the status line or the zoom, but the two
+    // regions the page tells a screen reader through.
+    expect(panel?.webview.html).toContain('<span id="status"></span>');
+    expect(panel?.webview.html).toContain('<span id="zoom" data-spoken="Zoom {0}"></span>');
+    expect(panel?.webview.html).toContain('<div id="announcer"><div role="status"></div><div role="status"></div></div>');
     // Nothing is sent before the page says it runs.
     expect(panel?.webview.posted).toEqual([]);
 
     panel?.receive({ type: 'ready' });
-    await waitFor(() => (panel === undefined ? false : posted(panel, 'render').length > 0));
+    await waitFor(() => (panel === undefined ? false : posted(panel, 'status').length > 1));
     expect(posted(panel!, 'diagrams')[0]).toEqual({
       type: 'diagrams',
       items: ['orders (line 1)', 'Diagram 2 (line 5)'],
@@ -2967,8 +2972,29 @@ describe('viewer (dist)', () => {
       keep: { uri: 'file:///c/view/flows.puml', name: null },
     });
     expect(posted(panel!, 'render')[0]?.svg).toContain('second');
-    // What the page keeps the zoom of this diagram by.
-    expect(posted(panel!, 'render')[0]).toMatchObject({ key: '#1' });
+    // What the page keeps the zoom of this diagram by, and what a screen
+    // reader calls it, as it has neither a title nor a name.
+    expect(posted(panel!, 'render')[0]).toMatchObject({ key: '#1', label: 'Diagram 2 of flows' });
+    // A screen reader is told it is drawn, not that it is being drawn.
+    expect(posted(panel!, 'status')).toEqual([
+      { type: 'status', text: 'Rendering diagram…', error: false, clear: false, spoken: null },
+      { type: 'status', text: '', error: false, clear: false, spoken: 'Rendered Diagram 2 of flows.' },
+    ]);
+  });
+
+  it('names the diagram by the title the engine draws', async () => {
+    const source = ['@startuml', 'title <u>Order</u> flow', 'Alice -> Bob', '@enduml'].join('\n');
+    vscodeStub._test.setActiveEditor(makeEditor('file:///c/viewtitle/orders.puml', source, 1, { languageId: 'plantuml' }));
+    const before = vscodeStub._test.webviewPanels.length;
+    await run('plantumlLocal.openPreviewToSide');
+    const panel = vscodeStub._test.webviewPanels[before]!;
+
+    panel.receive({ type: 'ready' });
+    await waitFor(() => posted(panel, 'status').length > 1);
+
+    // As drawn, without the markup of the source.
+    expect(posted(panel, 'render')[0]).toMatchObject({ key: 'orders', label: 'Order flow' });
+    expect(posted(panel, 'status').at(-1)).toMatchObject({ spoken: 'Rendered Order flow.' });
   });
 
   it('runs Export Diagram as PNG for the diagram shown when its PNG button is pressed', async () => {
@@ -3113,7 +3139,7 @@ describe('viewer (dist)', () => {
       editor.document.setText(FLOWS.replace('Alice -> Bob : orders', 'Alice -> Bob : changed'));
       vscodeStub._test.changeDocument(editor.document);
       await waitFor(() => statuses().at(-1)?.text === 'Preview is out of date. Save the file to refresh it.');
-      expect(statuses().at(-1)).toMatchObject({ error: false, clear: false });
+      expect(statuses().at(-1)).toMatchObject({ error: false, clear: false, spoken: 'Preview is out of date. Save the file to refresh it.' });
       // Past the delay a change waits for before drawing: nothing drawn.
       await new Promise((resolve) => setTimeout(resolve, 600));
       expect(posted(panel, 'render')).toHaveLength(count);
@@ -3186,6 +3212,7 @@ describe('viewer (dist)', () => {
           text: 'Select a diagram from the list.',
           error: false,
           clear: true,
+          spoken: 'Select a diagram from the list.',
         });
       } finally {
         panel?.dispose();
