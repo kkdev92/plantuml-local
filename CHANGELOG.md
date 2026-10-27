@@ -36,6 +36,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   taken for one or the other by lines that only that type reads, such as
   `participant` or `start`; where its lines do not tell, no snippet is
   offered.
+- **The `.puml` preview zooms to an area, and scrolls to an edge.** *Zoom to
+  Area* (`Z`) has the next drag mark an area rather than move the diagram, and
+  zooms to fit that area in the panel; Esc leaves it without zooming. `Home`
+  and `End` scroll to the top and the bottom of the diagram, with Shift to its
+  left and right edges, and `C` to its centre. The panel's context menu has
+  these too.
 
 ### Changed
 

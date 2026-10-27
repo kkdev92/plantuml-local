@@ -123,6 +123,13 @@ export function parseRequest(message: unknown, count: number): ViewerRequest | n
   return null;
 }
 
+/**
+ * What the panel's context menu has the page do: take the next drag as
+ * marking an area to zoom to, or move the view to an edge of the diagram or
+ * to its centre.
+ */
+export type ViewAction = 'zoomToArea' | 'top' | 'bottom' | 'left' | 'right' | 'centre';
+
 /** The zoom toolbar's text, localised by the caller. */
 export interface ToolbarLabels {
   selectDiagram: string;
@@ -131,6 +138,8 @@ export interface ToolbarLabels {
   zoomIn: string;
   fit: string;
   actualSize: string;
+  /** The toggle that has a drag mark an area to zoom to. */
+  zoomToArea: string;
   /** What a screen reader is told of a zoom it changed, the percentage in place of `{0}`. */
   zoomLevel: string;
   /** The PNG button, which exports the diagram shown. */
@@ -175,6 +184,7 @@ export function viewerBody(labels: ToolbarLabels, escape: (text: string) => stri
     button('zoom-in', '+', labels.zoomIn, '+'),
     button('fit', labels.fit, labels.fit, '0', ' aria-pressed="true"'),
     button('actual', '100%', labels.actualSize, '1'),
+    button('area', labels.zoomToArea, labels.zoomToArea, 'Z', ' aria-pressed="false"'),
     '</div>',
     '<div id="actions">',
     `<button id="export-png" type="button" aria-label="${escape(labels.exportPng)}" title="${escape(labels.exportPng)}">PNG</button>`,
@@ -186,8 +196,10 @@ export function viewerBody(labels: ToolbarLabels, escape: (text: string) => stri
     '</div>',
     '</div>',
     '</header>',
-    // Focused, the drawing area is described by the status line.
-    '<main id="stage" tabindex="0" aria-describedby="status"><div id="canvas"><img id="diagram" alt="" hidden draggable="false"></div></main>',
+    // Focused, the drawing area is described by the status line. The
+    // marquee outlines an area being marked to zoom to.
+    '<main id="stage" tabindex="0" aria-describedby="status"><div id="canvas">' +
+      '<img id="diagram" alt="" hidden draggable="false"><div id="marquee" hidden></div></div></main>',
     '<div id="announcer"><div role="status"></div><div role="status"></div></div>',
   ].join('');
 }
@@ -271,6 +283,11 @@ export class DiagramViewer {
   async stale(note: string): Promise<void> {
     this.note = note;
     await this.status(note, false, false);
+  }
+
+  /** Has the page do `action`, chosen in the panel's context menu. */
+  async act(action: ViewAction): Promise<void> {
+    await this.panel.post({ type: 'act', action });
   }
 
   /**

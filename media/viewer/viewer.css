@@ -148,3 +148,26 @@ select:focus-visible {
 	user-select: none;
 	-webkit-user-drag: none;
 }
+
+/* Marking an area to zoom to (viewer.js): a cross, and the area outlined in
+   the colour of the focus, which every theme makes stand out. A touch marks
+   the area too, rather than scrolling. */
+#stage.marking {
+	cursor: crosshair;
+	touch-action: none;
+}
+
+#marquee {
+	position: absolute;
+	box-sizing: border-box;
+	border: 1px solid var(--vscode-focusBorder);
+	pointer-events: none;
+}
+
+#marquee::before {
+	content: '';
+	position: absolute;
+	inset: 0;
+	background: var(--vscode-focusBorder);
+	opacity: 0.15;
+}

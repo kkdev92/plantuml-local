@@ -42,6 +42,7 @@ import {
   SAVE_REFRESH_DELAY_MS,
   VIEWER_DEBOUNCE_MS,
   VIEWER_TYPE,
+  VIEWER_URI_CONTEXT,
 } from './core/constants';
 import {
   blockAtLine,
@@ -108,7 +109,7 @@ import { createPlantUmlPlugin, type PlantUmlPlugin, type UpdateMode } from './pr
 import { RendererClient, defaultWorkerPath } from './render/client';
 import { shareRenders, type SharedRender } from './render/memo';
 import { ThemePalettes } from './render/palette';
-import { DiagramViewer, viewerBody, type ToolbarLabels, type ViewerDeps } from './viewer/viewer';
+import { DiagramViewer, viewerBody, type ToolbarLabels, type ViewAction, type ViewerDeps } from './viewer/viewer';
 
 /**
  * Extension entry point: wires VS Code, the markdown-it plugin and the render
@@ -305,6 +306,31 @@ export const OpenPreviewToSide = defineCommandContract<readonly [], void>({
   id: COMMANDS.OPEN_PREVIEW_TO_SIDE,
 });
 
+/*
+ * The viewer's context menu: take the next drag as marking an area to zoom
+ * to, or move the view to an edge of the diagram or to its centre. Each is
+ * given what the page set where the menu was opened (VIEWER_URI_CONTEXT),
+ * which names the viewer, and acts on nothing else.
+ */
+export const ZoomToArea = defineCommandContract<readonly unknown[], void>({
+  id: COMMANDS.ZOOM_TO_AREA,
+});
+export const ScrollToTop = defineCommandContract<readonly unknown[], void>({
+  id: COMMANDS.SCROLL_TO_TOP,
+});
+export const ScrollToBottom = defineCommandContract<readonly unknown[], void>({
+  id: COMMANDS.SCROLL_TO_BOTTOM,
+});
+export const ScrollToLeftEdge = defineCommandContract<readonly unknown[], void>({
+  id: COMMANDS.SCROLL_TO_LEFT_EDGE,
+});
+export const ScrollToRightEdge = defineCommandContract<readonly unknown[], void>({
+  id: COMMANDS.SCROLL_TO_RIGHT_EDGE,
+});
+export const ScrollToCentre = defineCommandContract<readonly unknown[], void>({
+  id: COMMANDS.SCROLL_TO_CENTRE,
+});
+
 /** The worker client. An object with `dispose`, so the container shuts it down. */
 const Renderer: ServiceToken<RendererClient> = serviceToken<RendererClient>('plantuml.renderer');
 
@@ -359,6 +385,11 @@ interface ViewerSet {
    * as not updated.
    */
   filesChanged(changes: ReadonlyMap<string, boolean>): void;
+  /**
+   * Has the page of the viewer that `context` names do `action`: the
+   * context its page set where its context menu was opened.
+   */
+  act(context: unknown, action: ViewAction): void;
   /** Whether a viewer of the document at `uri` is open. */
   shows(uri: vscode.Uri): boolean;
   /** Fires with the document's URI when a viewer of it opens or closes. */
@@ -1616,6 +1647,7 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         zoomIn: l10n.t('Zoom In'),
         fit: l10n.t('Fit to Window'),
         actualSize: l10n.t('Actual Size'),
+        zoomToArea: l10n.t('Zoom to Area'),
         // The page puts the percentage in place of {0}.
         zoomLevel: l10n.t('Zoom {0}', '{0}'),
         exportPng: l10n.t('Export Diagram as PNG'),
@@ -1645,7 +1677,8 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
           // Blob URLs are how the page shows the SVG, as an image.
           csp: generateCSP(panel.webview, { nonce, imgSrc: ['blob:'] }),
           styles: [panel.webview.asWebviewUri(vscode.Uri.joinPath(media, 'viewer.css')).toString()],
-          scripts: [panel.webview.asWebviewUri(vscode.Uri.joinPath(media, 'viewer.js')).toString()],
+          // zoom.js first: the page takes its zoom from it.
+          scripts: ['zoom.js', 'viewer.js'].map((file) => panel.webview.asWebviewUri(vscode.Uri.joinPath(media, file)).toString()),
           nonce,
           body: viewerBody(toolbar, escapeHtml),
         });
@@ -1746,6 +1779,14 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
             }
           }
         },
+        act: (context, action): void => {
+          // What the page set, which is no more trusted than the page.
+          const uri = typeof context === 'object' && context !== null ? (context as Record<string, unknown>)[VIEWER_URI_CONTEXT] : undefined;
+          const entry = typeof uri === 'string' ? open.get(uri) : undefined;
+          if (entry !== undefined) {
+            void entry.viewer.act(action);
+          }
+        },
         shows: (uri): boolean => open.has(uri.toString()),
         onDidChangeShown: shown.event,
         dispose: (): void => {
@@ -1817,6 +1858,23 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
     inject: { viewers: Viewers },
     execute: openPreview(vscode.ViewColumn.Beside),
   });
+
+  const viewActions = [
+    [ZoomToArea, 'zoomToArea'],
+    [ScrollToTop, 'top'],
+    [ScrollToBottom, 'bottom'],
+    [ScrollToLeftEdge, 'left'],
+    [ScrollToRightEdge, 'right'],
+    [ScrollToCentre, 'centre'],
+  ] as const;
+  for (const [contract, action] of viewActions) {
+    module.commands.handle(contract, {
+      inject: { viewers: Viewers },
+      execute: (_context: OperationContext, args, { viewers }): void => {
+        viewers.act(args[0], action);
+      },
+    });
+  }
 
   module.raw.register({
     id: 'plantuml.viewerUpdates',

@@ -114,6 +114,7 @@
   "Zoom In": "拡大",
   "Fit to Window": "全体を表示",
   "Actual Size": "元のサイズで表示",
+  "Zoom to Area": "範囲を拡大",
   "Zoom {0}": "表示倍率 {0}",
   "Exporting PNG…": "PNG を書き出しています…",
   "Creating a {0} × {1} pixel PNG…": "{0} × {1} ピクセルの PNG を作成しています…",
