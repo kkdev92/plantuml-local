@@ -248,8 +248,10 @@ is told only what that comes to — that it was rendered, or why not — once
 drawing settles, and is not told it again until it changes. It also hears the
 zoom the buttons, keys, wheel and *Zoom to Area* leave and what came of a
 copy, and VS Code reads out the notice of an export itself. Tab goes from the
-list through the buttons to the drawing area, showing where the focus is, and
-Enter or Space presses a button.
+list to the zoom buttons, which are one stop, then on through PNG, Copy and
+Copy SVG to the drawing area, showing where the focus is; Enter or Space
+presses a button. On the zoom buttons, the left and right arrow keys move
+between them, round from either end, rather than moving the diagram.
 
 The panel shows the SVG as an image, so nothing in it can run, and loads
 nothing but its own script and stylesheet.
