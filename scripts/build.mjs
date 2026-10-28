@@ -11,6 +11,7 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const outDir = join(root, 'dist');
 const engineDir = join(outDir, 'engine');
 const stdlibDir = join(outDir, 'stdlib');
+const declarationsDir = join(outDir, 'declarations');
 const syntaxesDir = join(outDir, 'syntaxes');
 
 const production = process.argv.includes('--production');
@@ -103,18 +104,38 @@ function writeThemes(to) {
 /**
  * The bundled PlantUML standard library (assets/stdlib/*.json) is data,
  * not code: the worker reads it at runtime, so it is copied rather than
- * bundled. Regenerate it with `npm run generate:stdlib`.
+ * bundled. So is what its files declare (assets/declarations/*.json),
+ * which the completion and the parameter hints read. Regenerate both with
+ * `npm run generate:stdlib`.
  */
 function copyStdlib() {
-  mkdirSync(stdlibDir, { recursive: true });
-
-  const from = join(root, 'assets', 'stdlib');
-  for (const name of readdirSync(from).filter((f) => f.endsWith('.json'))) {
-    const source = join(from, name);
-    const target = join(stdlibDir, name);
-    if (statSync(target, { throwIfNoEntry: false })?.size !== statSync(source).size) {
-      copyFileSync(source, target);
+  for (const [folder, to] of [
+    ['stdlib', stdlibDir],
+    ['declarations', declarationsDir],
+  ]) {
+    mkdirSync(to, { recursive: true });
+    const from = join(root, 'assets', folder);
+    for (const name of readdirSync(from).filter((f) => f.endsWith('.json'))) {
+      const wanted = readFileSync(join(from, name));
+      const target = join(to, name);
+      // Compared whole: a regenerated file can keep its size.
+      const present = readIfPresent(target);
+      if (present === null || !present.equals(wanted)) {
+        writeFileSync(target, wanted);
+      }
     }
+  }
+}
+
+/** A file's bytes, or null when there is no such file: read, not checked first, so nothing can change in between. */
+function readIfPresent(path) {
+  try {
+    return readFileSync(path);
+  } catch (error) {
+    if (error?.code === 'ENOENT') {
+      return null;
+    }
+    throw error;
   }
 }
 

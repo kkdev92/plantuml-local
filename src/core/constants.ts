@@ -180,6 +180,21 @@ export const RENDER_TIMEOUT_MS = 30_000;
 export const INCLUDE_LIMITS = { depth: 32, files: 2048, bytes: 16 * 1024 * 1024 } as const;
 
 /**
+ * What the completion and the parameter hints read in the background
+ * (src/language/macros.ts), within {@link INCLUDE_LIMITS}: a file larger
+ * than `fileBytes` or longer than `fileLines` lines is not read, and is said
+ * not to be; the texts held at once stay within `totalBytes`; and an answer
+ * with more than `results` items is cut there, and said to be partial. What
+ * a render reads does not go by these.
+ */
+export const ANALYSIS_LIMITS = {
+  fileBytes: 2 * 1024 * 1024,
+  fileLines: 50_000,
+  totalBytes: 32 * 1024 * 1024,
+  results: 5_000,
+} as const;
+
+/**
  * How long the render worker may sit idle before it is shut down.
  *
  * The worker holds the engine, the Graphviz WebAssembly and any sprite

@@ -43,7 +43,10 @@ src/
 │                    may be read, reading and watching it, and the editor's
 │                    path completion and Go to Definition
 ├── language/        editing help: completion, templates, folding, symbols, the
-│                    actions above each diagram, quick fixes, Go to Diagram
+│                    actions above each diagram, quick fixes, Go to Diagram, and
+│                    the preprocessor's definitions (what a text declares, what
+│                    is defined where the cursor is, the call it is in) for
+│                    the completion and the parameter hints
 ├── preview/         markdown-it plugin: fence dispatch + cache-and-refresh cycle
 │                    (dependency-injected, no `vscode` import — unit-testable)
 ├── render/          extension-host side of the worker (request/response,
@@ -60,7 +63,8 @@ l10n/                Japanese strings of the extension; the manifest's are in
                      package.nls.ja.json
 scripts/
 ├── build.mjs        esbuild bundling + engine copy + `!theme` table rebuild +
-│                    stdlib copy + happy-dom stubs + licence check + grammar JSON
+│                    stdlib and declarations copy + happy-dom stubs + licence
+│                    check + grammar JSON
 ├── extract-grammar-checklist.mjs  lists what the bundled engine accepts, from
 │                    the upstream PlantUML sources (run by hand; the output is
 │                    committed)
@@ -70,6 +74,9 @@ scripts/
 assets/
 ├── stdlib/          bundled standard-library data (the Azure icons and the C4
 │                    library)
+├── declarations/    what each of those files declares (procedures, functions,
+│                    macros, variables, includes), for the completion and the
+│                    parameter hints
 └── stdlib-sources.json  where that data came from: the upstream commit and the
                      SHA-256 of each file read and written
 test/

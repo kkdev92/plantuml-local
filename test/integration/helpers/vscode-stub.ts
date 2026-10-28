@@ -240,15 +240,29 @@ export interface DefinitionRegistrationStub {
   };
 }
 
+/**
+ * A `vscode.MarkdownString`: its value as VS Code builds it
+ * (src/vs/base/common/htmlContent.ts), and each part appended, as given.
+ */
+export interface MarkdownStringStub {
+  value: string;
+  parts: { kind: 'text' | 'markdown' | 'code'; value: string; language?: string }[];
+  appendText(value: string): MarkdownStringStub;
+  appendMarkdown(value: string): MarkdownStringStub;
+  appendCodeblock(value: string, language?: string): MarkdownStringStub;
+}
+
 /** A `vscode.CompletionItem` as the extension builds it. */
 export interface CompletionItemStub {
-  label: string | { label: string; description?: string };
+  label: string | { label: string; detail?: string; description?: string };
   kind?: number;
   detail?: string;
+  documentation?: string | MarkdownStringStub;
   insertText?: string | { value: string };
   keepWhitespace?: boolean;
   range?: { inserting: { start: PositionStub; end: PositionStub }; replacing: { start: PositionStub; end: PositionStub } };
   sortText?: string;
+  command?: { title: string; command: string; arguments?: unknown[] };
 }
 
 /** A completion provider as registered, with what it was registered for. */
@@ -259,10 +273,65 @@ export interface CompletionRegistrationStub {
     provideCompletionItems(
       document: TextEditorStub['document'],
       position: PositionStub,
-      token?: unknown,
+      token?: { isCancellationRequested: boolean },
       context?: { triggerKind: number; triggerCharacter?: string }
-    ): CompletionItemStub[] | undefined;
+    ): Promise<CompletionItemStub[] | undefined>;
   };
+}
+
+/** A `vscode.ParameterInformation` as the extension builds it. */
+export interface ParameterInformationStub {
+  label: string | [number, number];
+  documentation?: string | MarkdownStringStub;
+}
+
+/** A `vscode.SignatureInformation` as the extension builds it. */
+export interface SignatureInformationStub {
+  label: string;
+  documentation?: string | MarkdownStringStub;
+  parameters: ParameterInformationStub[];
+  activeParameter?: number;
+}
+
+/** A `vscode.SignatureHelp` as the extension builds it. */
+export interface SignatureHelpStub {
+  signatures: SignatureInformationStub[];
+  activeSignature: number;
+  activeParameter: number;
+}
+
+/** A signature help provider as registered, with what it was registered for. */
+export interface SignatureRegistrationStub {
+  selector: unknown;
+  metadata: { triggerCharacters: readonly string[]; retriggerCharacters: readonly string[] };
+  provider: {
+    provideSignatureHelp(
+      document: TextEditorStub['document'],
+      position: PositionStub,
+      token: { isCancellationRequested: boolean },
+      context: {
+        triggerKind: number;
+        triggerCharacter: string | undefined;
+        isRetrigger: boolean;
+        activeSignatureHelp: SignatureHelpStub | undefined;
+      }
+    ): Promise<SignatureHelpStub | undefined>;
+  };
+}
+
+/** A `vscode.LanguageStatusItem` as created, with what the extension set on it. */
+export interface LanguageStatusItemStub {
+  readonly id: string;
+  selector: unknown;
+  name: string | undefined;
+  text: string;
+  detail: string | undefined;
+  severity: number;
+  busy: boolean;
+  command: unknown;
+  /** Whether `dispose` was called. */
+  disposed: boolean;
+  dispose(): void;
 }
 
 /** A `vscode.WebviewPanel` as the stub creates it, with what it was sent. */
@@ -373,6 +442,13 @@ export interface VscodeStub {
       provider: CodeLensRegistrationStub['provider']
     ) => { dispose(): void };
     registerColorProvider: (selector: unknown, provider: ColorRegistrationStub['provider']) => { dispose(): void };
+    registerSignatureHelpProvider: (
+      selector: unknown,
+      provider: SignatureRegistrationStub['provider'],
+      metadata: SignatureRegistrationStub['metadata']
+    ) => { dispose(): void };
+    /** Throws for an id already in use, as VS Code does. */
+    createLanguageStatusItem: (id: string, selector: unknown) => LanguageStatusItemStub;
   };
   Color: new (red: number, green: number, blue: number, alpha: number) => ColorStub;
   ColorInformation: new (range: ColorInformationStub['range'], color: ColorStub) => ColorInformationStub;
@@ -391,9 +467,20 @@ export interface VscodeStub {
   FoldingRange: new (start: number, end: number, kind?: number) => FoldingRangeStub;
   FoldingRangeKind: Record<'Comment' | 'Imports' | 'Region', number>;
   CompletionItem: new (label: CompletionItemStub['label'], kind?: number) => CompletionItemStub;
-  CompletionItemKind: Record<'Text' | 'Variable' | 'Keyword' | 'Value' | 'Snippet' | 'File' | 'Folder', number>;
+  CompletionItemKind: Record<
+    'Text' | 'Method' | 'Function' | 'Variable' | 'Keyword' | 'Value' | 'Snippet' | 'File' | 'Folder' | 'Constant',
+    number
+  >;
   CompletionTriggerKind: Record<'Invoke' | 'TriggerCharacter' | 'TriggerForIncompleteCompletions', number>;
   SnippetString: new (value: string) => { value: string };
+  MarkdownString: new (value?: string) => MarkdownStringStub;
+  SignatureHelp: new () => SignatureHelpStub;
+  SignatureInformation: new (label: string, documentation?: string | MarkdownStringStub) => SignatureInformationStub;
+  ParameterInformation: new (
+    label: string | [number, number],
+    documentation?: string | MarkdownStringStub
+  ) => ParameterInformationStub;
+  SignatureHelpTriggerKind: Record<'Invoke' | 'TriggerCharacter' | 'ContentChange', number>;
   UIKind: Record<'Desktop' | 'Web', number>;
   ProgressLocation: Record<'SourceControl' | 'Window' | 'Notification', number>;
   StatusBarAlignment: Record<'Left' | 'Right', number>;
@@ -597,6 +684,10 @@ export interface VscodeStub {
     codeLensProviders: CodeLensRegistrationStub[];
     /** Colour providers registered, in order. */
     colorProviders: ColorRegistrationStub[];
+    /** Signature help providers registered, in order. */
+    signatureProviders: SignatureRegistrationStub[];
+    /** Language status items created, in order, disposed ones too. */
+    languageStatusItems: LanguageStatusItemStub[];
     /** Webview panels created, in order. */
     webviewPanels: WebviewPanelStub[];
     /** Panel serializers registered, by view type. */
@@ -861,6 +952,81 @@ export function createVscodeStub(): VscodeStub {
   }
   const completionProviders: CompletionRegistrationStub[] = [];
 
+  /** Builds its value as VS Code 1.138.0 does (src/vs/base/common/htmlContent.ts). */
+  class MarkdownString implements MarkdownStringStub {
+    parts: MarkdownStringStub['parts'] = [];
+    constructor(public value = '') {}
+    appendText(value: string): MarkdownString {
+      this.parts.push({ kind: 'text', value });
+      this.value += value
+        .replace(/[\\`*_{}[\]()#+!~]/g, '\\$&')
+        .replace(/^([ \t]*)-/gm, '$1\\-')
+        .replace(/([ \t]+)/g, (_match, spaces: string) => '&nbsp;'.repeat(spaces.length))
+        .replace(/>/gm, '\\>')
+        .replace(/\n/g, '\n\n');
+      return this;
+    }
+    appendMarkdown(value: string): MarkdownString {
+      this.parts.push({ kind: 'markdown', value });
+      this.value += value;
+      return this;
+    }
+    appendCodeblock(value: string, language = ''): MarkdownString {
+      this.parts.push({ kind: 'code', value, language });
+      const longest = Math.max(0, ...(value.match(/^`+/gm) ?? []).map((run) => run.length));
+      const fence = '`'.repeat(longest >= 3 ? longest + 1 : 3);
+      this.value += `\n${fence}${language}\n${value}\n${fence}\n`;
+      return this;
+    }
+  }
+
+  class ParameterInformation implements ParameterInformationStub {
+    constructor(
+      public label: string | [number, number],
+      public documentation?: string | MarkdownStringStub
+    ) {}
+  }
+  class SignatureInformation implements SignatureInformationStub {
+    parameters: ParameterInformationStub[] = [];
+    activeParameter?: number;
+    constructor(
+      public label: string,
+      public documentation?: string | MarkdownStringStub
+    ) {}
+  }
+  class SignatureHelp implements SignatureHelpStub {
+    signatures: SignatureInformationStub[] = [];
+    activeSignature = 0;
+    activeParameter = 0;
+  }
+  const signatureProviders: SignatureRegistrationStub[] = [];
+
+  const languageStatusItems: LanguageStatusItemStub[] = [];
+  /** As VS Code 1.138.0 makes one (src/vs/workbench/api/common/extHostLanguages.ts), less its name, which is the extension's there. */
+  const createLanguageStatusItem = (id: string, selector: unknown): LanguageStatusItemStub => {
+    if (languageStatusItems.some((item) => item.id === id && !item.disposed)) {
+      throw new Error(`LanguageStatusItem with id '${id}' ALREADY exists`);
+    }
+    const registration = track('languages.createLanguageStatusItem');
+    const item: LanguageStatusItemStub = {
+      id,
+      selector,
+      name: undefined,
+      text: '',
+      detail: '',
+      severity: 0,
+      busy: false,
+      command: undefined,
+      disposed: false,
+      dispose: () => {
+        item.disposed = true;
+        registration.dispose();
+      },
+    };
+    languageStatusItems.push(item);
+    return item;
+  };
+
   class FoldingRange implements FoldingRangeStub {
     constructor(
       public start: number,
@@ -1014,9 +1180,25 @@ export function createVscodeStub(): VscodeStub {
     RelativePattern,
     Diagnostic,
     CompletionItem,
-    CompletionItemKind: { Text: 0, Variable: 5, Keyword: 13, Value: 11, Snippet: 14, File: 16, Folder: 18 },
+    CompletionItemKind: {
+      Text: 0,
+      Method: 1,
+      Function: 2,
+      Variable: 5,
+      Keyword: 13,
+      Value: 11,
+      Snippet: 14,
+      File: 16,
+      Folder: 18,
+      Constant: 20,
+    },
     CompletionTriggerKind: { Invoke: 0, TriggerCharacter: 1, TriggerForIncompleteCompletions: 2 },
     SnippetString,
+    MarkdownString,
+    SignatureHelp,
+    SignatureInformation,
+    ParameterInformation,
+    SignatureHelpTriggerKind: { Invoke: 1, TriggerCharacter: 2, ContentChange: 3 },
     FoldingRange,
     FoldingRangeKind: { Comment: 1, Imports: 2, Region: 3 },
     DocumentSymbol,
@@ -1071,6 +1253,11 @@ export function createVscodeStub(): VscodeStub {
         colorProviders.push({ selector, provider });
         return track('languages.registerColorProvider');
       },
+      registerSignatureHelpProvider: (selector, provider, metadata) => {
+        signatureProviders.push({ selector, provider, metadata });
+        return track('languages.registerSignatureHelpProvider');
+      },
+      createLanguageStatusItem,
     },
     EndOfLine: { LF: 1, CRLF: 2 },
     Position,
@@ -1496,6 +1683,8 @@ export function createVscodeStub(): VscodeStub {
       definitionProviders,
       codeLensProviders,
       colorProviders,
+      signatureProviders,
+      languageStatusItems,
       webviewPanels,
       webviewSerializers,
       // Restored panels come with whatever options were saved: none here.

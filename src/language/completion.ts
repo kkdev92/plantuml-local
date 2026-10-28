@@ -508,7 +508,7 @@ export interface NameSuggestions {
  * `bare`, a source without a start line is one diagram, as the engine draws
  * a Markdown block without one.
  */
-function diagramAt(
+export function diagramAt(
   source: string,
   line: number,
   bare: boolean
