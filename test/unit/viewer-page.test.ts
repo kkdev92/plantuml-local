@@ -30,6 +30,7 @@ const labels = {
   zoomLevel: 'Zoom {0}',
   exportPng: 'Export Diagram as PNG',
   copySvgText: 'Copy Diagram as SVG Text',
+  copySvgButton: 'Copy SVG',
   copy: {
     text: 'Copy',
     label: 'Copy Diagram as PNG',

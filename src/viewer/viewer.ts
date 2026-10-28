@@ -146,6 +146,8 @@ export interface ToolbarLabels {
   exportPng: string;
   /** The Copy SVG button, which copies the diagram shown as SVG text. */
   copySvgText: string;
+  /** The words on the Copy SVG button. */
+  copySvgButton: string;
   /**
    * The Copy button, which copies the diagram shown as the PNG button
    * exports it, and what the page says of a copy.
@@ -192,7 +194,8 @@ export function viewerBody(labels: ToolbarLabels, escape: (text: string) => stri
       ` data-copying="${escape(labels.copy.copying)}" data-copied="${escape(labels.copy.copied)}"` +
       ` data-failed="${escape(labels.copy.failed)}" data-unmade="${escape(labels.copy.unmade)}" data-unwritten="${escape(labels.copy.unwritten)}">` +
       `${escape(labels.copy.text)}</button>`,
-    `<button id="copy-svg" type="button" aria-label="${escape(labels.copySvgText)}" title="${escape(labels.copySvgText)}">Copy SVG</button>`,
+    `<button id="copy-svg" type="button" aria-label="${escape(labels.copySvgText)}" title="${escape(labels.copySvgText)}">` +
+      `${escape(labels.copySvgButton)}</button>`,
     '</div>',
     '</div>',
     '</header>',

@@ -492,6 +492,7 @@ describe('viewerBody', () => {
         zoomLevel: 'Zoom {0}',
         exportPng: 'Export Diagram as PNG',
         copySvgText: 'Copy Diagram as SVG Text',
+        copySvgButton: 'Copy SVG',
         copy,
       },
       escape
@@ -539,6 +540,7 @@ describe('viewerBody', () => {
         zoomLevel: 'Zoom {0}',
         exportPng: 'Export Diagram as PNG',
         copySvgText: 'Copy Diagram as SVG Text',
+        copySvgButton: 'Copy SVG',
         copy,
       },
       escape
@@ -565,14 +567,16 @@ describe('viewerBody', () => {
         zoomLevel: '<kbd>{0}',
         exportPng: '<i>',
         copySvgText: '<svg>',
+        copySvgButton: '<del>',
         copy: { text: '<u>', label: '"><s>', copying: '<em>', copied: '"x"', failed: '<q>{0}', unmade: '<p>', unwritten: '<ol>' },
       },
       escape
     );
 
-    for (const tag of ['<script>', '<b>', '<i>', '<u>', '<s>', '<em>', '<q>', '<p>', '<ol>', '<kbd>', '<dfn>']) {
+    for (const tag of ['<script>', '<b>', '<i>', '<u>', '<s>', '<em>', '<q>', '<p>', '<ol>', '<kbd>', '<dfn>', '<del>']) {
       expect(body).not.toContain(tag);
     }
+    expect(body).toContain('title="&lt;svg&gt;">&lt;del&gt;</button>');
     expect(body).toContain('data-spoken="&lt;kbd&gt;{0}"');
     expect(body).toContain('data-copied="&quot;x&quot;"');
     expect(body).toContain('aria-label="&quot;&gt;&lt;script&gt;"');
