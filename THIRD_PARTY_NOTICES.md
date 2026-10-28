@@ -2,10 +2,11 @@
 
 PlantUML Local is distributed under the MIT License (see [LICENSE](LICENSE)).
 
-The published VSIX also contains third-party code, either copied verbatim into
-`dist/engine/` or bundled into `dist/extension.js` / `dist/worker.js`. Their
-copyright notices and licences are reproduced below; the full licence texts are
-in [`third-party/`](third-party).
+The published VSIX also contains third-party code, either taken from
+`@plantuml/core` into `dist/engine/`, generated from the PlantUML standard
+library into `dist/stdlib/`, or bundled into `dist/extension.js` /
+`dist/worker.js`. Their copyright notices and licences are reproduced below;
+the full licence texts are in [`third-party/`](third-party).
 
 | Component | Version | Licence | Full text |
 | --- | --- | --- | --- |
@@ -24,7 +25,7 @@ in [`third-party/`](third-party).
 | [mdurl](https://github.com/markdown-it/mdurl) | 2.1.0 | MIT | [mdurl-LICENSE.txt](third-party/mdurl-LICENSE.txt) |
 | [punycode.js](https://github.com/mathiasbynens/punycode.js) | 2.3.1 | MIT | [punycode-LICENSE.txt](third-party/punycode-LICENSE.txt) |
 | [uc.micro](https://github.com/markdown-it/uc.micro) | 2.1.0 | MIT | [uc-micro-LICENSE.txt](third-party/uc-micro-LICENSE.txt) |
-| [Azure-PlantUML](https://github.com/plantuml-stdlib/Azure-PlantUML) | 2.1.0 | MIT | [azure-plantuml-LICENSE.txt](third-party/azure-plantuml-LICENSE.txt) |
+| [Azure-PlantUML](https://github.com/plantuml-stdlib/Azure-PlantUML) | 2.2.0 | MIT | [azure-plantuml-LICENSE.txt](third-party/azure-plantuml-LICENSE.txt) |
 | [C4-PlantUML](https://github.com/plantuml-stdlib/C4-PlantUML) | 2.14.0 | MIT | [c4-plantuml-LICENSE.txt](third-party/c4-plantuml-LICENSE.txt) |
 | [Open Iconic](https://github.com/iconic/open-iconic) | (in `@plantuml/core`) | MIT | [open-iconic-LICENSE.txt](third-party/open-iconic-LICENSE.txt) |
 | [puml-themes](https://github.com/bschwarz/puml-themes) | (in `@plantuml/core`) | MIT | [puml-themes-LICENSE.txt](third-party/puml-themes-LICENSE.txt) |
@@ -64,7 +65,7 @@ License 2.0) and `sunlust` (GPL 3+) — are left out.
 
 ## Viz.js, Graphviz and Expat
 
-`viz-global.cjs` is Viz.js 3.24.0, copyright (c) 2014-2018 Michael Daines,
+`viz-global.cjs` is Viz.js 3.24.0, copyright (c) Michael Daines,
 licensed under the MIT License. It embeds Graphviz and Expat in WebAssembly
 object code form:
 
@@ -86,9 +87,11 @@ offline. The generator records the hash of every file it reads in
 Copyright (c) 2018-2019 Ricardo Niepel, 2021-2022 Ricardo Niepel and
 contributors. Licensed under the MIT License.
 
-The `dist/` tree of the upstream repository — the Azure icon sprites and the
+The `dist/` tree of Azure-PlantUML 2.2.0 — the Azure icon sprites and the
 `AzureCommon` macros — as the standard library carries it in `stdlib/azure`,
-baked into `dist/stdlib/azure.json`.
+baked into `dist/stdlib/azure.json`. 2.2.0 is the version the standard library
+records, and the upstream release `v2.2`; the header of `AzureCommon.puml`
+still reads 2.1.0.
 
 ### C4-PlantUML
 
