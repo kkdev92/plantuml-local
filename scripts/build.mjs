@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runInNewContext } from 'node:vm';
 import * as esbuild from 'esbuild';
+import { noticesProblems } from './notices.mjs';
 
 const require = createRequire(import.meta.url);
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -205,6 +206,9 @@ function licenceProblem(packageDir, file) {
   return notice === undefined ? undefined : `${file} carries a notice: ${notice.replace(/[\s/*#]+/g, ' ')}`;
 }
 
+/** The folder of the npm package a file of node_modules belongs to. */
+const PACKAGE_DIR = /^(?:.*\/)?node_modules\/(?:@[^/]+\/)?[^/]+/;
+
 /**
  * Fails a bundle that takes code from node_modules under a licence this
  * extension does not ship. A file tree-shaken out entirely does not count.
@@ -216,7 +220,7 @@ const checkLicences = {
       const problems = new Set();
       for (const { inputs } of Object.values(result.metafile?.outputs ?? {})) {
         for (const [file, { bytesInOutput }] of Object.entries(inputs)) {
-          const packageDir = /^(?:.*\/)?node_modules\/(?:@[^/]+\/)?[^/]+/.exec(file)?.[0];
+          const packageDir = PACKAGE_DIR.exec(file)?.[0];
           const problem = packageDir && bytesInOutput > 0 ? licenceProblem(packageDir, file) : undefined;
           if (problem !== undefined) {
             problems.add(problem);
@@ -227,6 +231,31 @@ const checkLicences = {
     });
   },
 };
+
+/**
+ * The npm packages that ship, each with the set of its versions that do:
+ * those whose code reaches a bundle, counted as checkLicences counts them,
+ * and @plantuml/core, whose files copyEngine copies.
+ */
+function shippedPackages(results) {
+  const shipped = new Map();
+  const add = (packageDir) => {
+    const { name, version } = JSON.parse(readFileSync(join(packageDir, 'package.json'), 'utf8'));
+    shipped.set(name, (shipped.get(name) ?? new Set()).add(version));
+  };
+  for (const { metafile } of results) {
+    for (const { inputs } of Object.values(metafile?.outputs ?? {})) {
+      for (const [file, { bytesInOutput }] of Object.entries(inputs)) {
+        const packageDir = PACKAGE_DIR.exec(file)?.[0];
+        if (packageDir && bytesInOutput > 0) {
+          add(packageDir);
+        }
+      }
+    }
+  }
+  add(dirname(require.resolve('@plantuml/core/package.json')));
+  return shipped;
+}
 
 /**
  * The syntax highlighting grammars are TypeScript modules (src/grammar/)
@@ -296,5 +325,14 @@ if (watch) {
   }
   console.log('Watching for changes...');
 } else {
-  await Promise.all(builds.map((options) => esbuild.build(options)));
+  const results = await Promise.all(builds.map((options) => esbuild.build(options)));
+  // The notices name every npm package that ships, at the versions that do:
+  // a dependency update that changes what ships stops here until they
+  // follow. Watch mode rebuilds one bundle at a time and skips this.
+  const problems = noticesProblems(readFileSync(join(root, 'THIRD_PARTY_NOTICES.md'), 'utf8'), shippedPackages(results));
+  if (problems.length > 0) {
+    throw new Error(
+      `${problems.join('\n')}\nBring THIRD_PARTY_NOTICES.md and third-party/ along with the dependency (CONTRIBUTING.md, Pull Requests).`
+    );
+  }
 }

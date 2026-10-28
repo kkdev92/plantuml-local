@@ -167,6 +167,8 @@ Use [Conventional Commits](https://www.conventionalcommits.org/): `feat:`, `fix:
 - Update README / CHANGELOG when behaviour changes.
 - If you add, remove or upgrade a dependency that ships inside the VSIX, update
   [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and `third-party/` to match.
+  The build stops while the table misses an npm package that ships, lists one
+  at other versions than those that ship, or lists one that no longer does.
 
 ## Reporting Issues
 
