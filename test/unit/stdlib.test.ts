@@ -10,7 +10,7 @@ import { installStdlib, rejectScriptLoad } from '../../src/worker/stdlib';
 
 const globals = globalThis as Record<string, unknown>;
 
-function fixtureDir(): string {
+function fixtureDir(json?: Record<string, unknown>): string {
   const dir = mkdtempSync(join(tmpdir(), 'plantuml-stdlib-'));
   writeFileSync(
     join(dir, 'azure.json'),
@@ -21,6 +21,7 @@ function fixtureDir(): string {
         azurecommon: '!define AZURE_COLOR #0072C6\nskinparam shadowing false',
         'compute/azurefunction': 'sprite $AzureFunction [8x8/16] {\n}',
       },
+      ...(json === undefined ? {} : { json }),
     })
   );
   return dir;
@@ -41,7 +42,7 @@ describe('installStdlib', () => {
 
     expect(globals.PLANTUML_STDLIB).toHaveProperty('azure');
     expect(globals.PLANTUML_STDLIB_INFO).toHaveProperty('azure');
-    expect(globals.PLANTUML_STDLIB_JSON).toBeDefined();
+    expect(globals.PLANTUML_STDLIB_JSON).toHaveProperty('azure');
   });
 
   it('marks the library script as loaded so the engine never injects one', () => {
@@ -58,6 +59,7 @@ describe('installStdlib', () => {
     for (const name of ['azure', 'c4']) {
       expect(globals.PLANTUML_STDLIB).toHaveProperty(name);
       expect(globals.PLANTUML_STDLIB_INFO).toHaveProperty(name);
+      expect(globals.PLANTUML_STDLIB_JSON).toHaveProperty(name);
       expect(state[`${name}.min.js`]?.state).toBe('loaded');
     }
   });
@@ -85,6 +87,35 @@ describe('installStdlib', () => {
     expect(azure['compute/nosuchthing']).toBeNull();
   });
 
+  it('serves a library’s JSON files parsed, by the key %load_json looks them up by', () => {
+    // `%load_json('<azure/all.json>')` reads PLANTUML_STDLIB_JSON.azure.all
+    // and writes the value back out as JSON text, so it must be the value
+    // itself rather than the file's text.
+    installStdlib(fixtureDir({ all: ['Compute'] }));
+    const azure = (globals.PLANTUML_STDLIB_JSON as Record<string, Record<string, unknown>>).azure;
+
+    expect(azure?.['all']).toEqual(['Compute']);
+    expect(azure?.['nosuchthing']).toBeNull();
+  });
+
+  it('returns null for a JSON file named like a property every object has', () => {
+    // A diagram names the file; the engine turns a function into no JSON
+    // at all and stops the render.
+    installStdlib(fixtureDir({ all: ['Compute'] }));
+    const azure = (globals.PLANTUML_STDLIB_JSON as Record<string, Record<string, unknown>>).azure;
+
+    expect(azure?.['constructor']).toBeNull();
+    expect(azure?.['__proto__']).toBeNull();
+    expect(azure?.['toString']).toBeNull();
+  });
+
+  it('returns null for every JSON file of a library that has none', () => {
+    installStdlib(fixtureDir());
+    const azure = (globals.PLANTUML_STDLIB_JSON as Record<string, Record<string, unknown>>).azure;
+
+    expect(azure?.['all']).toBeNull();
+  });
+
   it('answers for a script it does not have, on a later tick, so the engine appends none', () => {
     // `!include <aws/…>` is not bundled. Given no loader, the engine
     // appends a <script> to document.head for each such include.
@@ -107,6 +138,7 @@ describe('installStdlib', () => {
     // A diagram without sprites should not pay for the 500 KB asset.
     installStdlib(join(tmpdir(), 'plantuml-stdlib-does-not-exist'));
     expect(globals.PLANTUML_STDLIB).toHaveProperty('azure');
+    expect(globals.PLANTUML_STDLIB_JSON).toHaveProperty('azure');
   });
 });
 
@@ -116,10 +148,11 @@ describe('the bundled libraries', () => {
     commit: string;
     libraries: Record<string, { asset: { path: string; sha256: string }; files: Record<string, string> }>;
   };
-  const asset = (name: string): { library: string; entries: Record<string, string> } =>
+  const asset = (name: string): { library: string; entries: Record<string, string>; json?: Record<string, unknown> } =>
     JSON.parse(readFileSync(join(root, 'assets/stdlib', `${name}.json`), 'utf8')) as {
       library: string;
       entries: Record<string, string>;
+      json?: Record<string, unknown>;
     };
 
   it('are the same in the table, the generated assets and the record of where they came from', () => {
@@ -168,6 +201,31 @@ describe('the bundled libraries', () => {
         expect(text.includes(String.fromCharCode(13)), `${name}/${key}`).toBe(false);
       }
     }
+  });
+
+  it('hand the engine no line that is only @startuml or @enduml', () => {
+    // PlantUML's standard library leaves these lines out of the files it
+    // gives the engine, which reads one in an included file as a syntax
+    // error. `azure/all` is written between them upstream.
+    for (const { name } of BUNDLED_LIBRARIES) {
+      for (const [key, text] of Object.entries(asset(name).entries)) {
+        const markers = text.split('\n').filter((line) => /^@(?:startuml|enduml)$/.test(line.trim()));
+        expect(markers, `${name}/${key}`).toEqual([]);
+      }
+    }
+  });
+
+  it('bundle the list of categories azure/all includes, each of which is bundled', () => {
+    // `azure/all` reads the list with %load_json and includes the `all` of
+    // each category in it.
+    const azure = asset('azure');
+    const categories = azure.json?.['all'];
+    expect(Array.isArray(categories)).toBe(true);
+    expect((categories as unknown[]).length).toBeGreaterThan(0);
+    for (const category of categories as string[]) {
+      expect(azure.entries, category).toHaveProperty([`${category.toLowerCase()}/all`]);
+    }
+    expect(Object.keys(sources.libraries.azure?.files ?? {})).toContain('stdlib/azure/all.json');
   });
 
   it('are looked up whatever the case an include writes them in', () => {

@@ -22,6 +22,10 @@ import { BUNDLED_LIBRARIES } from '../core/libraries';
  *   (`<azure/Compute/AzureFunction>` -> `compute/azurefunction`). The
  *   value must be an **array of lines**; a single string with newlines is
  *   rejected by the parser.
+ * - `window.PLANTUML_STDLIB_JSON[library][key]` holds the library's JSON
+ *   files, parsed, keyed the same way without `.json`: what
+ *   `%load_json('<azure/all.json>')` reads. `<azure/all>` includes each
+ *   category that file lists.
  * - `window.PLANTUML_STDLIB_INFO[library]` is read for library metadata.
  * - `window.__pl_script_state[<library>.min.js]` marked as `loaded` stops
  *   the script-injection path from running at all.
@@ -37,6 +41,8 @@ interface StdlibFile {
   upstream: string;
   license: string;
   entries: Record<string, string>;
+  /** Absent for a library without JSON files. */
+  json?: Record<string, unknown>;
 }
 
 interface ScriptState {
@@ -45,12 +51,17 @@ interface ScriptState {
   err: ((message: string) => void)[];
 }
 
+/** Reads a library's asset the first time it is called, and returns that from then on. */
+function lazyAsset(stdlibDir: string, library: string): () => StdlibFile {
+  let file: StdlibFile | null = null;
+  return () => (file ??= JSON.parse(readFileSync(join(stdlibDir, `${library}.json`), 'utf8')) as StdlibFile);
+}
+
 /**
  * Lazily reads assets and hands the engine arrays of lines. Missing keys
  * return null, which is what the engine expects for "not in this library".
  */
-function createLibraryProxy(stdlibDir: string, library: string): Record<string, string[] | null> {
-  let entries: Record<string, string> | null = null;
+function createLibraryProxy(asset: () => StdlibFile): Record<string, string[] | null> {
   const lines = new Map<string, string[]>();
 
   return new Proxy(
@@ -60,9 +71,7 @@ function createLibraryProxy(stdlibDir: string, library: string): Record<string, 
         if (typeof property === 'symbol') {
           return null;
         }
-        entries ??= (
-          JSON.parse(readFileSync(join(stdlibDir, `${library}.json`), 'utf8')) as StdlibFile
-        ).entries;
+        const { entries } = asset();
 
         const cached = lines.get(property);
         if (cached !== undefined) {
@@ -82,6 +91,27 @@ function createLibraryProxy(stdlibDir: string, library: string): Record<string, 
 }
 
 /**
+ * Lazily reads assets and hands the engine a JSON file's value; null for a
+ * file the library does not have. The name comes from the diagram, so only
+ * the asset's own keys count: `constructor` would otherwise be a function,
+ * which the engine cannot write as JSON, and the render would stop.
+ */
+function createJsonProxy(asset: () => StdlibFile): Record<string, unknown> {
+  return new Proxy(
+    {},
+    {
+      get(_target, property: string | symbol): unknown {
+        if (typeof property === 'symbol') {
+          return null;
+        }
+        const { json } = asset();
+        return json !== undefined && Object.hasOwn(json, property) ? json[property] : null;
+      },
+    }
+  );
+}
+
+/**
  * Installs the bundled libraries on `globalThis`. Must run before
  * `plantuml.js` is imported.
  */
@@ -89,6 +119,7 @@ export function installStdlib(stdlibDir: string): void {
   const globals = globalThis as Record<string, unknown>;
 
   const stdlib: Record<string, Record<string, string[] | null>> = {};
+  const json: Record<string, Record<string, unknown>> = {};
   const info: Record<string, { version: string }> = {};
   const scriptState: Record<string, ScriptState> = {};
 
@@ -96,7 +127,9 @@ export function installStdlib(stdlibDir: string): void {
   // lower-cased name the engine looks it up by, whatever case the include
   // writes it in.
   for (const { name: library } of BUNDLED_LIBRARIES) {
-    stdlib[library] = createLibraryProxy(stdlibDir, library);
+    const asset = lazyAsset(stdlibDir, library);
+    stdlib[library] = createLibraryProxy(asset);
+    json[library] = createJsonProxy(asset);
     info[library] = { version: 'bundled' };
     // Pretend the library's script is already loaded: the engine then
     // reads PLANTUML_STDLIB directly and never touches document.head.
@@ -105,7 +138,7 @@ export function installStdlib(stdlibDir: string): void {
 
   globals.PLANTUML_STDLIB = stdlib;
   globals.PLANTUML_STDLIB_INFO = info;
-  globals.PLANTUML_STDLIB_JSON = {};
+  globals.PLANTUML_STDLIB_JSON = json;
   globals.__pl_script_state = scriptState;
   globals.PLANTUML_STDLIB_LOADER = refuseScript;
 }

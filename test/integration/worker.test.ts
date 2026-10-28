@@ -701,6 +701,41 @@ describe('render worker (dist)', () => {
       expect(payloads.size).toBe(2);
     });
 
+    it('resolves !include <azure/all>, every category of icons at once', async () => {
+      // azure/all reads the list of categories with %load_json and includes
+      // the `all` of each, so two icons of different categories draw.
+      const svg = await render(
+        [
+          '@startuml',
+          '!include <azure/all>',
+          'AzureFunction(fn, "API", "Functions")',
+          'AzureCosmosDb(db, "DB", "Cosmos DB")',
+          'fn --> db',
+          '@enduml',
+        ].join('\n')
+      );
+
+      expect(recognizeEngineError(svg)).toBeNull();
+      expect(svg).toContain('«AzureFunction»');
+      expect(svg).toContain('«AzureCosmosDb»');
+      const payloads = new Set(svg.match(/base64,iVBORw0KGg[A-Za-z0-9+/=]+/g) ?? []);
+      expect(payloads.size).toBe(2);
+    });
+
+    it.each([
+      ['the list of categories', 'all', 'size 22'],
+      ['a file the library does not have', 'nosuch', 'size 3'],
+      ['a file named like a property every object has', 'constructor', 'size 3'],
+      ['a file named like the prototype', '__proto__', 'size 3'],
+    ])('loads %s as JSON, or the default it is given', async (_what, name, shown) => {
+      const svg = await render(
+        ['@startuml', `!$x = %load_json("<azure/${name}.json>", "[1, 2, 3]")`, 'rectangle "size %size($x)"', '@enduml'].join('\n')
+      );
+
+      expect(recognizeEngineError(svg)).toBeNull();
+      expect(svg).toContain(`>${shown}<`);
+    });
+
     it('fails fast on a library that is not bundled', async () => {
       // The engine falls back to injecting <script src="aws.min.js">. Left
       // alone that never settles and the render dies on the 30 s timeout.

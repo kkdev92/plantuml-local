@@ -24,8 +24,13 @@
  *
  * The engine reads libraries from `window.PLANTUML_STDLIB[library][key]`
  * where `key` is the include path, lower-cased and without the `.puml`
- * extension (`<azure/Compute/AzureFunction>` -> `compute/azurefunction`).
- * See src/worker/stdlib.ts for the runtime side.
+ * extension (`<azure/Compute/AzureFunction>` -> `compute/azurefunction`),
+ * and the JSON files `%load_json('<azure/all.json>')` names from
+ * `window.PLANTUML_STDLIB_JSON[library][key]`, keyed the same way without
+ * `.json`. As in the bundles the standard library builds for the engine,
+ * the `.puml` files are stored without the lines that are only `@startuml`
+ * or `@enduml`, and the JSON files parsed. See src/worker/stdlib.ts for the
+ * runtime side.
  *
  * Usage: node scripts/generate-stdlib.mjs
  */
@@ -56,7 +61,7 @@ const COMMIT = 'a31ac1a87cbdaa3339d1a551dc971c85f8359d5d';
  * `name` is the library as the engine looks it up, lower-cased;
  * `directory` is its folder under stdlib/ upstream. A library with `files`
  * bundles those files of its folder and nothing else; one without bundles
- * every `.puml` in its folder.
+ * every `.puml` and `.json` in its folder.
  *
  * The other cloud icon sets are deliberately absent. Both `awslib20` and
  * `gcp` state in their READMEs that "the icons provided in this package
@@ -92,6 +97,13 @@ const SKIP_DIRECTORIES = new Set(['_examples_']);
 
 /** The byte-order mark one C4 file starts with. */
 const BOM = String.fromCharCode(0xfeff);
+
+/**
+ * Lines the standard library leaves out of every `.puml` file it bundles
+ * for the engine, which reads one in an included file as a syntax error.
+ * `azure/all` is written between them.
+ */
+const MARKERS = new Set(['@startuml', '@enduml']);
 
 function git(args, cwd) {
   execFileSync('git', args, { cwd, stdio: ['ignore', 'ignore', 'inherit'] });
@@ -153,24 +165,45 @@ function readSource(full, blobs, sources) {
   }
   sources[path] = sha256(bytes);
   const text = bytes.toString('utf8');
-  // Stored as one string; the worker splits it into lines on demand,
-  // which is the shape the engine requires.
   return (text.startsWith(BOM) ? text.slice(BOM.length) : text).replace(/\r\n/g, '\n');
 }
 
-function collect(dir, base, blobs, entries, sources) {
+/**
+ * A `.puml` file as the engine includes it: without the {@link MARKERS}
+ * lines. Stored as one string; the worker splits it into lines on demand,
+ * which is the shape the engine requires.
+ */
+function readPuml(full, blobs, sources) {
+  return readSource(full, blobs, sources)
+    .split('\n')
+    .filter((line) => !MARKERS.has(line.trim()))
+    .join('\n');
+}
+
+/** The key the engine looks a file up by: its path in the library, lower-cased and without the extension. */
+function keyOf(full, base, extension) {
+  return relative(base, full).split(sep).join(posix.sep).slice(0, -extension.length).toLowerCase();
+}
+
+function collect(dir, base, blobs, entries, json, sources) {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const full = join(dir, entry.name);
     if (entry.isDirectory()) {
       if (!SKIP_DIRECTORIES.has(entry.name)) {
-        collect(full, base, blobs, entries, sources);
+        collect(full, base, blobs, entries, json, sources);
       }
     } else if (entry.name.endsWith('.puml')) {
-      const key = relative(base, full).split(sep).join(posix.sep).replace(/\.puml$/i, '').toLowerCase();
+      const key = keyOf(full, base, '.puml');
       if (key in entries) {
         throw new Error(`Duplicate include key after lower-casing: ${key}`);
       }
-      entries[key] = readSource(full, blobs, sources);
+      entries[key] = readPuml(full, blobs, sources);
+    } else if (entry.name.endsWith('.json')) {
+      const key = keyOf(full, base, '.json');
+      if (key in json) {
+        throw new Error(`Duplicate JSON key after lower-casing: ${key}`);
+      }
+      json[key] = JSON.parse(readSource(full, blobs, sources));
     }
   }
 }
@@ -185,15 +218,17 @@ const record = { source: SOURCE, commit: COMMIT, libraries: {} };
 for (const library of LIBRARIES) {
   /** @type {Record<string, string>} */
   const entries = {};
+  /** @type {Record<string, unknown>} */
+  const json = {};
   /** @type {Record<string, string>} */
   const sources = {};
   const base = join(tempDir, 'stdlib', library.directory);
   const blobs = committedBlobs(library.directory);
   if (library.files === undefined) {
-    collect(base, base, blobs, entries, sources);
+    collect(base, base, blobs, entries, json, sources);
   } else {
     for (const name of library.files) {
-      entries[name.toLowerCase()] = readSource(join(base, `${name}.puml`), blobs, sources);
+      entries[name.toLowerCase()] = readPuml(join(base, `${name}.puml`), blobs, sources);
     }
   }
 
@@ -201,9 +236,17 @@ for (const library of LIBRARIES) {
   if (count === 0) {
     throw new Error(`No .puml files found for ${library.name}`);
   }
+  const jsonCount = Object.keys(json).length;
 
   const out = join(outDir, `${library.name}.json`);
-  const asset = JSON.stringify({ library: library.name, upstream: library.upstream, license: library.license, entries });
+  const asset = JSON.stringify({
+    library: library.name,
+    upstream: library.upstream,
+    license: library.license,
+    entries,
+    // Only a library that has JSON files gets the field.
+    ...(jsonCount > 0 ? { json } : {}),
+  });
   writeFileSync(out, asset);
   record.libraries[library.name] = {
     upstream: library.upstream,
@@ -212,7 +255,8 @@ for (const library of LIBRARIES) {
     files: Object.fromEntries(Object.entries(sources).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))),
   };
   console.log(
-    `  ${library.name.padEnd(6)} ${String(count).padStart(4)} files -> ${relative(root, out)} ` +
+    `  ${library.name.padEnd(6)} ${String(count).padStart(4)} files` +
+      `${jsonCount > 0 ? ` + ${String(jsonCount)} JSON` : ''} -> ${relative(root, out)} ` +
       `(${(statSync(out).size / 1024).toFixed(0)} KB)`
   );
 }

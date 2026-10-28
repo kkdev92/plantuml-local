@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`!include <azure/all>` works.** It includes every category of the Azure
+  icons at once, and failed with a syntax error at its first line instead:
+  the extension gave the engine the file with the `@startuml` and `@enduml`
+  lines it is written between, which PlantUML's standard library leaves out
+  of what it hands the engine, and without the list of categories the file
+  reads with `%load_json`. The file now reaches the engine without those
+  lines, and the list ships with the library.
+
 ## [0.17.0] - 2026-10-28
 
 ### Added

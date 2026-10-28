@@ -7,7 +7,7 @@
       "license": "MIT",
       "asset": {
         "path": "assets/stdlib/azure.json",
-        "sha256": "7879883d93345d760ef26b020b75fb793d5eb4745ec488b3fc783df16a529b9e"
+        "sha256": "94aae9c9bb70b849f2707372b7fa20f4632c45ced27bc5331927e86b1e68a617"
       },
       "files": {
         "stdlib/azure/AIMachineLearning/AzureBatchAI.puml": "145c0f949dc52f3f1e4f61b8e42953b17dcc91b34942c9cff9347b649727c0c2",
@@ -300,6 +300,7 @@
         "stdlib/azure/Web/AzureSignalRService.puml": "f7adc45e86cd88afc385e98ccb52d68dcdf5d5db94cdada0006220efd0642ddc",
         "stdlib/azure/Web/AzureWebApp.puml": "559fdf04edaf073a1b6457d465efeb296fc2c2f67a584d689ada3048c72cfcf0",
         "stdlib/azure/Web/all.puml": "2e02816c22f2c05a63e5dcf32d5a846a57b2d4c532ccba56ad2f1105299273a2",
+        "stdlib/azure/all.json": "2f8b8432f9db02ff4e3e87c6f12686d88b314dc494931eefef81d2006aa68a69",
         "stdlib/azure/all.puml": "e2e44700a85b46fead6b5d40fd6735cf767c38a5d64837cc87dbb3e74e2a7e84"
       }
     },
