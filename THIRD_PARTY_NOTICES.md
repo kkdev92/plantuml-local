@@ -91,7 +91,9 @@ The `dist/` tree of Azure-PlantUML 2.2.0 — the Azure icon sprites and the
 `AzureCommon` macros — as the standard library carries it in `stdlib/azure`,
 baked into `dist/stdlib/azure.json`. 2.2.0 is the version the standard library
 records, and the upstream release `v2.2`; the header of `AzureCommon.puml`
-still reads 2.1.0.
+still reads 2.1.0. The standard library adds two files to that folder, which
+ship as well: `all.puml`, which includes every category at once, and
+`all.json`, the list of categories it reads.
 
 ### C4-PlantUML
 
