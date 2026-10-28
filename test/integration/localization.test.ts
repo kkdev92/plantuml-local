@@ -59,6 +59,41 @@ describe('Japanese UI (dist)', () => {
       .toContain('URL を指定したファイルやテーマの読み込み');
   });
 
+  it('writes the words on the .puml preview’s buttons in Japanese', async () => {
+    const text = '@startuml\nAlice -> Bob\n@enduml';
+    const path = '/c/japanese/flows.puml';
+    stub._test.setActiveEditor({
+      document: {
+        languageId: 'plantuml',
+        version: 1,
+        isUntitled: false,
+        uri: { toString: () => `file://${path}`, scheme: 'file', path, fsPath: path },
+        getText: () => text,
+        lineAt: (line) => {
+          const lineText = text.split('\n')[line] ?? '';
+          return { text: lineText, range: new stub.Range(line, 0, line, lineText.length), firstNonWhitespaceCharacterIndex: 0 };
+        },
+        setText: () => undefined,
+      },
+      selection: { active: { line: 0 } },
+    });
+    const before = stub._test.webviewPanels.length;
+    await stub._test.registeredCommands.get('plantumlLocal.openPreviewToSide')?.();
+    const html = stub._test.webviewPanels[before]?.webview.html ?? '';
+
+    // All but PNG, a format, and 100%, a size, which read the same in either language.
+    for (const [id, english] of [
+      ['fit', 'Fit to Window'],
+      ['area', 'Zoom to Area'],
+      ['copy-png', 'Copy'],
+      ['copy-svg', 'Copy SVG'],
+    ] as const) {
+      const words = new RegExp(`<button id="${id}"[^>]*>([^<]*)</button>`).exec(html)?.[1];
+      expect(words, id).toBe(translations[english]);
+    }
+    expect([...untranslated]).toEqual([]);
+  });
+
   it('explains a real engine syntax error in Japanese above its original SVG', async () => {
     const source = '```plantuml\n@startuml\nAlice -> Bob\nthis is invalid ;;; [[[\n@enduml\n```';
     let html = md.render(source);

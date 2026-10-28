@@ -16,6 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   of what it hands the engine, and without the list of categories the file
   reads with `%load_json`. The file now reaches the engine without those
   lines, and the list ships with the library.
+- **The words on the `.puml` preview's Copy SVG button are translated.** They
+  were English whatever the display language, while the button's tooltip and
+  the words on the other buttons were translated.
 
 ## [0.17.0] - 2026-10-28
 

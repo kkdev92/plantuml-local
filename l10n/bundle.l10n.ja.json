@@ -146,6 +146,7 @@
   "Export SVG": "SVG に書き出す",
   "Export PNG": "PNG に書き出す",
   "Copy Diagram as SVG Text": "図を SVG テキストとしてコピー",
+  "Copy SVG": "SVG をコピー",
   "Open a Markdown file to go to one of its diagrams.": "Markdown ファイルを開いてから、図へ移動してください。",
   "Diagram without a name": "名前のない図",
   "line {0}": "{0} 行目",

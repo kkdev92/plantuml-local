@@ -1652,6 +1652,7 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         zoomLevel: l10n.t('Zoom {0}', '{0}'),
         exportPng: l10n.t('Export Diagram as PNG'),
         copySvgText: l10n.t('Copy Diagram as SVG Text'),
+        copySvgButton: l10n.t('Copy SVG'),
         copy: {
           text: l10n.t('Copy'),
           label: l10n.t('Copy Diagram as PNG'),
