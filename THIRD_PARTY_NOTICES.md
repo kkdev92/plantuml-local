@@ -12,8 +12,8 @@ the full licence texts are in [`third-party/`](third-party).
 | --- | --- | --- | --- |
 | [`@plantuml/core`](https://www.npmjs.com/package/@plantuml/core) | 1.2026.9 | MIT | [plantuml-core-LICENSE.txt](third-party/plantuml-core-LICENSE.txt) |
 | [Viz.js](https://github.com/mdaines/viz-js) | 3.24.0 | MIT | [viz-js-LICENSE.txt](third-party/viz-js-LICENSE.txt) |
-| [Graphviz](https://graphviz.org/) | (in Viz.js WebAssembly) | EPL-1.0 | [graphviz-LICENSE.txt](third-party/graphviz-LICENSE.txt) |
-| [Expat](https://libexpat.github.io/) | (in Viz.js WebAssembly) | MIT | [expat-LICENSE.txt](third-party/expat-LICENSE.txt) |
+| [Graphviz](https://graphviz.org/) | 14.1.1 | EPL-1.0 | [graphviz-LICENSE.txt](third-party/graphviz-LICENSE.txt) |
+| [Expat](https://libexpat.github.io/) | 2.7.3 | MIT | [expat-LICENSE.txt](third-party/expat-LICENSE.txt) |
 | [happy-dom](https://github.com/capricorn86/happy-dom) | 21.0.4 | MIT | [happy-dom-LICENSE.txt](third-party/happy-dom-LICENSE.txt) |
 | [entities](https://github.com/fb55/entities) | 4.5.0, 7.0.1 | BSD-2-Clause | [entities-LICENSE.txt](third-party/entities-LICENSE.txt) |
 | [whatwg-mimetype](https://github.com/jsdom/whatwg-mimetype) | 3.0.0 | MIT | [whatwg-mimetype-LICENSE.txt](third-party/whatwg-mimetype-LICENSE.txt) |
@@ -66,8 +66,8 @@ License 2.0) and `sunlust` (GPL 3+) — are left out.
 ## Viz.js, Graphviz and Expat
 
 `viz-global.cjs` is Viz.js 3.24.0, copyright (c) Michael Daines,
-licensed under the MIT License. It embeds Graphviz and Expat in WebAssembly
-object code form:
+licensed under the MIT License. It embeds Graphviz 14.1.1 and Expat 2.7.3 in
+WebAssembly object code form:
 
 - Graphviz is licensed under the Eclipse Public License, Version 1.0
 - Expat is licensed under the MIT License
