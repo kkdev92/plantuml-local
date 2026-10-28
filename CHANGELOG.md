@@ -83,6 +83,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   sizes, *Fit to Window* left the diagram a fraction of a pixel larger than
   the panel, which then showed a scroll bar and scrolled by a hair. The
   diagram is now fitted to the panel's size rounded down.
+- **A drag in the `.puml` preview ends when the button is let go outside
+  the panel.** The page did not hear the button come up outside the panel,
+  so the diagram went on following the pointer once it came back, with no
+  button down, until the next click. The drag now ends there.
 
 ## [0.16.0] - 2026-10-27
 
