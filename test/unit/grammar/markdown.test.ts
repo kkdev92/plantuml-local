@@ -20,6 +20,12 @@ async function expectMarkdown(markdown: string, expectations: readonly Expectati
 
 const diagram = '@startuml\nAlice -> Bob : hi\n@enduml';
 
+// The first "every grammar case" test to run with each Markdown grammar
+// (with and without the catch-all) compiles the regular expressions of
+// the PlantUML rules the cases reach, which takes seconds; the rest reuse
+// them.
+const EVERY_CASE = { timeout: 30_000 };
+
 describe('markdown injection', () => {
   it('highlights a backtick fence', async () => {
     await expectMarkdown(`Text\n\n\`\`\`plantuml\n${diagram}\n\`\`\`\n\nAfter`, [
@@ -96,7 +102,7 @@ describe('markdown injection', () => {
     expect(endDepth).toBe(1);
   });
 
-  it('gives every grammar case the same scopes inside a fence', async () => {
+  it('gives every grammar case the same scopes inside a fence', EVERY_CASE, async () => {
     const failures: string[] = [];
     for (const c of allCases) {
       const markdown = `Text before.\n\n\`\`\`plantuml\n${c.source}\n\`\`\`\n`;
@@ -107,7 +113,7 @@ describe('markdown injection', () => {
     expect(failures).toEqual([]);
   });
 
-  it('gives every grammar case the same scopes inside a fence in a block quote', async () => {
+  it('gives every grammar case the same scopes inside a fence in a block quote', EVERY_CASE, async () => {
     const failures: string[] = [];
     for (const c of allCases) {
       const quoted = `\`\`\`plantuml\n${c.source}\n\`\`\``.replace(/^/gm, '> ');
@@ -121,7 +127,7 @@ describe('markdown injection', () => {
     expect(failures).toEqual([]);
   });
 
-  it('gives every grammar case the same scopes inside a fence in a list item', async () => {
+  it('gives every grammar case the same scopes inside a fence in a list item', EVERY_CASE, async () => {
     const failures: string[] = [];
     for (const c of allCases) {
       const indented = `\`\`\`plantuml\n${c.source}\n\`\`\``.replace(/^/gm, '   ');
@@ -207,7 +213,7 @@ describe('markdown injection after another grammar has claimed every fence', () 
     expect(endDepth).toBe(1);
   });
 
-  it('gives every grammar case the same scopes inside a claimed fence', async () => {
+  it('gives every grammar case the same scopes inside a claimed fence', EVERY_CASE, async () => {
     const failures: string[] = [];
     for (const c of allCases) {
       const markdown = `Text before.\n\n\`\`\`plantuml\n${c.source}\n\`\`\`\n`;
