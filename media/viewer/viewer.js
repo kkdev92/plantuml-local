@@ -328,6 +328,22 @@
   buttons.actual.addEventListener('click', actual);
   buttons.area.addEventListener('click', () => setMarking(!marking));
 
+  // The zoom buttons are a toolbar, one stop for Tab: the button used last,
+  // the first until then. The left and right arrow keys move between them
+  // (the keydown listener).
+  const tools = [...document.querySelectorAll('#tools button')];
+  function rove(to) {
+    for (const button of tools) {
+      button.tabIndex = button === to ? 0 : -1;
+    }
+  }
+  rove(tools[0]);
+  document.getElementById('tools').addEventListener('focusin', (event) => {
+    if (tools.includes(event.target)) {
+      rove(event.target);
+    }
+  });
+
   // A plain wheel scrolls, and Shift sideways, as anywhere. With Ctrl (Cmd
   // on macOS), or as a touchpad pinch, which arrives the same way, it zooms
   // at the pointer.
@@ -440,6 +456,14 @@
   // sideways, as it does the wheel.
   document.addEventListener('keydown', (event) => {
     if (size === null || event.ctrlKey || event.metaKey || event.altKey || event.target === select) {
+      return;
+    }
+    // On the toolbar, left and right go to the button before or after,
+    // round from either end, rather than scrolling.
+    const tool = tools.indexOf(event.target);
+    if (tool !== -1 && !event.shiftKey && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) {
+      tools[(tool + (event.key === 'ArrowRight' ? 1 : tools.length - 1)) % tools.length].focus();
+      event.preventDefault();
       return;
     }
     const step = event.shiftKey ? 200 : 40;

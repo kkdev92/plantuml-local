@@ -87,6 +87,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the panel.** The page did not hear the button come up outside the panel,
   so the diagram went on following the pointer once it came back, with no
   button down, until the next click. The drag now ends there.
+- **The `.puml` preview's zoom buttons are one stop for Tab.** They are
+  marked as a toolbar, whose buttons are moved between with the arrow keys,
+  but each was a stop for Tab and the arrow keys scrolled the diagram. Tab
+  now stops once on the zoom buttons, at the one used last; there the left
+  and right arrow keys move between them, round from either end, and Tab
+  goes on to PNG. The up and down arrow keys, `Home` and `End` still move
+  the diagram.
 
 ## [0.16.0] - 2026-10-27
 
