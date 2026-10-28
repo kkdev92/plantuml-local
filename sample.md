@@ -236,6 +236,26 @@ fn --> blob
 @enduml
 ```
 
+## C4 model (bundled library, no network)
+
+C4's colours are made for a white page, so in a dark editor a C4 diagram that picks no theme gets the light palette, as the Azure one above does.
+
+```plantuml
+@startuml
+!include <C4/C4_Context>
+
+Person(customer, "Customer", "Buys from the web shop")
+System(shop, "Web shop", "Takes and tracks orders")
+System_Ext(payments, "Payment service", "Charges cards")
+System_Ext(mail, "Mail service", "Sends receipts")
+
+Rel(customer, shop, "Places orders", "HTTPS")
+Rel(shop, payments, "Charges the card", "HTTPS")
+Rel(shop, mail, "Sends the receipt", "SMTP")
+SHOW_LEGEND()
+@enduml
+```
+
 ## Sprite written straight into the diagram
 
 ```plantuml
@@ -299,6 +319,8 @@ stop
 
 In a block, suggestions open on `@` or `!` at the start of a line, on `!theme ` and on `<&`. Outside a block, type `puml` and press `Ctrl+Space` for a whole block from one of sixteen templates, or run *PlantUML Local: Insert Diagram Template*.
 
+Elsewhere in a block, `Ctrl+Space` lists what that diagram holds: its aliases with the names they show — `Shop` with `Web shop` in the block below — and its words. On a line of its own, a sequence diagram such as this one also offers snippets of `alt`, `opt`, `loop`, `par`, `ref` and `note`, and an activity diagram of `if`, `while`, `repeat` and `fork`, with their parts to tab through.
+
 A swatch sits beside each colour a diagram sets, such as the two below; clicking it opens VS Code's colour picker, and the pick is written back as `#RRGGBB`.
 
 ```plantuml
@@ -327,6 +349,14 @@ Alice -> Bob
 ```plantuml
 @startuml
 Alice -> Bob : <math>x^2 + y^2 = z^2</math>
+@enduml
+```
+
+### An image from a file (drawn as text, with a note)
+
+```plantuml
+@startuml
+Alice -> Bob : <img:logo.png> Signed
 @enduml
 ```
 
