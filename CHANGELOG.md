@@ -94,6 +94,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and right arrow keys move between them, round from either end, and Tab
   goes on to PNG. The up and down arrow keys, `Home` and `End` still move
   the diagram.
+- **The `.puml` preview's buttons keep to the right when a narrow panel
+  wraps them.** The zoom buttons kept to the right only while they fitted
+  on one row; in a narrower panel they wrapped from its left edge, while
+  PNG and the Copy buttons stayed at the right. *Zoom to Area*, new among
+  the zoom buttons, has them wrap in a wider panel than before. Every row
+  of buttons now keeps to the right.
 
 ## [0.16.0] - 2026-10-27
 
