@@ -73,6 +73,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   in a high contrast theme the ring only recoloured the border. It is now
   drawn around the control, 2 px out, as VS Code draws it around its own
   buttons.
+- **The `.puml` preview keeps its view while the panel resizes.** A PNG
+  export opens a panel beside the editor for a moment, and VS Code lays the
+  editors out again around it, so the preview took several sizes within
+  half a second; a zoomed-in view could end up moved to one side, and stay
+  there. The point at the centre of the view is now kept however quickly
+  the panel resizes, and a view scrolled to an edge comes back to it.
 
 ## [0.16.0] - 2026-10-27
 
