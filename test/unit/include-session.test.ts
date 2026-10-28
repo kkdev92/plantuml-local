@@ -419,22 +419,27 @@ describe('IncludeSession and the palette', () => {
     await mkdir(root, { recursive: true });
     await writeFile(join(root, 'styles.iuml'), "' shared look\n!theme cerulean\nskinparam shadowing false\n");
     await writeFile(join(root, 'icons.iuml'), '!include <azure/AzureCommon>\n');
+    await writeFile(join(root, 'c4.iuml'), '!include <C4/C4_Container>\n');
   });
 
   afterEach(async () => {
     await rm(temp, { recursive: true, force: true });
   });
 
-  it('keeps the !theme lines of the files delivered, and whether one brings the Azure icons', async () => {
-    const session = new IncludeSession(
-      { available: true, scope: { root, documentFolder: root, searchFolders: [] } },
-      () => undefined
-    );
-    expect(session.themes).toEqual([]);
-    expect(session.azure).toBe(false);
-    await session.load('styles.iuml', null);
-    await session.load('icons.iuml', null);
-    expect(session.themes).toEqual(['!theme cerulean']);
-    expect(session.azure).toBe(true);
-  });
+  it.each(['icons.iuml', 'c4.iuml'])(
+    'keeps the !theme lines of the files delivered, and whether one brings a bundled library: %s',
+    async (library) => {
+      const session = new IncludeSession(
+        { available: true, scope: { root, documentFolder: root, searchFolders: [] } },
+        () => undefined
+      );
+      expect(session.themes).toEqual([]);
+      expect(session.whitePageLibrary).toBe(false);
+      await session.load('styles.iuml', null);
+      expect(session.whitePageLibrary).toBe(false);
+      await session.load(library, null);
+      expect(session.themes).toEqual(['!theme cerulean']);
+      expect(session.whitePageLibrary).toBe(true);
+    }
+  );
 });

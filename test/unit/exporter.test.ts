@@ -82,6 +82,7 @@ function makeDeps(
     pagesMessage: 'no pages',
     formulaMessage: (tag: string): string => `formula ${tag}`,
     embeddedDiagramMessage: 'embedded',
+    imageMessage: 'image',
     engineErrorMessage: (message: string, line: number | null): string =>
       `engine: ${message} @ ${String(line)}`,
     pngTooLargeMessage: (width: number, height: number, fits: number | null): string =>
@@ -169,11 +170,13 @@ describe('exportOne', () => {
 
   it('notes what the engine drew the diagram without, for the report', async () => {
     const deps = makeDeps();
-    const [block] = findPlantUmlBlocks('```plantuml\n@startuml\nA -> B : <math>x</math>\nnote left\n{{\nC -> D\n}}\nend note\n@enduml\n```');
+    const [block] = findPlantUmlBlocks(
+      '```plantuml\n@startuml\nA -> B : <math>x</math>\nnote left\n{{\nC -> D\n}}\nend note\nA -> B : <img:pic.png>\n@enduml\n```'
+    );
 
     const result = await exportOne(deps, DOC, 'images', block!, 'maths');
 
-    expect(result).toMatchObject({ error: null, path: '/repo/docs/images/maths.svg', notes: ['formula <math>', 'embedded'] });
+    expect(result).toMatchObject({ error: null, path: '/repo/docs/images/maths.svg', notes: ['formula <math>', 'embedded', 'image'] });
   });
 
   it('asks before replacing a file that holds something else, and leaves it when declined', async () => {

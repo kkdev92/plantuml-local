@@ -51,7 +51,7 @@ describe('encodePng', () => {
   });
 
   it('starts with the base64 prefix the sanitiser matches on', () => {
-    // Keeps encodePng and sanitize.ts's PNG_SIGNATURE_BASE64 in step.
+    // Keeps encodePng and PNG_SIGNATURE_BASE64 (src/core/inline-png.ts) in step.
     expect(encodePng(1, 1, new Uint8ClampedArray(4)).toString('base64')).toMatch(/^iVBORw0KGg/);
   });
 });

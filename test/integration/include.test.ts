@@ -143,7 +143,7 @@ describe('local includes through the built worker', () => {
   });
 });
 
-describe('the palette of a diagram whose included file picks a theme', () => {
+describe('the palette of a diagram whose included file picks a theme or a library', () => {
   let client: RendererClient;
   let temp: string;
   let root: string;
@@ -154,6 +154,7 @@ describe('the palette of a diagram whose included file picks a theme', () => {
     root = join(temp, 'ws');
     await mkdir(root, { recursive: true });
     await writeFile(join(root, 'white-page.iuml'), '!theme cerulean\n');
+    await writeFile(join(root, 'c4.iuml'), '!include <C4/C4_Container>\n');
   });
 
   afterAll(async () => {
@@ -161,10 +162,13 @@ describe('the palette of a diagram whose included file picks a theme', () => {
     await rm(temp, { recursive: true, force: true });
   });
 
-  it('is drawn again, in the light palette, when the dark one is asked for', async () => {
+  it.each([
+    ['a theme made for a white page', '!include white-page.iuml\nAlice -> Bob : hello'],
+    ['the C4 library', '!include c4.iuml\nContainer(web, "Web app", "TypeScript")'],
+  ])('is drawn again, in the light palette, when the dark one is asked for: %s', async (_what, body) => {
     const access: IncludeAccess = { available: true, scope: { root, documentFolder: root, searchFolders: [] } };
     const palettes = new ThemePalettes((source, dark) => client.render(source, dark));
-    const source = '@startuml\n!include white-page.iuml\nAlice -> Bob : hello\n@enduml';
+    const source = `@startuml\n${body}\n@enduml`;
     const asked: boolean[] = [];
     const { palette, result } = await drawReadable(
       source,
@@ -178,7 +182,7 @@ describe('the palette of a diagram whose included file picks a theme', () => {
           svg,
           failedIncludes: new Map(),
           dependencies: [],
-          includedStyle: { themes: session.themes, azure: session.azure },
+          includedStyle: { themes: session.themes, whitePageLibrary: session.whitePageLibrary },
         };
       }
     );
@@ -379,7 +383,7 @@ describe('a selector, !includesub and !theme … from through the session', () =
           svg,
           failedIncludes: new Map(),
           dependencies: [],
-          includedStyle: { themes: session.themes, azure: session.azure },
+          includedStyle: { themes: session.themes, whitePageLibrary: session.whitePageLibrary },
         };
       }
     );

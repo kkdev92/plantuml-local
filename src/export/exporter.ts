@@ -1,5 +1,5 @@
 import { DIAGRAM_BACKDROP, EMOJI_UNAVAILABLE, hasRemoteReference } from '../core/constants';
-import { unsupportedKinds } from '../core/notation';
+import { notationLabel, unsupportedKinds } from '../core/notation';
 import { diagramShape } from '../core/shape';
 import type { DiagramRender, IncludedStyle } from '../core/types';
 import { withIncludeReason } from '../includes/describe';
@@ -92,6 +92,8 @@ export interface ExporterDeps {
   formulaMessage(tag: string): string;
   /** Localised note for a diagram embedded with `{{ … }}`, which the engine leaves out. */
   embeddedDiagramMessage: string;
+  /** Localised note for an image the engine does not draw, writing placeholder text in its place. */
+  imageMessage: string;
   /**
    * Localised reason given for a diagram the engine drew as an error:
    * `message` is the engine's own text, or for a local include that failed,
@@ -128,6 +130,7 @@ export type DrawingDeps = Pick<
   | 'pagesMessage'
   | 'formulaMessage'
   | 'embeddedDiagramMessage'
+  | 'imageMessage'
   | 'engineErrorMessage'
   | 'pngTooLargeMessage'
   | 'pngFailedMessage'
@@ -281,9 +284,8 @@ function messageOf(error: unknown): string {
 
 /** The notes an export's report carries for `source`: what the engine drew it without. */
 function notationNotes(deps: DrawingDeps, source: string): string[] {
-  return unsupportedKinds(source).map((kind) =>
-    kind === 'embedded' ? deps.embeddedDiagramMessage : deps.formulaMessage(kind === 'math' ? '<math>' : '<latex>')
-  );
+  const labels = { formula: deps.formulaMessage, embeddedDiagram: deps.embeddedDiagramMessage, image: deps.imageMessage };
+  return unsupportedKinds(source).map((kind) => notationLabel(kind, labels));
 }
 
 /**

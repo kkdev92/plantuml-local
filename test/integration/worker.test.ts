@@ -417,6 +417,223 @@ describe('render worker (dist)', () => {
     });
   });
 
+  describe('the bundled C4 library (re-check on every engine or library update)', () => {
+    const diagram = (...lines: string[]): string => ['@startuml', ...lines, '@enduml'].join('\n');
+    /** The texts a drawing shows, in order, entities decoded. */
+    const texts = (svg: string): string[] =>
+      [...svg.matchAll(/<text\b[^>]*>([^<]*)<\/text>/g)].map(([, text]) =>
+        (text ?? '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&amp;/g, '&')
+      );
+    /** What a drawing reads as: the engine writes each word of a label as a text of its own. */
+    const shownIn = (svg: string): string => texts(svg).join(' ').replace(/\s+/g, ' ');
+    const EXAMPLES: Record<string, string[]> = {
+      C4_Context: [
+        'Person(customer, "Customer", "Buys things")',
+        'System(shop, "Online shop", "Takes orders")',
+        'System_Ext(mail, "Mail service", "Sends email")',
+        'Rel(customer, shop, "Places orders", "HTTPS")',
+        'Rel(shop, mail, "Sends confirmations", "SMTP")',
+      ],
+      C4_Container: [
+        'Person(customer, "Customer")',
+        'System_Boundary(shop, "Online shop") {',
+        '  Container(web, "Web app", "TypeScript", "Serves the shop")',
+        '  ContainerDb(db, "Database", "PostgreSQL", "Holds orders")',
+        '}',
+        'Rel(customer, web, "Places orders", "HTTPS")',
+        'Rel(web, db, "Reads and writes", "SQL")',
+      ],
+      C4_Component: [
+        'Container_Boundary(api, "API") {',
+        '  Component(orders, "Orders", "Controller", "Handles orders")',
+        '  Component(repository, "Repository", "Data access")',
+        '}',
+        'ContainerDb(db, "Database", "PostgreSQL")',
+        'Rel(orders, repository, "Uses")',
+        'Rel(repository, db, "Reads and writes", "SQL")',
+      ],
+      C4_Dynamic: [
+        'Person(customer, "Customer")',
+        'Container(web, "Web app", "TypeScript")',
+        'ContainerDb(db, "Database", "PostgreSQL")',
+        'Rel(customer, web, "Submits an order")',
+        'Rel(web, db, "Stores the order")',
+      ],
+      C4_Deployment: [
+        'Deployment_Node(cloud, "Cloud", "Region") {',
+        '  Deployment_Node(vm, "Virtual machine", "Linux") {',
+        '    Container(web, "Web app", "TypeScript")',
+        '  }',
+        '  Deployment_Node(server, "Database server", "Managed") {',
+        '    ContainerDb(db, "Database", "PostgreSQL")',
+        '  }',
+        '}',
+        'Rel(web, db, "Reads and writes", "SQL")',
+      ],
+      C4_Sequence: [
+        'Person(customer, "Customer")',
+        'Container_Boundary(shop, "Online shop")',
+        '  Container(web, "Web app", "TypeScript")',
+        '  ContainerDb(db, "Database", "PostgreSQL")',
+        'Boundary_End()',
+        'Rel(customer, web, "Submits an order")',
+        'Rel(web, db, "Stores the order")',
+      ],
+    };
+    /** The labels of an example, each of which the drawing must show. */
+    const labelsOf = (lines: readonly string[]): string[] =>
+      lines.flatMap((line) => [...line.matchAll(/"([^"]+)"/g)].map(([, label]) => label ?? '')).filter((l) => !/^(?:HTTPS|SQL|SMTP)$/.test(l));
+
+    it.each(Object.entries(EXAMPLES))('draws %s from the bundled library, every label in it', async (module, lines) => {
+      const svg = await render(diagram(`!include <C4/${module}>`, ...lines));
+      expect(recognizeEngineError(svg)).toBeNull();
+      const shown = shownIn(svg);
+      for (const label of labelsOf(lines)) {
+        expect(shown, `${module}: ${label}`).toContain(label);
+      }
+    });
+
+    it('draws nested boundaries, tags, a legend and relations, with definitions of the diagram’s own reused', async () => {
+      const svg = await render(
+        diagram(
+          '!include <C4/C4_Container>',
+          'AddElementTag("legacy", $bgColor="#7a3b2e", $legendText="legacy system")',
+          'AddRelTag("async", $lineStyle=DashedLine(), $legendText="asynchronous")',
+          '!procedure $service($alias, $label)',
+          '  Container($alias, $label, "Go", "A service")',
+          '!endprocedure',
+          'Enterprise_Boundary(company, "Company") {',
+          '  System_Boundary(shop, "Online shop") {',
+          '    $service(orders, "Orders")',
+          '    $service(billing, "Billing")',
+          '    Container(old, "Old billing", "COBOL", $tags="legacy")',
+          '  }',
+          '}',
+          'Rel(orders, billing, "Charges")',
+          'Rel_D(billing, old, "Mirrors", $tags="async")',
+          'BiRel(orders, old, "Reconciles")',
+          'SHOW_LEGEND()'
+        )
+      );
+      expect(recognizeEngineError(svg)).toBeNull();
+      const shown = shownIn(svg);
+      for (const label of ['Company', 'Online shop', 'Orders', 'Billing', 'Old billing', 'Charges', 'Mirrors', 'Reconciles', 'legacy system', 'asynchronous']) {
+        expect(shown, label).toContain(label);
+      }
+      expect(svg).toMatch(/fill="#7A3B2E"/i);
+    });
+
+    it('reads the library whatever case its name is written in', async () => {
+      const lines = EXAMPLES.C4_Context ?? [];
+      const upper = await render(diagram('!include <C4/C4_Context>', ...lines));
+      const lower = await render(diagram('!include <c4/C4_Context>', ...lines));
+      expect(recognizeEngineError(lower)).toBeNull();
+      expect(texts(lower)).toEqual(texts(upper));
+    });
+
+    it('draws C4 and Azure in one diagram', async () => {
+      const svg = await render(
+        diagram(
+          '!include <C4/C4_Container>',
+          '!include <azure/AzureCommon>',
+          '!include <azure/Compute/AzureFunction>',
+          'Container(web, "Web app", "TypeScript")',
+          'AzureFunction(fn, "Mailer", "Functions")',
+          'Rel(web, fn, "Queues mail")'
+        )
+      );
+      expect(recognizeEngineError(svg)).toBeNull();
+      expect(svg).toContain('«AzureFunction»');
+      expect(shownIn(svg)).toContain('Queues mail');
+    });
+
+    it('fails a file the library leaves out, and a theme of it, with the engine’s error', async () => {
+      expect(recognizeEngineError(await render(diagram('!include <C4/C4_Nope>', 'A -> B')))?.message).toBe(
+        'cannot include <C4/C4_Nope>'
+      );
+      expect(
+        recognizeEngineError(await render(diagram('!include <C4/C4_Context>', '!theme C4_united from <C4/themes>', 'Person(p, "P")')))?.message
+      ).toBe('Cannot load theme C4_united in <C4/themes>');
+    });
+
+    // Why a diagram that includes the library is drawn in the light palette
+    // (src/render/palette.ts): its colours are made for a white page.
+    it.each(['C4_Container', 'C4_Component', 'C4_Sequence'])(
+      'writes the names of %s boundaries in a grey the dark palette leaves hard to read',
+      async (module) => {
+        const source = diagram(`!include <C4/${module}>`, ...(EXAMPLES[module] ?? []));
+        const dark = weakestTextContrast(lightenLinks(await render(source, true)), true) ?? Infinity;
+        expect(dark).toBeLessThan(MIN_DRAWN_CONTRAST);
+        expect(weakestTextContrast(await render(source, false), false)).toBeGreaterThan(dark);
+      }
+    );
+
+    it('draws a legend whose title is black in either palette, and whose swatches no palette makes easier to read', async () => {
+      const source = diagram(
+        '!include <C4/C4_Context>',
+        'Person(customer, "Customer")',
+        'System_Ext(mail, "Mail service")',
+        'Rel(customer, mail, "Reads")',
+        'SHOW_LEGEND()'
+      );
+      const dark = lightenLinks(await render(source, true));
+      const light = await render(source, false);
+      expect(dark).toMatch(/<text\b[^>]*\sfill="#000000"[^>]*>Legend\s*<\/text>/);
+      // So the light drawing reads no better by its weakest text, and looking
+      // at the dark one alone would keep it.
+      expect(weakestTextContrast(light, false)).toBeLessThanOrEqual(weakestTextContrast(dark, true) ?? 0);
+    });
+  });
+
+  // What the warning about an image (src/core/notation.ts) says the engine does.
+  describe('images (re-check on every engine update)', () => {
+    const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEUlEQVR4nGP4z8DwnwGMgRQAH+4D/dJQfRoAAAAASUVORK5CYII=';
+    const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46]).toString('base64');
+    const SVG = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="4" height="4"/>').toString('base64');
+    const PLACEHOLDER = /\[img TBD\d*\]/;
+    /** What a drawing reads as: C4 writes each word of a label, and each space, as a text of its own. */
+    const shown = (svg: string): string =>
+      [...svg.matchAll(/<text\b[^>]*>([^<]*)<\/text>/g)]
+        .map(([, text]) => text ?? '')
+        .join(' ')
+        .replace(/\s+/g, ' ');
+
+    it.each([
+      ['a file', 'A -> B : see <img:pic.png> here'],
+      ['a file named with src=', 'A -> B : see <img src="pic.png"> here'],
+      ['a URL', 'A -> B : see <img:https://example.invalid/pic.png> here'],
+      ['inline JPEG', `A -> B : see <img:data:image/jpeg;base64,${JPEG}> here`],
+      ['inline SVG', `A -> B : see <img:data:image/svg+xml;base64,${SVG}> here`],
+    ])('draws placeholder text for %s', async (_what, line) => {
+      const svg = await render(`@startuml\n${line}\n@enduml`);
+      expect(recognizeEngineError(svg)).toBeNull();
+      expect(shown(svg)).toMatch(PLACEHOLDER);
+      expect(svg).not.toMatch(/<image\b/);
+    });
+
+    it.each([
+      ['in a label', `A -> B : see <img:${PNG}> here`],
+      ['with src= and quotes', `A -> B : see <img src="${PNG}"> here`],
+      ['as a C4 sprite', `!include <C4/C4_Context>\nPerson(p, "Customer", $sprite="img:${PNG}")`],
+    ])('draws a PNG written inline %s, which the sanitiser keeps', async (_what, line) => {
+      const svg = await render(`@startuml\n${line}\n@enduml`);
+      expect(shown(svg)).not.toMatch(PLACEHOLDER);
+      expect(svg).toContain(`href="${PNG}"`);
+    });
+
+    it('draws placeholder text for a C4 sprite from a file, by name or by position', async () => {
+      for (const line of ['Person(p, "Customer", $sprite="img:pic.png")', 'Person(p, "Customer", "Buys", "img:pic.png")']) {
+        const svg = await render(`@startuml\n!include <C4/C4_Context>\n${line}\n@enduml`);
+        expect(shown(svg), line).toMatch(PLACEHOLDER);
+      }
+    });
+
+    it('takes <img only in that case for an image', async () => {
+      expect(shown(await render('@startuml\nA -> B : <Img:pic.png>\n@enduml'))).not.toMatch(PLACEHOLDER);
+      expect(shown(await render('@startuml\nA -> B : <iMG:pic.png>\n@enduml'))).toMatch(PLACEHOLDER);
+    });
+  });
+
   describe('sprites and the bundled standard library', () => {
     it('renders an inline sprite as an embedded PNG', async () => {
       const svg = await render(

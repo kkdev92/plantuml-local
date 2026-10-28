@@ -1,5 +1,7 @@
 import type { Window } from 'happy-dom';
 
+import { isInlinePng } from '../core/inline-png';
+
 /**
  * SVG sanitisation for engine output.
  *
@@ -88,16 +90,6 @@ function localPart(name: string): string {
 }
 
 /**
- * Base64 of the eight-byte PNG signature. Those bytes fix the first ten
- * characters of the encoding regardless of what follows, so matching the
- * prefix checks the container without decoding the payload.
- */
-const PNG_SIGNATURE_BASE64 = 'iVBORw0KGg';
-
-/** Nothing outside the base64 alphabet, so no second URI can be smuggled in. */
-const SPRITE_PNG = /^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/;
-
-/**
  * Whether a link value is a sprite PNG this extension itself produced.
  *
  * PlantUML rasterises `sprite` definitions — the mechanism behind icon
@@ -118,12 +110,7 @@ const SPRITE_PNG = /^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/;
  * stay blocked.
  */
 function isSpritePng(element: ElementLike, attributeName: string, value: string): boolean {
-  return (
-    localPart(element.nodeName) === 'image' &&
-    attributeName !== 'src' &&
-    value.startsWith(`data:image/png;base64,${PNG_SIGNATURE_BASE64}`) &&
-    SPRITE_PNG.test(value)
-  );
+  return localPart(element.nodeName) === 'image' && attributeName !== 'src' && isInlinePng(value);
 }
 
 /** DOM node types the walk distinguishes (standard `Node.nodeType` values). */

@@ -9,7 +9,7 @@ import {
   hasRemoteReference,
   isDiagramFence,
 } from '../core/constants';
-import { unsupportedKinds } from '../core/notation';
+import { notationLabel, unsupportedKinds } from '../core/notation';
 import { diagramShape } from '../core/shape';
 import type { DiagramRender, IncludedStyle, RenderLog } from '../core/types';
 import { hasLocalInclude } from '../includes/describe';
@@ -70,6 +70,8 @@ export interface PluginLabels {
   formula(tag: string): string;
   /** Note above a diagram drawn without the diagram embedded in it with `{{ … }}`. */
   embeddedDiagram: string;
+  /** Note above a diagram drawn with placeholder text for an image the engine does not draw. */
+  image: string;
   /** Note above a diagram not drawn again since its block changed. */
   notUpdated(mode: Exclude<UpdateMode, 'onChange'>): string;
   /** Note above a diagram whose local include of `path` failed, and why. */
@@ -510,7 +512,7 @@ export function createPlantUmlPlugin(deps: PluginDeps): PlantUmlPlugin {
         const notice = [
           shape.before === null ? null : deps.labels.beforeStart(shape.before.start),
           shape.addedEnd === null ? null : deps.labels.missingEnd(shape.addedEnd),
-          ...unsupported.map((kind) => (kind === 'embedded' ? deps.labels.embeddedDiagram : deps.labels.formula(kind === 'math' ? '<math>' : '<latex>'))),
+          ...unsupported.map((kind) => notationLabel(kind, deps.labels)),
         ]
           .filter((text): text is string => text !== null)
           .map((text) => `<div class="plantuml-notice">${deps.escapeHtml(text)}</div>`)

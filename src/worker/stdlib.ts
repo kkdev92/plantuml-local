@@ -1,6 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { BUNDLED_LIBRARIES } from '../core/libraries';
+
 /**
  * Serves PlantUML standard-library includes from the package.
  *
@@ -29,9 +31,6 @@ import { join } from 'node:path';
  * Libraries are read from disk lazily, on the first include that needs
  * one, so a diagram without sprites pays nothing.
  */
-
-/** Libraries bundled in assets/stdlib/ and copied to dist/stdlib/. */
-const BUNDLED = ['azure'] as const;
 
 interface StdlibFile {
   library: string;
@@ -93,7 +92,10 @@ export function installStdlib(stdlibDir: string): void {
   const info: Record<string, { version: string }> = {};
   const scriptState: Record<string, ScriptState> = {};
 
-  for (const library of BUNDLED) {
+  // Bundled in assets/stdlib/ and copied to dist/stdlib/, each under the
+  // lower-cased name the engine looks it up by, whatever case the include
+  // writes it in.
+  for (const { name: library } of BUNDLED_LIBRARIES) {
     stdlib[library] = createLibraryProxy(stdlibDir, library);
     info[library] = { version: 'bundled' };
     // Pretend the library's script is already loaded: the engine then

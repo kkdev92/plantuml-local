@@ -1,7 +1,7 @@
 /**
  * VSIX verification.
  *
- * Extracts the packaged VSIX and checks five things:
+ * Extracts the packaged VSIX and checks six things:
  *
  * 1. Everything the extension needs at runtime is present
  *    (bundles, engine files, stylesheet, l10n, manifest assets).
@@ -12,16 +12,19 @@
  *    EPL licences of what we bundle require it.
  * 4. The bundles and the engine are no more than 5% over their recorded
  *    sizes (RECORDED_SIZES).
- * 5. The packaged worker actually renders — a Japanese sequence diagram
+ * 5. The standard libraries are the ones generated from the pinned commit
+ *    that assets/stdlib-sources.json records, which the notices name.
+ * 6. The packaged worker actually renders — a Japanese sequence diagram
  *    is rendered from the extracted VSIX, which proves the engine files
  *    and the worker bundle fit together without Java or network access;
- *    so are an Azure sprite, a `!theme` and an OpenIconic icon, whose
- *    data ships beside the engine.
+ *    so are an Azure sprite, a C4 diagram, a `!theme` and an OpenIconic
+ *    icon, whose data ships beside the engine.
  *
  * Usage: node scripts/verify-vsix.mjs [path-to.vsix]
  */
 
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -52,6 +55,7 @@ const REQUIRED = [
   'extension/dist/syntaxes/plantuml-data.tmLanguage.json',
   'extension/dist/syntaxes/plantuml-json.tmLanguage.json',
   'extension/dist/stdlib/azure.json',
+  'extension/dist/stdlib/c4.json',
   'extension/media/plantuml.css',
   'extension/media/viewer/viewer.js',
   'extension/media/viewer/viewer.css',
@@ -180,6 +184,40 @@ function checkThirdPartyNotices() {
   ok(`third-party licence texts ship and are referenced (${String(licences.length)} files)`);
 }
 
+/**
+ * Each standard library in the VSIX is the asset generated from the pinned
+ * commit: it has the hash assets/stdlib-sources.json records for it, and
+ * every library recorded ships. The record stays in the repository; the
+ * packaged notices name the commit.
+ */
+function checkStdlibProvenance() {
+  const record = JSON.parse(readFileSync(join(projectRoot, 'assets/stdlib-sources.json'), 'utf8'));
+  const shippedDir = join(extractDir, 'extension/dist/stdlib');
+  const recorded = Object.keys(record.libraries).map((name) => `${name}.json`);
+  const shipped = existsSync(shippedDir) ? readdirSync(shippedDir) : [];
+  for (const file of shipped.filter((name) => !recorded.includes(name))) {
+    fail(`dist/stdlib/${file} is not recorded in assets/stdlib-sources.json`);
+  }
+  for (const [name, library] of Object.entries(record.libraries)) {
+    const path = join(shippedDir, `${name}.json`);
+    if (!existsSync(path)) {
+      continue; // reported by checkFiles
+    }
+    const hash = createHash('sha256').update(readFileSync(path)).digest('hex');
+    if (hash === library.asset.sha256) {
+      ok(`stdlib: ${name}.json is the one generated from ${record.commit}`);
+    } else {
+      fail(`dist/stdlib/${name}.json has sha256 ${hash}, not the ${library.asset.sha256} generated from ${record.commit}`);
+    }
+  }
+  const notices = readFileSync(join(extractDir, 'extension/THIRD_PARTY_NOTICES.md'), 'utf8');
+  if (notices.includes(record.commit)) {
+    ok('THIRD_PARTY_NOTICES.md names the commit the libraries are generated from');
+  } else {
+    fail(`THIRD_PARTY_NOTICES.md does not name ${record.commit}, the commit the libraries are generated from`);
+  }
+}
+
 function checkSizes() {
   for (const [file, recorded] of Object.entries(RECORDED_SIZES)) {
     const size = statSync(join(extractDir, file), { throwIfNoEntry: false })?.size;
@@ -305,6 +343,20 @@ async function renderSmoke() {
       fail('packaged worker did not render the bundled Azure sprite');
     }
 
+    // Proves <C4/…> resolves too, with the common definitions it includes
+    // (C4_Container includes C4_Context, which includes C4).
+    const c4 = await renderOn(
+      worker,
+      6,
+      '@startuml\n!include <C4/C4_Container>\nPerson(user, "Customer")\n' +
+        'Container(web, "Storefront", "TypeScript")\nRel(user, web, "Uses")\n@enduml'
+    );
+    if (typeof c4 === 'string' && !/cannot include/.test(c4) && c4.includes('Storefront') && c4.includes('«container»')) {
+      ok('packaged worker resolves <C4/…> and draws a C4 container');
+    } else {
+      fail('packaged worker did not render the bundled C4 library');
+    }
+
     // Proves the !theme library and the OpenIconic icons load from the
     // packaged engine folder: a theme brings colours of its own, an icon
     // draws a path. The engine's own error text would bring colours too.
@@ -335,6 +387,7 @@ console.log(`Verifying ${vsixPath}`);
 extract(vsixPath);
 checkFiles();
 checkThirdPartyNotices();
+checkStdlibProvenance();
 checkSizes();
 checkNoOwnSvgImages();
 checkNoSecrets();

@@ -1,4 +1,5 @@
 import { DIAGRAM_BACKDROP } from '../core/constants';
+import { bundledLibrary } from '../core/libraries';
 import { splitLines } from '../core/lines';
 import type { DiagramRender, IncludedStyle } from '../core/types';
 import { firstLocalIncludeLine } from '../includes/describe';
@@ -20,7 +21,7 @@ import { firstLocalIncludeLine } from '../includes/describe';
  * up with the engine's theme library, and takes in several `!theme` lines,
  * which the engine applies one over the other.
  *
- * A `!theme`, or the Azure library, can also come from a file the diagram
+ * A `!theme`, or a bundled library, can also come from a file the diagram
  * includes, which is known only once the diagram is drawn. The diagram is
  * drawn in the palette its own lines choose; if what it included turns the
  * choice, it is drawn once more in the other palette, and that drawing is
@@ -62,18 +63,27 @@ export const MIN_DRAWN_CONTRAST = 3;
 export const DARK_LINK = '#9ECBFF';
 
 /**
- * An include of the bundled Azure library. It paints its elements white and
+ * An include of a standard library, whose name the engine reads in any case.
+ *
+ * The bundled libraries (src/core/libraries.ts) set colours made for a white
+ * page, the same in either palette. Azure paints its elements white and
  * leaves their text to the palette, which the dark one makes white: white on
- * white. A diagram that includes it and picks no theme is drawn in the light
+ * white. C4 writes the names of boundaries, the relations and the title of
+ * its legend in greys and black, which the dark backdrop all but hides.
+ * Looking at the dark drawing would not catch every one: the swatches of a
+ * C4 legend are as faint in either palette, so the light drawing reads no
+ * better by the weakest text, and the lines are not measured at all.
+ *
+ * So a diagram that includes one and picks no theme is drawn in the light
  * palette, as one whose theme is made for a white page is. A theme sets the
  * text colour itself, the same in either palette, so a diagram with one is
  * measured like any other.
  */
-const AZURE_INCLUDE = /^[ \t]*!include(?:_many|_once)?[ \t]*<azure\//m;
+const LIBRARY_INCLUDE = /^[ \t]*!include(?:_many|_once)?[ \t]*<([^/>]+)\//gm;
 
-/** Whether `text` includes the bundled Azure library. */
-export function includesAzure(text: string): boolean {
-  return AZURE_INCLUDE.test(text);
+/** Whether `text` includes a bundled library made for a white page. */
+export function includesWhitePageLibrary(text: string): boolean {
+  return [...text.matchAll(LIBRARY_INCLUDE)].some(([, name]) => bundledLibrary(name ?? '')?.forWhitePage === true);
 }
 
 /** How many sets of `!theme` lines keep their measurement. */
@@ -359,7 +369,7 @@ export class ThemePalettes {
   async resolve(source: string, dark: boolean, included?: IncludedStyle): Promise<boolean> {
     const lines = paletteLines(source, included);
     if (lines.length === 0) {
-      return includesAzure(source) || included?.azure === true ? false : dark;
+      return includesWhitePageLibrary(source) || included?.whitePageLibrary === true ? false : dark;
     }
     const measured = await this.measure(lines.join('\n'), lines);
     return measured === undefined ? dark : choosePalette(dark, measured);

@@ -47,12 +47,12 @@ export function drawInDocuments(renderer: Renderer, host: IncludeHost): DrawDiag
     const svg = await renderer.render(source, dark, session.load);
     const dependencies = [...session.dependencies].map((path) => pathKey(opened(path)));
     host.remember?.(`${document}\n${source}`, dependencies);
-    const styled = session.themes.length > 0 || session.azure;
+    const styled = session.themes.length > 0 || session.whitePageLibrary;
     return {
       svg,
       failedIncludes: describeIncludeFailures(session.failures, describe),
       dependencies,
-      ...(styled ? { includedStyle: { themes: [...session.themes], azure: session.azure } } : {}),
+      ...(styled ? { includedStyle: { themes: [...session.themes], whitePageLibrary: session.whitePageLibrary } } : {}),
     };
   };
 }

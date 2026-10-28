@@ -101,7 +101,8 @@ describe('Japanese UI (dist)', () => {
 
   it.each([
     ['!theme missing-theme\nA -> B', 'テーマ missing-theme は利用できません。'],
-    ['!include <C4/C4_Context>\nA -> B', '標準ライブラリ C4 はこの拡張機能に含まれていません。'],
+    ['!include <aws/AWSCommon>\nA -> B', '標準ライブラリ aws はこの拡張機能に含まれていません。'],
+    ['!include <C4/C4_Nope>\nA -> B', 'この拡張機能に同梱の C4 ライブラリに &lt;C4/C4_Nope&gt; はありません。'],
     ['!import foo.zip\nA -> B', 'この拡張機能は !import に対応していません。'],
     ['start\n#pink:deprecated colour\nsecond line;\nstop', 'この構文は非推奨です。'],
     ['start\n:Hello;\nthis is invalid ;;; [[[', '「アクティビティ図」'],

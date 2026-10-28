@@ -28,6 +28,7 @@ const LABELS = {
   beforeStart: (start: string): string => `above ${start}`,
   formula: (tag: string): string => `formula ${tag}`,
   embeddedDiagram: 'embedded',
+  image: 'image',
   notUpdated: (mode: string): string => `not updated (${mode})`,
   includeFailed: (path: string, reason: string): string => `cannot include ${path} (${reason})`,
 };
@@ -171,13 +172,15 @@ describe('createPlantUmlPlugin', () => {
     expect(html.indexOf('plantuml-notice')).toBeLessThan(html.indexOf('<svg>'));
   });
 
-  it('says above the drawing what the engine leaves out: a formula, an embedded diagram', async () => {
+  it('says above the drawing what the engine leaves out: a formula, an embedded diagram, an image', async () => {
     const h = makeHarness();
-    const source = ['@startuml', 'A -> B : <math>x</math>', 'note left', '{{', 'C -> D', '}}', 'end note', '@enduml'].join('\n');
+    const source = ['@startuml', 'A -> B : <math>x</math>', 'note left', '{{', 'C -> D', '}}', 'end note', 'A -> B : <img:pic.png>', '@enduml'].join('\n');
     h.fence('plantuml', source);
     await h.settle();
     const html = h.fence('plantuml', source);
-    expect(html).toContain('<div class="plantuml-notice">formula &lt;math&gt;</div><div class="plantuml-notice">embedded</div>');
+    expect(html).toContain(
+      '<div class="plantuml-notice">formula &lt;math&gt;</div><div class="plantuml-notice">embedded</div><div class="plantuml-notice">image</div>'
+    );
     expect(html.indexOf('plantuml-notice')).toBeLessThan(html.indexOf('<svg>'));
   });
 

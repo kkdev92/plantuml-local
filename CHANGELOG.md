@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **The C4 library ships with the extension.** `!include <C4/C4_Context>`,
+  `<C4/C4_Container>`, `<C4/C4_Component>`, `<C4/C4_Dynamic>`,
+  `<C4/C4_Deployment>` and `<C4/C4_Sequence>` — C4-PlantUML 2.14.0, as
+  PlantUML's standard library carries it — render offline in the previews and
+  in exports, with the `C4` definitions they share. The library's themes are
+  not bundled; an include of a file of the library that is not bundled fails
+  with a message that lists the files that are, and the message for a library
+  that is not bundled at all now names both bundled libraries. C4's colours
+  are made for a white page, so a C4 diagram that picks no theme is drawn in
+  the light palette, as one with the Azure icons is.
+- **An image the bundled engine does not draw is now said.** The engine draws
+  only an image written into the diagram as a PNG (`data:image/png;base64,…`);
+  one from a file or a URL, or inline data of another kind, it draws as the
+  text `[img TBD…]`. An image named with `<img:…>`, or given to C4 with
+  `img:` (as in `$sprite="img:…"`), now gets a warning on its line in the
+  Problems panel, a note above the drawing in the Markdown and `.puml`
+  previews, and a note in an export's notice.
+
 ## [0.16.0] - 2026-10-27
 
 ### Added
