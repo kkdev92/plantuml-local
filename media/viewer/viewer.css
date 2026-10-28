@@ -40,7 +40,8 @@ select {
 }
 
 /* The zoom and the actions keep to the right. A narrow panel wraps them,
-   PNG and Copy together, rather than breaking a button's label. */
+   PNG and Copy together, rather than breaking a button's label; a group
+   too wide for its row wraps inside, and its rows keep to the right too. */
 #bar {
 	display: flex;
 	flex-wrap: wrap;
@@ -56,6 +57,7 @@ select {
 	flex-wrap: wrap;
 	gap: 0.25rem;
 	align-items: center;
+	justify-content: flex-end;
 }
 
 #tools button,
