@@ -39,7 +39,7 @@ Your diagram source is processed locally and is not sent to a rendering service.
 ## Features
 
 - **Built-in Preview**: Diagrams appear in the same Markdown preview you already use
-- **`.puml` Files**: PlantUML files open as their own language, with folding, an outline and a preview beside the editor that zooms, exports PNG and copies the diagram to the clipboard, as a PNG or as SVG text
+- **`.puml` Files**: PlantUML files open as their own language, with folding, an outline and a preview beside the editor that zooms — to an area you mark, too, with *Zoom to Area* — scrolls to the diagram's edges with `Home` and `End`, exports PNG and copies the diagram to the clipboard, as a PNG or as SVG text
 - **Local Includes**: `!include`, `!includesub` and `!theme … from` read shared definitions, sections and themes from the files of your workspace folder, in a trusted workspace; their paths complete, and Ctrl+Click opens the file
 - **Syntax Highlighting**: ```` ```plantuml ```` blocks and `.puml` files are coloured in the editor, following the syntax the bundled engine accepts
 - **Offline Rendering**: No Java, no PlantUML server, no network connection required — nothing to install besides the extension
