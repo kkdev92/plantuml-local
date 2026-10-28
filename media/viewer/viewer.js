@@ -9,6 +9,8 @@
 // 100% is the size the SVG gives itself in its width and height, which is
 // what PlantUML's `scale` sets. The stage scrolls; zooming resizes the
 // image and keeps the point under the pointer, or at the centre, in place.
+// A drag moves the view, or, once Zoom to Area is pressed, marks the area to
+// zoom to; zoom.js, which runs first, has how far to zoom and to what.
 //
 // A screen reader is told what comes of things, not what is under way: what
 // a drawing comes to once drawing settles, and only when it is not what it
@@ -21,6 +23,7 @@
   const stage = document.getElementById('stage');
   const canvas = document.getElementById('canvas');
   const image = document.getElementById('diagram');
+  const marquee = document.getElementById('marquee');
   const zoomText = document.getElementById('zoom');
   const regions = [...document.querySelectorAll('#announcer [role="status"]')];
   const buttons = {
@@ -28,12 +31,11 @@
     in: document.getElementById('zoom-in'),
     fit: document.getElementById('fit'),
     actual: document.getElementById('actual'),
+    area: document.getElementById('area'),
   };
 
   /** Space between the diagram and the edges of the stage, in CSS pixels. */
   const MARGIN = 16;
-  const MIN_ZOOM = 0.01;
-  const MAX_ZOOM = 16;
   /** The factor of one step of the buttons and keys. */
   const STEP = 1.25;
   /** How many diagrams' views are kept, the least recently shown dropped first. */
@@ -58,6 +60,12 @@
   let shown = null;
   let latest = null;
   let drag = null;
+  /** Whether a drag marks an area to zoom to, rather than moving the view. */
+  let marking = false;
+  /** Where the area being marked starts, in the scrolled area, or null. */
+  let mark = null;
+  /** Where the pointer last was with its button down while marking it. */
+  let reach = null;
   let saving = undefined;
   /** The result of a drawing a screen reader was told last, which it is not told again. */
   let told = null;
@@ -99,7 +107,7 @@
     );
   }
 
-  const clamp = (value) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, value));
+  const clamp = viewerZoom.clamp;
 
   /** The zoom showing the whole diagram, but never past 100%. */
   function fitZoom() {
@@ -114,6 +122,8 @@
    * the image in it; where it ended up is read back once laid out.
    */
   function layout() {
+    // An area being marked was marked on the layout this replaces.
+    unmark();
     const width = size.width * zoom;
     const height = size.height * zoom;
     canvas.style.width = `${width + 2 * MARGIN}px`;
@@ -201,6 +211,91 @@
     for (const button of Object.values(buttons)) {
       button.disabled = size === null;
     }
+    // The panel's context menu acts on the file's diagram once one is shown
+    // (package.json), and is told which file it is.
+    stage.dataset.vscodeContext = JSON.stringify(size === null ? {} : { 'plantumlLocal.viewerUri': keep.uri });
+  }
+
+  /** Turns marking an area to zoom to on or off, letting go of one being marked. */
+  function setMarking(on) {
+    marking = on && size !== null;
+    unmark();
+    stage.classList.toggle('marking', marking);
+    buttons.area.setAttribute('aria-pressed', String(marking));
+  }
+
+  function unmark() {
+    mark = null;
+    reach = null;
+    marquee.hidden = true;
+  }
+
+  /** Where the pointer of `event` is, in the scrolled area. */
+  function pointOf(event) {
+    const box = stage.getBoundingClientRect();
+    return { x: stage.scrollLeft + event.clientX - box.left, y: stage.scrollTop + event.clientY - box.top };
+  }
+
+  /** The part of the scrolled area in sight. */
+  function visible() {
+    return { left: stage.scrollLeft, top: stage.scrollTop, width: stage.clientWidth, height: stage.clientHeight };
+  }
+
+  /** Shows the rectangle from where the area being marked starts to `to`, as much of it as is in sight. */
+  function outline(to) {
+    const sight = visible();
+    const left = Math.max(Math.min(mark.x, to.x), sight.left);
+    const top = Math.max(Math.min(mark.y, to.y), sight.top);
+    marquee.style.left = `${left}px`;
+    marquee.style.top = `${top}px`;
+    marquee.style.width = `${Math.max(0, Math.min(Math.max(mark.x, to.x), sight.left + sight.width) - left)}px`;
+    marquee.style.height = `${Math.max(0, Math.min(Math.max(mark.y, to.y), sight.top + sight.height) - top)}px`;
+    marquee.hidden = false;
+  }
+
+  /**
+   * Zooms to the area marked, which ends at `to`, and stops marking. An area
+   * too small to zoom to, as a click is, or off the diagram, changes nothing.
+   */
+  function zoomToMark(to) {
+    const next = viewerZoom.toArea({
+      from: mark,
+      to,
+      visible: visible(),
+      diagram: { left: at.left, top: at.top, width: size.width * zoom, height: size.height * zoom },
+      zoom,
+      room: { width: stage.clientWidth - 2 * MARGIN, height: stage.clientHeight - 2 * MARGIN },
+    });
+    unmark();
+    if (next !== null) {
+      setMarking(false);
+      view = { fit: false, ...next };
+      apply();
+      remember();
+      tellZoom();
+    }
+  }
+
+  /**
+   * Moves the view to an edge of the diagram, or puts its centre in the
+   * middle, at the same zoom. Where the diagram fits, there is nowhere to go.
+   */
+  function moveTo(place) {
+    if (size === null) {
+      return;
+    }
+    if (place === 'top') {
+      stage.scrollTop = 0;
+    } else if (place === 'bottom') {
+      stage.scrollTop = stage.scrollHeight;
+    } else if (place === 'left') {
+      stage.scrollLeft = 0;
+    } else if (place === 'right') {
+      stage.scrollLeft = stage.scrollWidth;
+    } else if (place === 'centre') {
+      stage.scrollLeft = at.left + (size.width * zoom - stage.clientWidth) / 2;
+      stage.scrollTop = at.top + (size.height * zoom - stage.clientHeight) / 2;
+    }
   }
 
   /** Keeps this diagram's view, and saves everything the page keeps. */
@@ -220,6 +315,7 @@
   buttons.in.addEventListener('click', () => zoomBy(STEP));
   buttons.fit.addEventListener('click', fit);
   buttons.actual.addEventListener('click', actual);
+  buttons.area.addEventListener('click', () => setMarking(!marking));
 
   // A plain wheel scrolls, and Shift sideways, as anywhere. With Ctrl (Cmd
   // on macOS), or as a touchpad pinch, which arrives the same way, it zooms
@@ -245,12 +341,26 @@
     if (size === null || event.button !== 0 || onBar) {
       return;
     }
-    drag = { x: event.clientX, y: event.clientY, left: stage.scrollLeft, top: stage.scrollTop };
     stage.setPointerCapture(event.pointerId);
+    if (marking) {
+      mark = pointOf(event);
+      reach = mark;
+      outline(mark);
+      return;
+    }
+    drag = { x: event.clientX, y: event.clientY, left: stage.scrollLeft, top: stage.scrollTop };
     stage.classList.add('dragging');
   });
   stage.addEventListener('pointermove', (event) => {
-    if (drag !== null) {
+    if (mark !== null) {
+      if ((event.buttons & 1) === 0) {
+        // Let go where the page did not hear it, as lostpointercapture says.
+        zoomToMark(reach);
+      } else {
+        reach = pointOf(event);
+        outline(reach);
+      }
+    } else if (drag !== null) {
       stage.scrollLeft = drag.left - (event.clientX - drag.x);
       stage.scrollTop = drag.top - (event.clientY - drag.y);
     }
@@ -259,8 +369,25 @@
     drag = null;
     stage.classList.remove('dragging');
   };
-  stage.addEventListener('pointerup', stopDrag);
-  stage.addEventListener('pointercancel', stopDrag);
+  stage.addEventListener('pointerup', (event) => {
+    if (mark !== null) {
+      zoomToMark(pointOf(event));
+    }
+    stopDrag();
+  });
+  stage.addEventListener('pointercancel', () => {
+    unmark();
+    stopDrag();
+  });
+  // Let go outside the panel, the button can come up with no pointerup for
+  // the page, which hears of it only when the pointer comes back, by the
+  // capture it has lost. The area then ends where the pointer last was with
+  // the button down, kept to what is in sight, as it would have on pointerup.
+  stage.addEventListener('lostpointercapture', () => {
+    if (mark !== null) {
+      zoomToMark(reach);
+    }
+  });
 
   // However the view moved, the new centre is kept once it stops.
   stage.addEventListener('scroll', () => {
@@ -277,7 +404,8 @@
   canvas.style.padding = `${MARGIN}px`;
 
   // Unmodified keys only, so that VS Code's own shortcuts still work, and
-  // not while the list of diagrams has the focus.
+  // not while the list of diagrams has the focus. Shift takes Home and End
+  // sideways, as it does the wheel.
   document.addEventListener('keydown', (event) => {
     if (size === null || event.ctrlKey || event.metaKey || event.altKey || event.target === select) {
       return;
@@ -308,6 +436,26 @@
         break;
       case 'ArrowDown':
         stage.scrollBy(0, step);
+        break;
+      case 'Home':
+        moveTo(event.shiftKey ? 'left' : 'top');
+        break;
+      case 'End':
+        moveTo(event.shiftKey ? 'right' : 'bottom');
+        break;
+      case 'c':
+      case 'C':
+        moveTo('centre');
+        break;
+      case 'z':
+      case 'Z':
+        setMarking(!marking);
+        break;
+      case 'Escape':
+        if (!marking) {
+          return;
+        }
+        setMarking(false);
         break;
       default:
         return;
@@ -499,11 +647,19 @@
       if (message.clear === true) {
         latest = null;
         size = null;
+        setMarking(false);
         image.hidden = true;
         stage.removeAttribute('aria-label');
         canvas.style.width = '0';
         canvas.style.height = '0';
         indicate();
+      }
+    } else if (message.type === 'act') {
+      // Chosen in the panel's context menu.
+      if (message.action === 'zoomToArea') {
+        setMarking(true);
+      } else {
+        moveTo(message.action);
       }
     }
   });

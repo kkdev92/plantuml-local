@@ -2949,9 +2949,13 @@ describe('viewer (dist)', () => {
     expect(csp).toMatch(/script-src 'nonce-[^' ]+'(;|$)/);
     expect(csp).toMatch(/img-src [^;]*blob:/);
     expect(panel?.webview.html).toContain('/media/viewer/viewer.js');
+    // The page takes its zoom from zoom.js, which runs first.
+    const html = panel?.webview.html ?? '';
+    expect(html.indexOf('/media/viewer/zoom.js"')).toBeGreaterThan(-1);
+    expect(html.indexOf('/media/viewer/zoom.js"')).toBeLessThan(html.indexOf('/media/viewer/viewer.js"'));
     // The zoom toolbar, its buttons named in the display language.
     expect(panel?.webview.html).toContain('<div id="tools" role="toolbar" aria-label="Diagram zoom">');
-    for (const label of ['Zoom Out', 'Zoom In', 'Fit to Window', 'Actual Size']) {
+    for (const label of ['Zoom Out', 'Zoom In', 'Fit to Window', 'Actual Size', 'Zoom to Area']) {
       expect(panel?.webview.html).toContain(`aria-label="${label}"`);
     }
     // Read out as they change: not the status line or the zoom, but the two
@@ -3105,6 +3109,48 @@ describe('viewer (dist)', () => {
     const count = posted(panel!, 'render').length;
     await waitFor(() => posted(panel!, 'render').length > count);
     expect(posted(panel!, 'render').at(-1)?.svg).toContain('second');
+  });
+
+  it('has the viewer its context menu was opened on do what the menu chose, and no other', async () => {
+    const before = vscodeStub._test.webviewPanels.length;
+    vscodeStub._test.setActiveEditor(makeEditor('file:///c/menu/one.puml', FLOWS, 1, { languageId: 'plantuml' }));
+    await run('plantumlLocal.openPreviewToSide');
+    vscodeStub._test.setActiveEditor(makeEditor('file:///c/menu/two.puml', FLOWS, 1, { languageId: 'plantuml' }));
+    await run('plantumlLocal.openPreviewToSide');
+    const [one, two] = vscodeStub._test.webviewPanels.slice(before);
+    const command = (id: string): ((...args: unknown[]) => unknown) => vscodeStub._test.registeredCommands.get(id)!;
+    // What VS Code passes: what the page set where the menu was opened, and the view type.
+    const context = { 'plantumlLocal.viewerUri': 'file:///c/menu/two.puml', webview: 'plantumlLocal.viewer' };
+    const items = [
+      ['plantumlLocal.zoomToArea', 'zoomToArea'],
+      ['plantumlLocal.scrollToTop', 'top'],
+      ['plantumlLocal.scrollToBottom', 'bottom'],
+      ['plantumlLocal.scrollToLeftEdge', 'left'],
+      ['plantumlLocal.scrollToRightEdge', 'right'],
+      ['plantumlLocal.scrollToCentre', 'centre'],
+    ] as const;
+
+    for (const [id] of items) {
+      await command(id)(context);
+    }
+
+    expect(posted(two!, 'act')).toEqual(items.map(([, action]) => ({ type: 'act', action })));
+    expect(posted(one!, 'act')).toEqual([]);
+
+    // A context that names no open viewer, or none, does nothing.
+    for (const arg of [
+      undefined,
+      null,
+      'file:///c/menu/two.puml',
+      {},
+      { 'plantumlLocal.viewerUri': 'file:///c/menu/three.puml' },
+      { 'plantumlLocal.viewerUri': 42 },
+      { uri: 'file:///c/menu/two.puml' },
+    ]) {
+      await command('plantumlLocal.scrollToTop')(arg);
+    }
+    expect(posted(two!, 'act')).toHaveLength(items.length);
+    expect(posted(one!, 'act')).toEqual([]);
   });
 
   it('draws the file again once it stops changing', async () => {

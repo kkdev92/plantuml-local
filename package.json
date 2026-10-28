@@ -210,6 +210,36 @@
         "title": "%command.openPreviewToSide.title%",
         "category": "PlantUML Local",
         "icon": "$(open-preview)"
+      },
+      {
+        "command": "plantumlLocal.zoomToArea",
+        "title": "%command.zoomToArea.title%",
+        "category": "PlantUML Local"
+      },
+      {
+        "command": "plantumlLocal.scrollToTop",
+        "title": "%command.scrollToTop.title%",
+        "category": "PlantUML Local"
+      },
+      {
+        "command": "plantumlLocal.scrollToBottom",
+        "title": "%command.scrollToBottom.title%",
+        "category": "PlantUML Local"
+      },
+      {
+        "command": "plantumlLocal.scrollToLeftEdge",
+        "title": "%command.scrollToLeftEdge.title%",
+        "category": "PlantUML Local"
+      },
+      {
+        "command": "plantumlLocal.scrollToRightEdge",
+        "title": "%command.scrollToRightEdge.title%",
+        "category": "PlantUML Local"
+      },
+      {
+        "command": "plantumlLocal.scrollToCentre",
+        "title": "%command.scrollToCentre.title%",
+        "category": "PlantUML Local"
       }
     ],
     "menus": {
@@ -260,6 +290,38 @@
           "group": "navigation@1"
         }
       ],
+      "webview/context": [
+        {
+          "command": "plantumlLocal.zoomToArea",
+          "when": "webviewId == 'plantumlLocal.viewer' && plantumlLocal.viewerUri",
+          "group": "1_zoom@1"
+        },
+        {
+          "command": "plantumlLocal.scrollToTop",
+          "when": "webviewId == 'plantumlLocal.viewer' && plantumlLocal.viewerUri",
+          "group": "2_scroll@1"
+        },
+        {
+          "command": "plantumlLocal.scrollToBottom",
+          "when": "webviewId == 'plantumlLocal.viewer' && plantumlLocal.viewerUri",
+          "group": "2_scroll@2"
+        },
+        {
+          "command": "plantumlLocal.scrollToLeftEdge",
+          "when": "webviewId == 'plantumlLocal.viewer' && plantumlLocal.viewerUri",
+          "group": "2_scroll@3"
+        },
+        {
+          "command": "plantumlLocal.scrollToRightEdge",
+          "when": "webviewId == 'plantumlLocal.viewer' && plantumlLocal.viewerUri",
+          "group": "2_scroll@4"
+        },
+        {
+          "command": "plantumlLocal.scrollToCentre",
+          "when": "webviewId == 'plantumlLocal.viewer' && plantumlLocal.viewerUri",
+          "group": "2_scroll@5"
+        }
+      ],
       "commandPalette": [
         {
           "command": "plantumlLocal.openPreview",
@@ -288,6 +350,30 @@
         {
           "command": "plantumlLocal.goToDiagram",
           "when": "editorLangId == markdown && !notebookEditorFocused"
+        },
+        {
+          "command": "plantumlLocal.zoomToArea",
+          "when": "false"
+        },
+        {
+          "command": "plantumlLocal.scrollToTop",
+          "when": "false"
+        },
+        {
+          "command": "plantumlLocal.scrollToBottom",
+          "when": "false"
+        },
+        {
+          "command": "plantumlLocal.scrollToLeftEdge",
+          "when": "false"
+        },
+        {
+          "command": "plantumlLocal.scrollToRightEdge",
+          "when": "false"
+        },
+        {
+          "command": "plantumlLocal.scrollToCentre",
+          "when": "false"
         }
       ]
     },

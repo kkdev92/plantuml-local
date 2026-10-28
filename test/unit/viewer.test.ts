@@ -415,6 +415,28 @@ describe('DiagramViewer', () => {
   });
 });
 
+describe('DiagramViewer and its context menu', () => {
+  it('has the page do what the menu chose, and nothing else', async () => {
+    const panel = makePanel();
+    const viewer = new DiagramViewer(panel, makeDeps(), 'flows', 'file:///flows.puml');
+
+    for (const action of ['zoomToArea', 'top', 'bottom', 'left', 'right', 'centre'] as const) {
+      await viewer.act(action);
+    }
+
+    expect(panel.sent).toEqual([
+      { type: 'act', action: 'zoomToArea' },
+      { type: 'act', action: 'top' },
+      { type: 'act', action: 'bottom' },
+      { type: 'act', action: 'left' },
+      { type: 'act', action: 'right' },
+      { type: 'act', action: 'centre' },
+    ]);
+    // Neither drawn nor listed again: the view moves, not the diagram.
+    expect(of(panel.sent, 'render')).toEqual([]);
+  });
+});
+
 describe('DiagramViewer not updated', () => {
   it('keeps the diagram, saying it is not updated, also when a drawing lands afterwards', async () => {
     let finish: (svg: string) => void = () => undefined;
@@ -466,6 +488,7 @@ describe('viewerBody', () => {
         zoomIn: 'Zoom In',
         fit: 'Fit to Window',
         actualSize: 'Actual Size',
+        zoomToArea: 'Zoom to Area',
         zoomLevel: 'Zoom {0}',
         exportPng: 'Export Diagram as PNG',
         copySvgText: 'Copy Diagram as SVG Text',
@@ -483,6 +506,10 @@ describe('viewerBody', () => {
     expect(body).toContain('<select id="diagrams" aria-label="Select a diagram" hidden>');
     expect(body).toContain('<button id="fit" type="button" aria-label="Fit to Window" title="Fit to Window (0)" aria-pressed="true">Fit to Window</button>');
     expect(body).toContain('<button id="actual" type="button" aria-label="Actual Size" title="Actual Size (1)">100%</button>');
+    // Zoom to Area is a toggle too, pressed while a drag marks an area, the last of the zoom.
+    expect(body).toContain(
+      '>100%</button><button id="area" type="button" aria-label="Zoom to Area" title="Zoom to Area (Z)" aria-pressed="false">Zoom to Area</button></div>'
+    );
     // Beside the zoom, not in it, and kept together: the PNG button, then
     // Copy, which carries what the page says of a copy, then Copy SVG.
     expect(body).toContain('<div id="bar"><div id="tools" role="toolbar"');
@@ -493,6 +520,10 @@ describe('viewerBody', () => {
         '<button id="copy-svg" type="button" aria-label="Copy Diagram as SVG Text" title="Copy Diagram as SVG Text">Copy SVG</button></div></div></header>'
     );
     expect(body).toContain('<main id="stage" tabindex="0" aria-describedby="status">');
+    // With the outline of an area being marked, over the diagram and hidden until then.
+    expect(body).toContain(
+      '<div id="canvas"><img id="diagram" alt="" hidden draggable="false"><div id="marquee" hidden></div></div></main>'
+    );
   });
 
   it('reads out only what the page tells a screen reader, through two regions that take turns', () => {
@@ -504,6 +535,7 @@ describe('viewerBody', () => {
         zoomIn: 'Zoom In',
         fit: 'Fit to Window',
         actualSize: 'Actual Size',
+        zoomToArea: 'Zoom to Area',
         zoomLevel: 'Zoom {0}',
         exportPng: 'Export Diagram as PNG',
         copySvgText: 'Copy Diagram as SVG Text',
@@ -529,6 +561,7 @@ describe('viewerBody', () => {
         zoomIn: 'in',
         fit: '<b>',
         actualSize: 'x',
+        zoomToArea: '<dfn>',
         zoomLevel: '<kbd>{0}',
         exportPng: '<i>',
         copySvgText: '<svg>',
@@ -537,7 +570,7 @@ describe('viewerBody', () => {
       escape
     );
 
-    for (const tag of ['<script>', '<b>', '<i>', '<u>', '<s>', '<em>', '<q>', '<p>', '<ol>', '<kbd>']) {
+    for (const tag of ['<script>', '<b>', '<i>', '<u>', '<s>', '<em>', '<q>', '<p>', '<ol>', '<kbd>', '<dfn>']) {
       expect(body).not.toContain(tag);
     }
     expect(body).toContain('data-spoken="&lt;kbd&gt;{0}"');

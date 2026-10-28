@@ -58,6 +58,7 @@ const REQUIRED = [
   'extension/dist/stdlib/c4.json',
   'extension/media/plantuml.css',
   'extension/media/viewer/viewer.js',
+  'extension/media/viewer/zoom.js',
   'extension/media/viewer/viewer.css',
   'extension/media/png/png.js',
   'extension/l10n/bundle.l10n.ja.json',

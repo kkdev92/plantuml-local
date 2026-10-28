@@ -30,10 +30,24 @@ export const COMMANDS = {
   DIAGRAM_ACTION: `${EXTENSION_ID}.diagramAction`,
   COPY_SVG_TEXT: `${EXTENSION_ID}.copySvgText`,
   GO_TO_DIAGRAM: `${EXTENSION_ID}.goToDiagram`,
+  ZOOM_TO_AREA: `${EXTENSION_ID}.zoomToArea`,
+  SCROLL_TO_TOP: `${EXTENSION_ID}.scrollToTop`,
+  SCROLL_TO_BOTTOM: `${EXTENSION_ID}.scrollToBottom`,
+  SCROLL_TO_LEFT_EDGE: `${EXTENSION_ID}.scrollToLeftEdge`,
+  SCROLL_TO_RIGHT_EDGE: `${EXTENSION_ID}.scrollToRightEdge`,
+  SCROLL_TO_CENTRE: `${EXTENSION_ID}.scrollToCentre`,
 } as const;
 
 /** The view type of the diagram viewer's panels. */
 export const VIEWER_TYPE = `${EXTENSION_ID}.viewer`;
+
+/**
+ * What the diagram viewer's page sets on its drawing area for the panel's
+ * context menu (`data-vscode-context`): the URI of the file it shows, once
+ * a diagram is drawn. The menu's items show only then, and their commands
+ * are given it to know which viewer to act on.
+ */
+export const VIEWER_URI_CONTEXT = `${EXTENSION_ID}.viewerUri`;
 
 /** The view type of the panel a PNG is drawn in. */
 export const PNG_PANEL_TYPE = `${EXTENSION_ID}.png`;

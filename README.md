@@ -217,7 +217,12 @@ diagram gives itself, which PlantUML's `scale` sets. The buttons above it zoom
 out and in, fit it, and show it at 100%; so do the keys `-`, `+`, `0` and `1`.
 Ctrl+wheel (Cmd on macOS) or a pinch zooms at the pointer, the wheel scrolls,
 dragging moves the diagram, and the arrow keys move it by 40 pixels (200 with
-Shift). Each diagram keeps its zoom and position while it is redrawn, while
+Shift). *Zoom to Area* (`Z`) has the next drag mark an area instead, and zooms
+to fit that area in the panel; Esc leaves it without zooming. `Home` and `End`
+scroll to the top and the bottom of the diagram, with Shift to its left and
+right edges, and `C` to its centre; the panel's context menu has these too.
+None of these keys does anything while the list of diagrams has the focus.
+Each diagram keeps its zoom and position while it is redrawn, while
 the panel is hidden, and across a restart. The PNG button beside them exports
 the diagram shown as *Export Diagram as PNG* does, at its own size and scale
 rather than the zoom of the panel, and in the palette of exports: light,
@@ -241,10 +246,10 @@ name for a file's only diagram — else its place in the file, as *Diagram 2 of
 flows*. As you type, the diagram is drawn again and again; the screen reader
 is told only what that comes to — that it was rendered, or why not — once
 drawing settles, and is not told it again until it changes. It also hears the
-zoom the buttons, keys and wheel leave and what came of a copy, and VS Code
-reads out the notice of an export itself. Tab goes from the list through the
-buttons to the drawing area, showing where the focus is, and Enter or Space
-presses a button.
+zoom the buttons, keys, wheel and *Zoom to Area* leave and what came of a
+copy, and VS Code reads out the notice of an export itself. Tab goes from the
+list through the buttons to the drawing area, showing where the focus is, and
+Enter or Space presses a button.
 
 The panel shows the SVG as an image, so nothing in it can run, and loads
 nothing but its own script and stylesheet.
