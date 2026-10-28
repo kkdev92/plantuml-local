@@ -98,6 +98,17 @@ export function textEnd(line: string): RegExp | null {
   return TEXTS.find((text) => text.open.test(line))?.close ?? null;
 }
 
+/** The column of the colon the text of the one-line note `line` follows, or null. */
+export function noteText(line: string): number | null {
+  const note = NOTE.exec(line);
+  const rest = note?.[1] ?? '';
+  const colon = LABEL_COLON.exec(rest);
+  if (note === null || colon === null || FLOATING_TEXT.test(rest)) {
+    return null;
+  }
+  return line.length - rest.length + colon.index;
+}
+
 export function foldingRanges(source: string): Fold[] {
   const folds: Fold[] = [];
   const add = (start: number, end: number, comment = false): void => {

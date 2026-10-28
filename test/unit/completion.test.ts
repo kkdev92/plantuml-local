@@ -2,10 +2,13 @@ import { describe, expect, it } from 'vitest';
 
 import {
   DIRECTIVES,
+  expandSnippet,
   lineContext,
   mightSuggest,
   readCompletionData,
+  SNIPPETS,
   suggest,
+  suggestNames,
   suggestTemplates,
   TEMPLATES,
   type CompletionData,
@@ -223,5 +226,127 @@ describe('DIRECTIVES', () => {
       DIRECTIVES.map((name) => [`!${name}`, 'keyword.control.directive'] as const)
     );
     expect(failures).toEqual([]);
+  });
+});
+
+describe('suggestNames', () => {
+  const D01 = ['@startuml', 'participant "注文係" as A', 'participant Server as B', 'A -> B : hello', '', '@enduml'];
+  const at = (
+    lines: readonly string[],
+    line: number,
+    column = (lines[line] ?? '').length,
+    options: { bare?: boolean; words?: 'always' | 'beside' | 'never' } = {}
+  ): ReturnType<typeof suggestNames> =>
+    suggestNames(lines.join('\n'), line, column, { bare: options.bare ?? true, words: options.words ?? 'always' });
+  const labels = (found: ReturnType<typeof suggestNames>): string[] => found?.snippets.map((snippet) => snippet.label) ?? [];
+
+  it("offers the diagram's unique aliases, its words, and the snippets of a diagram type its markers settle", () => {
+    const found = at(D01, 4);
+
+    expect(found?.aliases).toEqual([{ name: 'A', display: '注文係' }]);
+    // The alias once, as an alias; neither the quoted name nor the start and end lines.
+    expect(found?.words).toEqual(['participant', 'as', 'Server', 'B', 'hello']);
+    expect(labels(found)).toEqual(['alt', 'opt', 'loop', 'par', 'ref', 'note']);
+    expect(found).toMatchObject({ start: 0, end: 0, lead: '' });
+  });
+
+  it('leaves the words out when they are turned off, the aliases and snippets in', () => {
+    const found = at(D01, 4, 0, { words: 'never' });
+
+    expect(found?.words).toEqual([]);
+    expect(found?.aliases).toHaveLength(1);
+    expect(labels(found)).toHaveLength(6);
+    expect(at(['@startuml', 'A -> B', '', '@enduml'], 2, 0, { words: 'never' })).toBeNull();
+  });
+
+  it('offers the words beside aliases or snippets only, when asked to', () => {
+    expect(at(D01, 4, 0, { words: 'beside' })?.words).toEqual(['participant', 'as', 'Server', 'B', 'hello']);
+    // Snippets without aliases.
+    expect(at(['@startuml', 'start', ':pay;', '', '@enduml'], 3, 0, { words: 'beside' })?.words).toEqual([
+      'start',
+      'pay',
+    ]);
+    // Words alone: nothing.
+    expect(at(['@startuml', 'A -> B', '', '@enduml'], 2, 0, { words: 'beside' })).toBeNull();
+    expect(at(['@startuml', 'A -> B', '', '@enduml'], 2, 0)?.words).toEqual(['A', 'B']);
+  });
+
+  it('takes nothing from another diagram of the same source, whether or not the first one ends', () => {
+    const two = ['@startuml(id=alpha)', 'participant "Alpha" as a1', 'a1 -> a2', '@enduml', '@startuml(id=beta)', 'participant "Beta" as b1', 'b1 -> ', '@enduml'];
+    expect(at(two, 6)).toMatchObject({ aliases: [{ name: 'b1', display: 'Beta' }], words: ['participant', 'as'] });
+
+    const unended = ['@startuml(id=alpha)', 'participant "Alpha" as a1', '@startuml(id=beta)', 'b1 -> '];
+    expect(at(unended, 3)).toMatchObject({ aliases: [], words: ['b1'] });
+  });
+
+  it('leaves out the word being typed, and replaces all of it', () => {
+    const found = at(['@startuml', 'A -> Server', 'Ser', '@enduml'], 2, 2);
+
+    expect(found?.words).toEqual(['A', 'Server']);
+    expect(found).toMatchObject({ start: 0, end: 3 });
+  });
+
+  it('offers nothing in protected text, on a directive, on the start or end line, or outside a diagram', () => {
+    const lines = ['@startuml', 'participant "注文係" as A', 'note left', 'text', 'end note', "' x", '!include fo', 'A -> B : "x', '@enduml', 'after'];
+
+    expect(at(lines, 1, 15)).toBeNull();
+    expect(at(lines, 3)).toBeNull();
+    expect(at(lines, 5)).toBeNull();
+    expect(at(lines, 6)).toBeNull();
+    expect(at(lines, 7)).toBeNull();
+    expect(at(lines, 0)).toBeNull();
+    expect(at(lines, 8)).toBeNull();
+    expect(at(lines, 9)).toBeNull();
+    // Lines above the start line, which the engine leaves out.
+    expect(at(['x', '@startuml', 'A', '@enduml'], 0)).toBeNull();
+  });
+
+  it('takes a source without a start line for one diagram only where it is drawn as one', () => {
+    expect(at(['A -> B', ''], 1)?.words).toEqual(['A', 'B']);
+    expect(at(['A -> B', ''], 1, 0, { bare: false })).toBeNull();
+  });
+
+  it('offers nothing in a JSON or YAML diagram, and nothing when there is nothing to offer', () => {
+    expect(at(['@startjson', '{', '  "a": 1', '}', '@endjson'], 2)).toBeNull();
+    expect(at(['@startuml', '', '@enduml'], 1)).toBeNull();
+  });
+
+  it('offers the snippets only on a line of their own, with the indentation their lines go on with', () => {
+    expect(labels(at(['@startuml', 'participant A', 'A -> B : al', '@enduml'], 2))).toEqual([]);
+    expect(at(['@startuml', 'participant A', '  al', '@enduml'], 2)).toMatchObject({ start: 2, end: 4, lead: '  ' });
+    expect(labels(at(['@startuml', 'participant A', '  al', '@enduml'], 2))).toHaveLength(6);
+  });
+
+  it('offers no snippets where the markers settle no type, or in a type that has none', () => {
+    expect(labels(at(['@startuml', 'A -> B', '', '@enduml'], 2))).toEqual([]);
+    expect(labels(at(['@startmindmap', '* root', '', '@endmindmap'], 2))).toEqual([]);
+    expect(at(['@startmindmap', '* root', '** child', '@endmindmap'], 2)?.words).toEqual(['root']);
+  });
+
+  it('offers the activity snippets in an activity diagram, in a partition but not in a skinparam block', () => {
+    expect(labels(at(['@startuml', 'start', ':a;', '', 'stop', '@enduml'], 3))).toEqual(['if', 'while', 'repeat', 'fork']);
+    expect(labels(at(['@startuml', 'start', 'partition P {', '  ', '}', 'stop', '@enduml'], 3))).toHaveLength(4);
+    expect(labels(at(['@startuml', 'start', 'skinparam activity {', '  ', '}', 'stop', '@enduml'], 3))).toEqual([]);
+  });
+});
+
+describe('SNIPPETS', () => {
+  const all = Object.values(SNIPPETS).flat();
+
+  it('are the sequence and activity snippets, each label once', () => {
+    expect(Object.keys(SNIPPETS)).toEqual(['sequence', 'activity']);
+    expect(new Set(all.map((snippet) => snippet.label)).size).toBe(all.length);
+  });
+
+  it('use only placeholders whose text needs no escaping, numbered from 1 without gaps', () => {
+    for (const { label, body } of all) {
+      const stops = [...body.matchAll(/\$\{?(\d+)/g)].map((match) => Number(match[1]));
+      expect(Math.min(...stops), label).toBe(1);
+      expect(new Set(stops).size, label).toBe(Math.max(...stops));
+      for (const [, text = ''] of body.matchAll(/\$\{\d+[:|]([^}]*)\}/g)) {
+        expect(text, label).not.toMatch(/[$\{]/);
+      }
+      expect(expandSnippet(body), label).not.toMatch(/[$\{}]/);
+    }
   });
 });

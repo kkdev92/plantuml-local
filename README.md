@@ -46,7 +46,7 @@ Your diagram source is processed locally and is not sent to a rendering service.
 - **C4 and Azure Libraries**: `!include <C4/C4_Container>` and the other C4 modules, and the Azure icons with `!include <azure/…>`, ship inside the extension and render offline
 - **Fault-Tolerant**: A syntax error shows up inline at the broken diagram; the rest of the page stays intact
 - **Problems Panel**: Errors, warnings and unsupported syntax in the diagrams of open Markdown and PlantUML files are listed with their line, preview or not
-- **Writing Help**: Completion for start lines, directives, themes and icons, templates for sixteen kinds of diagram, and quick fixes that name a diagram for export and add a missing end line
+- **Writing Help**: Completion for start lines, directives, themes and icons, the aliases and words of the diagram you are in, snippets of sequence and activity blocks, templates for sixteen kinds of diagram, and quick fixes that name a diagram for export and add a missing end line
 - **Actions Above Each Diagram**: *Preview*, *Export SVG* and *Export PNG* sit above the first line of each diagram, in `.puml` files and Markdown alike, and act on that diagram
 - **Go to Diagram**: *Go to Diagram in Document…* lists the diagram blocks of a Markdown file — with the heading above each, its kind and its title or first line — and moves the cursor to the one picked
 - **Colours**: A swatch beside each colour a diagram sets — a `skinparam` value, an element's colour, a `<style>` property — opens VS Code's colour picker, which writes the pick back as `#RRGGBB`
@@ -290,6 +290,29 @@ cursor, inside the block quote or list item the cursor is in, as one edit that
 one Undo takes back. In a block that already holds a
 diagram, it asks to add a new block after it; in a diagram, a comment or a block
 of another language, it says why it does not.
+
+Elsewhere in a diagram, the list offers what that diagram holds, and nothing
+from other diagrams or documents:
+
+- the aliases it declares, each with the name it shows: `A` with `Order desk`
+  for `participant "Order desk" as A`, `web` with `Web` for
+  `component [Web] as web`
+- in a sequence or an activity diagram, on a line of its own, snippets of its
+  blocks with their parts to tab through: `alt`, `opt`, `loop`, `par`, `ref`
+  and `note`, or `if`, `while`, `repeat` and `fork`. A `@startuml` diagram is
+  taken for one or the other by lines that only that type reads, such as
+  `participant` or `activate`, and `start` or `:action;`. Where its lines do
+  not tell, no snippet is offered
+- its words, cut as VS Code cuts them, leaving out those of comments, quoted
+  text and notes
+
+The words take the place of VS Code's own word suggestions, which come from
+every open document of the language, and follow their setting,
+`editor.wordBasedSuggestions`: with `off` there are none. By default
+(`offWithInlineSuggestions`) VS Code lists no words in a PlantUML file while
+inline suggestions are on there, which an extension cannot tell; so in a
+`.puml` file the diagram's words come only beside its aliases or snippets, and
+where they would come alone, the list is left to VS Code.
 
 Markdown turns quick suggestions off, so in a Markdown file the list opens on
 those characters, or with *Trigger Suggest* (`Ctrl+Space`) — type `puml` and

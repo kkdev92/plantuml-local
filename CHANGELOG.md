@@ -26,6 +26,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `img:` (as in `$sprite="img:…"`), now gets a warning on its line in the
   Problems panel, a note above the drawing in the Markdown and `.puml`
   previews, and a note in an export's notice.
+- **Completion offers the aliases and the snippets of the diagram at the
+  cursor.** In a ` ```plantuml ` block or a `.puml` file, the list offers each
+  alias the diagram declares with the name it shows (`A` with `Order desk`
+  for `participant "Order desk" as A`). On a line of its own, a sequence
+  diagram offers snippets of `alt`, `opt`, `loop`, `par`, `ref` and `note`,
+  and an activity diagram of `if`, `while`, `repeat` and `fork`, with their
+  parts to tab through; each draws as inserted. A `@startuml` diagram is
+  taken for one or the other by lines that only that type reads, such as
+  `participant` or `start`; where its lines do not tell, no snippet is
+  offered.
+
+### Changed
+
+- **The words suggested in a diagram are that diagram's own.** VS Code's word
+  suggestions come from every open document of the language: the names of
+  other diagrams and of open include files in a `.puml` file, the prose of
+  the document in a Markdown block. In a diagram, the words now come from
+  that diagram alone, leaving out those of comments, quoted text and notes.
+  They follow `editor.wordBasedSuggestions`: none with `off`. With its
+  default, `offWithInlineSuggestions`, VS Code lists no words in a PlantUML
+  file while inline suggestions are on there, which an extension cannot
+  tell; so a `.puml` file gets the diagram's words only beside its aliases
+  or snippets, and the rest is left to VS Code.
 
 ## [0.16.0] - 2026-10-27
 
