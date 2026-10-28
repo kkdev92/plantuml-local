@@ -9,6 +9,12 @@
  * of diagrams and the drawing again. All it keeps is the file and diagram
  * it is told to, for a restart, and how each diagram was zoomed.
  *
+ * A screen reader is told what a drawing comes to, not that one is under
+ * way: the file is drawn again each time it stops changing, and being told
+ * each time would get in the way of typing. The image and the panel are
+ * named after the diagram, by the title it draws, else by its name, else by
+ * its place in the file.
+ *
  * Like the exporter, this has no dependency on the `vscode` module: the
  * panel and the renderer arrive as ports, and the caller hands over the
  * file's text.
@@ -24,6 +30,7 @@ import { withIncludeReason } from '../includes/describe';
 import { changeTo } from '../includes/tracking';
 import { drawReadable } from '../render/palette';
 import { recognizeEngineError, recognizeEngineWarnings } from '../render/engine-error';
+import { drawnTitle } from '../render/title';
 
 /** What the viewer needs of its panel. */
 export interface ViewerPanel {
@@ -35,9 +42,16 @@ export interface ViewerLabels {
   errorMessage(message: string): string;
   /** The name of an unnamed diagram, from its position counting from 1. */
   diagram(position: number): string;
+  /**
+   * What a screen reader calls an unnamed diagram among several: its
+   * position counting from 1, in the file named `file`.
+   */
+  unnamed(position: number, file: string): string;
   /** A diagram in the list: its name and the line it starts on. */
   entry(name: string, line: number): string;
   rendering: string;
+  /** What a screen reader is told once the diagram called `name` is drawn. */
+  rendered(name: string): string;
   /** The diagram shown is no longer in the file. */
   gone: string;
   /** No diagram is chosen yet: one is to be picked from the list. */
@@ -117,6 +131,8 @@ export interface ToolbarLabels {
   zoomIn: string;
   fit: string;
   actualSize: string;
+  /** What a screen reader is told of a zoom it changed, the percentage in place of `{0}`. */
+  zoomLevel: string;
   /** The PNG button, which exports the diagram shown. */
   exportPng: string;
   /** The Copy SVG button, which copies the diagram shown as SVG text. */
@@ -141,18 +157,21 @@ export interface ToolbarLabels {
 
 /**
  * The body of the page, which media/viewer/viewer.js fills. Each button's
- * tooltip names the key that does the same.
+ * tooltip names the key that does the same. The status line is not read out
+ * as it changes: what a screen reader is told goes to the two regions of
+ * `announcer`, which take turns so that the same words are said again, as
+ * VS Code's own announcements do.
  */
 export function viewerBody(labels: ToolbarLabels, escape: (text: string) => string): string {
   const button = (id: string, text: string, label: string, key: string, more = ''): string =>
     `<button id="${id}" type="button" aria-label="${escape(label)}" title="${escape(`${label} (${key})`)}"${more}>${escape(text)}</button>`;
   return [
-    `<header><select id="diagrams" aria-label="${escape(labels.selectDiagram)}" hidden></select><span id="status" role="status"></span>`,
+    `<header><select id="diagrams" aria-label="${escape(labels.selectDiagram)}" hidden></select><span id="status"></span>`,
     // The zoom, then PNG and Copy, which a narrow panel wraps together.
     '<div id="bar">',
     `<div id="tools" role="toolbar" aria-label="${escape(labels.toolbar)}">`,
     button('zoom-out', '−', labels.zoomOut, '-'),
-    '<span id="zoom" aria-live="polite"></span>',
+    `<span id="zoom" data-spoken="${escape(labels.zoomLevel)}"></span>`,
     button('zoom-in', '+', labels.zoomIn, '+'),
     button('fit', labels.fit, labels.fit, '0', ' aria-pressed="true"'),
     button('actual', '100%', labels.actualSize, '1'),
@@ -167,7 +186,9 @@ export function viewerBody(labels: ToolbarLabels, escape: (text: string) => stri
     '</div>',
     '</div>',
     '</header>',
-    '<main id="stage" tabindex="0"><div id="canvas"><img id="diagram" alt="" hidden draggable="false"></div></main>',
+    // Focused, the drawing area is described by the status line.
+    '<main id="stage" tabindex="0" aria-describedby="status"><div id="canvas"><img id="diagram" alt="" hidden draggable="false"></div></main>',
+    '<div id="announcer"><div role="status"></div><div role="status"></div></div>',
   ].join('');
 }
 
@@ -297,7 +318,7 @@ export class DiagramViewer {
       return;
     }
 
-    await this.status(labels.rendering, false, false);
+    await this.status(labels.rendering, false, false, null);
     try {
       const asked = this.deps.isDark();
       const { result, palette: dark } = await drawReadable(
@@ -311,12 +332,15 @@ export class DiagramViewer {
         return;
       }
       this.dependencies = dependencies;
+      const label = drawnTitle(svg) ?? diagram.name ?? labels.unnamed(index + 1, this.fileName);
       await this.panel.post({
         type: 'render',
         svg,
         backdrop: dark ? DIAGRAM_BACKDROP.dark : DIAGRAM_BACKDROP.light,
         // Which diagram this is, so the page keeps each one's zoom apart.
         key: diagram.name ?? `#${String(index)}`,
+        // What the image and the drawing area are called.
+        label,
       });
       // The engine draws its errors: the drawing stays, and the reason is
       // named with the line of the file it points to. sourceLine counts
@@ -331,7 +355,8 @@ export class DiagramViewer {
         });
         // And what the engine drew the diagram without.
         const leftOut = unsupportedKinds(shape.source).map((kind) => notationLabel(kind, labels));
-        await this.status([...warnings, ...leftOut, why].filter((text) => text !== '').join(' '), false, false);
+        const text = [...warnings, ...leftOut, why].filter((part) => part !== '').join(' ');
+        await this.status(text, false, false, [labels.rendered(label), text].filter((part) => part !== '').join(' '));
       } else {
         const line = failure.line === null ? null : diagram.sourceLine + failure.line;
         const message = withIncludeReason(failure.message, failedIncludes);
@@ -372,7 +397,12 @@ export class DiagramViewer {
       : diagrams.findIndex((diagram) => diagram.name === this.target.name);
   }
 
-  private async status(text: string, error: boolean, clear: boolean): Promise<void> {
-    await this.panel.post({ type: 'status', text, error, clear });
+  /**
+   * Shows `text` in the status line, and has the page tell a screen reader
+   * `spoken` once drawing settles, unless it told it the same last. Null
+   * while a drawing is under way, which a screen reader is not told of.
+   */
+  private async status(text: string, error: boolean, clear: boolean, spoken: string | null = text): Promise<void> {
+    await this.panel.post({ type: 'status', text, error, clear, spoken });
   }
 }

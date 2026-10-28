@@ -1576,8 +1576,10 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         labels: {
           errorMessage: (message) => errorMessage(message, l10n),
           diagram: (position) => l10n.t('Diagram {0}', String(position)),
+          unnamed: (position, file) => l10n.t('Diagram {0} of {1}', String(position), file),
           entry: (name, line) => l10n.t('{0} (line {1})', name, String(line)),
           rendering: l10n.t('Rendering diagram…'),
+          rendered: (name) => l10n.t('Rendered {0}.', name),
           gone: l10n.t('The selected diagram is no longer in this file. Select another diagram from the list.'),
           choose: l10n.t('Select a diagram from the list.'),
           empty: l10n.t('No diagrams found in this file.'),
@@ -1614,6 +1616,8 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         zoomIn: l10n.t('Zoom In'),
         fit: l10n.t('Fit to Window'),
         actualSize: l10n.t('Actual Size'),
+        // The page puts the percentage in place of {0}.
+        zoomLevel: l10n.t('Zoom {0}', '{0}'),
         exportPng: l10n.t('Export Diagram as PNG'),
         copySvgText: l10n.t('Copy Diagram as SVG Text'),
         copy: {

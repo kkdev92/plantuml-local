@@ -49,6 +49,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   file while inline suggestions are on there, which an extension cannot
   tell; so a `.puml` file gets the diagram's words only beside its aliases
   or snippets, and the rest is left to VS Code.
+- **The `.puml` preview tells a screen reader what a drawing comes to, not
+  each drawing.** Its status line and zoom were live regions, so a screen
+  reader heard "Rendering diagram…" and the zoom each time the diagram was
+  drawn again — at every pause in typing. It now hears, once drawing settles,
+  that the diagram was rendered or why not, and only when that changes; the
+  zoom when a button, a key or the wheel changes it; and what came of a copy.
+  The image and the drawing area, which had no name, are named after the
+  diagram: the title it draws, else its name, else its place in the file.
+
+### Fixed
+
+- **The focus shows on the `.puml` preview's pressed Fit button.** The focus
+  ring of the preview's buttons and list was drawn inside them, in the colour
+  that the default themes give a pressed button's background, so *Fit to
+  Window* — pressed while the diagram is fitted — showed no focus at all; and
+  in a high contrast theme the ring only recoloured the border. It is now
+  drawn around the control, 2 px out, as VS Code draws it around its own
+  buttons.
 
 ## [0.16.0] - 2026-10-27
 

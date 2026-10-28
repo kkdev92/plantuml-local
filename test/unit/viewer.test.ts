@@ -40,8 +40,10 @@ function makeDeps(
     labels: {
       errorMessage: (message) => message,
       diagram: (position) => `Diagram ${String(position)}`,
+      unnamed: (position, file) => `Diagram ${String(position)} of ${file}`,
       entry: (name, line) => `${name} (line ${String(line)})`,
       rendering: 'rendering',
+      rendered: (name) => `rendered ${name}`,
       gone: 'gone',
       choose: 'choose',
       empty: 'empty',
@@ -123,10 +125,12 @@ describe('DiagramViewer', () => {
         backdrop: '#1b1b1b',
         // Unnamed: the page keeps its zoom by its position.
         key: '#1',
+        // And a screen reader knows it by its place in the file.
+        label: 'Diagram 2 of flows',
       },
     ]);
     // The last word is an empty status: drawn and current.
-    expect(panel.sent.at(-1)).toEqual({ type: 'status', text: '', error: false, clear: false });
+    expect(panel.sent.at(-1)).toEqual({ type: 'status', text: '', error: false, clear: false, spoken: 'rendered Diagram 2 of flows' });
   });
 
   it('waits for the page before drawing a diagram it was told to show', async () => {
@@ -273,7 +277,7 @@ describe('DiagramViewer', () => {
 
     expect(deps.render).not.toHaveBeenCalled();
     expect(of(panel.sent, 'diagrams')[0]).toMatchObject({ selected: -1 });
-    expect(panel.sent.at(-1)).toEqual({ type: 'status', text: 'choose', error: false, clear: true });
+    expect(panel.sent.at(-1)).toEqual({ type: 'status', text: 'choose', error: false, clear: true, spoken: 'choose' });
 
     // Picking one from the list draws it.
     await viewer.receive({ type: 'select', index: 1 }, FLOWS);
@@ -290,7 +294,7 @@ describe('DiagramViewer', () => {
     await viewer.update('@startuml(id=billing)\nE -> F\n@enduml');
 
     expect(deps.render).not.toHaveBeenCalled();
-    expect(panel.sent.at(-1)).toEqual({ type: 'status', text: 'gone', error: true, clear: true });
+    expect(panel.sent.at(-1)).toEqual({ type: 'status', text: 'gone', error: true, clear: true, spoken: 'gone' });
   });
 
   it('explains what the engine cannot draw instead of drawing it', async () => {
@@ -303,7 +307,7 @@ describe('DiagramViewer', () => {
       await new DiagramViewer(panel, deps, 'one', 'file:///one.puml').show(source, 0);
 
       expect(deps.render, reason).not.toHaveBeenCalled();
-      expect(panel.sent.at(-1)).toEqual({ type: 'status', text: reason, error: true, clear: true });
+      expect(panel.sent.at(-1)).toEqual({ type: 'status', text: reason, error: true, clear: true, spoken: reason });
     }
   });
 
@@ -321,6 +325,7 @@ describe('DiagramViewer', () => {
       text: 'engine: Syntax Error? (Assumed diagram type: sequence) @ 7',
       error: true,
       clear: false,
+      spoken: 'engine: Syntax Error? (Assumed diagram type: sequence) @ 7',
     });
   });
 
@@ -338,6 +343,7 @@ describe('DiagramViewer', () => {
       text: 'engine: cannot include shared.puml: not found @ 2',
       error: true,
       clear: false,
+      spoken: 'engine: cannot include shared.puml: not found @ 2',
     });
   });
 
@@ -367,7 +373,13 @@ describe('DiagramViewer', () => {
       0
     );
 
-    expect(panel.sent.at(-1)).toEqual({ type: 'status', text: 'formula <math> embedded image', error: false, clear: false });
+    expect(panel.sent.at(-1)).toEqual({
+      type: 'status',
+      text: 'formula <math> embedded image',
+      error: false,
+      clear: false,
+      spoken: 'rendered one formula <math> embedded image',
+    });
   });
 
   it('names an emoji as the reason when the engine fails on one', async () => {
@@ -378,7 +390,7 @@ describe('DiagramViewer', () => {
 
     await new DiagramViewer(panel, deps, 'one', 'file:///one.puml').show('@startuml\nA -> B : <:smile:>\n@enduml', 0);
 
-    expect(panel.sent.at(-1)).toEqual({ type: 'status', text: 'emoji', error: true, clear: true });
+    expect(panel.sent.at(-1)).toEqual({ type: 'status', text: 'emoji', error: true, clear: true, spoken: 'emoji' });
   });
 
   it('drops a drawing that finishes after a newer one was asked for', async () => {
@@ -398,7 +410,7 @@ describe('DiagramViewer', () => {
 
     expect(of(panel.sent, 'render')).toEqual([
       // The lone diagram of a file goes by the file's name.
-      { type: 'render', svg: '<svg>@startuml\nnew\n@enduml</svg>', backdrop: '#FFFFFF', key: 'one' },
+      { type: 'render', svg: '<svg>@startuml\nnew\n@enduml</svg>', backdrop: '#FFFFFF', key: 'one', label: 'one' },
     ]);
   });
 });
@@ -420,11 +432,15 @@ describe('DiagramViewer not updated', () => {
     await drawing;
 
     expect(of(panel.sent, 'render')).toHaveLength(1);
-    expect(of(panel.sent, 'status').at(-1)).toEqual({ type: 'status', text: 'not updated', error: false, clear: false });
+    // As it is told, and once the drawing lands, with it.
+    expect(of(panel.sent, 'status').slice(-2)).toEqual([
+      { type: 'status', text: 'not updated', error: false, clear: false, spoken: 'not updated' },
+      { type: 'status', text: 'not updated', error: false, clear: false, spoken: 'rendered one not updated' },
+    ]);
 
     // Drawn again, as on a save: the note goes.
     await viewer.update('@startuml\nnew\n@enduml');
-    expect(of(panel.sent, 'status').at(-1)).toEqual({ type: 'status', text: '', error: false, clear: false });
+    expect(of(panel.sent, 'status').at(-1)).toEqual({ type: 'status', text: '', error: false, clear: false, spoken: 'rendered one' });
   });
 });
 
@@ -450,6 +466,7 @@ describe('viewerBody', () => {
         zoomIn: 'Zoom In',
         fit: 'Fit to Window',
         actualSize: 'Actual Size',
+        zoomLevel: 'Zoom {0}',
         exportPng: 'Export Diagram as PNG',
         copySvgText: 'Copy Diagram as SVG Text',
         copy,
@@ -459,6 +476,8 @@ describe('viewerBody', () => {
 
     expect(body).toContain('<div id="tools" role="toolbar" aria-label="Diagram zoom">');
     expect(body).toContain('<button id="zoom-out" type="button" aria-label="Zoom Out" title="Zoom Out (-)">−</button>');
+    // The zoom shown between them, with what the page tells a screen reader of it.
+    expect(body).toContain('</button><span id="zoom" data-spoken="Zoom {0}"></span><button id="zoom-in"');
     expect(body).toContain('<button id="zoom-in" type="button" aria-label="Zoom In" title="Zoom In (+)">+</button>');
     // Fit is a toggle, pressed while the diagram is fitted.
     expect(body).toContain('<select id="diagrams" aria-label="Select a diagram" hidden>');
@@ -473,7 +492,32 @@ describe('viewerBody', () => {
         ' data-copying="Copying…" data-copied="Copied." data-failed="Could not copy: {0}" data-unmade="No PNG." data-unwritten="Not taken.">Copy</button>' +
         '<button id="copy-svg" type="button" aria-label="Copy Diagram as SVG Text" title="Copy Diagram as SVG Text">Copy SVG</button></div></div></header>'
     );
-    expect(body).toContain('<main id="stage" tabindex="0">');
+    expect(body).toContain('<main id="stage" tabindex="0" aria-describedby="status">');
+  });
+
+  it('reads out only what the page tells a screen reader, through two regions that take turns', () => {
+    const body = viewerBody(
+      {
+        selectDiagram: 'Select a diagram',
+        toolbar: 'Diagram zoom',
+        zoomOut: 'Zoom Out',
+        zoomIn: 'Zoom In',
+        fit: 'Fit to Window',
+        actualSize: 'Actual Size',
+        zoomLevel: 'Zoom {0}',
+        exportPng: 'Export Diagram as PNG',
+        copySvgText: 'Copy Diagram as SVG Text',
+        copy,
+      },
+      escape
+    );
+
+    // The status line shows a drawing under way, so it is not read out as
+    // it changes; nor is the zoom, which fitting changes as the file does.
+    expect(body).toContain('<header><select id="diagrams" aria-label="Select a diagram" hidden></select><span id="status"></span>');
+    expect(body).not.toContain('aria-live');
+    expect(body.match(/role="status"/g)).toHaveLength(2);
+    expect(body).toContain('</main><div id="announcer"><div role="status"></div><div role="status"></div></div>');
   });
 
   it('escapes the labels it is given', () => {
@@ -485,6 +529,7 @@ describe('viewerBody', () => {
         zoomIn: 'in',
         fit: '<b>',
         actualSize: 'x',
+        zoomLevel: '<kbd>{0}',
         exportPng: '<i>',
         copySvgText: '<svg>',
         copy: { text: '<u>', label: '"><s>', copying: '<em>', copied: '"x"', failed: '<q>{0}', unmade: '<p>', unwritten: '<ol>' },
@@ -492,9 +537,10 @@ describe('viewerBody', () => {
       escape
     );
 
-    for (const tag of ['<script>', '<b>', '<i>', '<u>', '<s>', '<em>', '<q>', '<p>', '<ol>']) {
+    for (const tag of ['<script>', '<b>', '<i>', '<u>', '<s>', '<em>', '<q>', '<p>', '<ol>', '<kbd>']) {
       expect(body).not.toContain(tag);
     }
+    expect(body).toContain('data-spoken="&lt;kbd&gt;{0}"');
     expect(body).toContain('data-copied="&quot;x&quot;"');
     expect(body).toContain('aria-label="&quot;&gt;&lt;script&gt;"');
     expect(body).toContain('aria-label="a&amp;b"');
@@ -525,13 +571,65 @@ describe('DiagramViewer and the palette', () => {
     const panel = makePanel();
     const deps = makeDeps({ isDark: () => true, resolvePalette: () => Promise.resolve(false) });
     await new DiagramViewer(panel, deps, 'one', 'file:///one.puml').show('@startuml\n!theme plain\nA -> B\n@enduml', 0);
-    expect(panel.sent.at(-1)).toEqual({ type: 'status', text: 'other palette false', error: false, clear: false });
+    expect(panel.sent.at(-1)).toEqual({
+      type: 'status',
+      text: 'other palette false',
+      error: false,
+      clear: false,
+      spoken: 'rendered one other palette false',
+    });
   });
 
   it('says nothing when it is drawn as asked', async () => {
     const panel = makePanel();
     const deps = makeDeps({ isDark: () => true });
     await new DiagramViewer(panel, deps, 'one', 'file:///one.puml').show('@startuml\nA -> B\n@enduml', 0);
-    expect(panel.sent.at(-1)).toEqual({ type: 'status', text: '', error: false, clear: false });
+    expect(panel.sent.at(-1)).toEqual({ type: 'status', text: '', error: false, clear: false, spoken: 'rendered one' });
+  });
+});
+
+describe('DiagramViewer and screen readers', () => {
+  /** An SVG with the title the engine draws for `title Order\nflow`, on two lines. */
+  const TITLED =
+    '<svg><g><g class="title"><text x="10" y="21.2">Order</text><text x="10" y="37.5">flow</text></g>' +
+    '<text x="5" y="60">A</text></g></svg>';
+
+  it('names the diagram by the title it draws, else by its name, else by its place in the file', async () => {
+    const titled = makePanel();
+    const deps = makeDeps({ render: (source) => Promise.resolve(source.includes('A -> B') ? TITLED : `<svg>${source}</svg>`) });
+    const viewer = new DiagramViewer(titled, deps, 'flows', 'file:///flows.puml');
+
+    await viewer.show(FLOWS, 0);
+    expect(of(titled.sent, 'render').at(-1)).toMatchObject({ key: 'orders', label: 'Order flow' });
+    await viewer.receive({ type: 'select', index: 1 }, FLOWS);
+    expect(of(titled.sent, 'render').at(-1)).toMatchObject({ key: '#1', label: 'Diagram 2 of flows' });
+
+    // An untitled diagram with a name goes by it, as a lone one goes by the file's.
+    const named = makePanel();
+    await new DiagramViewer(named, makeDeps(), 'flows', 'file:///flows.puml').show(FLOWS, 0);
+    expect(of(named.sent, 'render').at(-1)).toMatchObject({ label: 'orders' });
+    const lone = makePanel();
+    await new DiagramViewer(lone, makeDeps(), 'one', 'file:///one.puml').show('@startuml\nX -> Y\n@enduml', 0);
+    expect(of(lone.sent, 'render').at(-1)).toMatchObject({ label: 'one' });
+  });
+
+  it('names a diagram the engine drew as an error by its name, as the error has no title', async () => {
+    const svg = readFileSync(join(__dirname, 'fixtures/engine-output/syntax-error.svg'), 'utf8');
+    const panel = makePanel();
+    const source = ['@startuml(id=first)', 'title Broken', 'this is not valid ;;; [[[', '@enduml'].join('\n');
+    await new DiagramViewer(panel, makeDeps({ render: () => Promise.resolve(svg) }), 'one', 'file:///one.puml').show(source, 0);
+
+    expect(of(panel.sent, 'render').at(-1)).toMatchObject({ label: 'first' });
+  });
+
+  it('has the page tell a screen reader what the drawing came to, and nothing while it is under way', async () => {
+    const panel = makePanel();
+    const deps = makeDeps({ render: () => Promise.resolve(TITLED) });
+    await new DiagramViewer(panel, deps, 'one', 'file:///one.puml').show('@startuml\ntitle Order\\nflow\nA -> B\n@enduml', 0);
+
+    expect(of(panel.sent, 'status')).toEqual([
+      { type: 'status', text: 'rendering', error: false, clear: false, spoken: null },
+      { type: 'status', text: '', error: false, clear: false, spoken: 'rendered Order flow' },
+    ]);
   });
 });

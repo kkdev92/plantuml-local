@@ -47,7 +47,8 @@ const LONE_MESSAGES = [/^Your data does not sound like \S+ data$/, /^Syntax erro
 const NOT_SUPPORTED = 'Diagram not supported by this release of PlantUML';
 const DIRECTIVE_INTRO = 'Sorry, but the following directive ';
 
-function decode(text: string): string {
+/** The text of an element of the engine's SVG, its escaped characters as written. */
+export function decode(text: string): string {
   return text
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')

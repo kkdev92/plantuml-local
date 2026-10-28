@@ -235,6 +235,17 @@ a PNG does not apply to it; an SVG over 32 MiB is not copied, and the notice
 then offers *Export as SVG*, as it does when the clipboard does not take the
 text.
 
+For a screen reader, the image and the drawing area carry the diagram's name:
+the title it draws, else its name — the id on its start line, or the file's
+name for a file's only diagram — else its place in the file, as *Diagram 2 of
+flows*. As you type, the diagram is drawn again and again; the screen reader
+is told only what that comes to — that it was rendered, or why not — once
+drawing settles, and is not told it again until it changes. It also hears the
+zoom the buttons, keys and wheel leave and what came of a copy, and VS Code
+reads out the notice of an export itself. Tab goes from the list through the
+buttons to the drawing area, showing where the focus is, and Enter or Space
+presses a button.
+
 The panel shows the SVG as an image, so nothing in it can run, and loads
 nothing but its own script and stylesheet.
 
