@@ -117,9 +117,13 @@
 
   /** The zoom showing the whole diagram, but never past 100%. */
   function fitZoom() {
-    const width = (stage.clientWidth - 2 * MARGIN) / size.width;
-    const height = (stage.clientHeight - 2 * MARGIN) / size.height;
-    return clamp(Math.min(1, width, height));
+    const box = stage.getBoundingClientRect();
+    return viewerZoom.toFit({
+      client: { width: stage.clientWidth, height: stage.clientHeight },
+      box: { width: box.width, height: box.height },
+      size,
+      margin: MARGIN,
+    });
   }
 
   /**
