@@ -79,6 +79,25 @@ describe('the declarations of the bundled libraries', () => {
     expect(count).toBeGreaterThan(2000);
   });
 
+  it('name each file as upstream writes its path, which its key is in lower case', () => {
+    const directories: Record<string, string> = { azure: 'azure', c4: 'C4' };
+    for (const library of Object.keys(record.libraries)) {
+      const written = JSON.parse(read(`assets/declarations/${library}.json`).toString('utf8')) as {
+        files: Record<string, string>;
+      };
+      expect(Object.keys(written.files)).toEqual(Object.keys(entriesOf(library)));
+      for (const [key, file] of Object.entries(written.files)) {
+        expect(file.toLowerCase()).toBe(key);
+        expect(record.libraries[library]?.files[`stdlib/${directories[library] ?? ''}/${file}.puml`], file).toBeDefined();
+      }
+    }
+    expect(
+      (JSON.parse(read('assets/declarations/azure.json').toString('utf8')) as { files: Record<string, string> }).files[
+        'aimachinelearning/azurebotservice'
+      ]
+    ).toBe('AIMachineLearning/AzureBotService');
+  });
+
   it('count lines from the first of each asset text, which a BOM upstream does not move', () => {
     // C4_Sequence.puml starts with a BOM and then its include; the asset holds the text without the BOM.
     expect(record.libraries.c4?.files['stdlib/C4/C4_Sequence.puml']).toBeDefined();

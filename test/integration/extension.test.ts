@@ -1973,11 +1973,15 @@ describe('completion (dist)', () => {
     ];
     expect(vscodeStub._test.completionProviders[1]?.selector).toEqual(onDisk);
     expect(vscodeStub._test.completionProviders[1]?.triggers).toEqual([' ', '/', '\\']);
-    expect(vscodeStub._test.definitionProviders.map((registered) => registered.selector)).toEqual([onDisk]);
+    // Go to Definition of what diagrams define comes first, for every document.
+    expect(vscodeStub._test.definitionProviders.map((registered) => registered.selector)).toEqual([
+      [{ language: 'markdown' }, { language: 'plantuml' }],
+      onDisk,
+    ]);
     // The stub's workspace folder is no folder on disk: nothing is looked for in it.
     const document = makeEditor('file:///c/inc/a.puml', '!include common.puml', 0, { languageId: 'plantuml' }).document;
     await expect(
-      vscodeStub._test.definitionProviders[0]?.provider.provideDefinition(document, new vscodeStub.Position(0, 12))
+      vscodeStub._test.definitionProviders[1]?.provider.provideDefinition(document, new vscodeStub.Position(0, 12))
     ).resolves.toBeUndefined();
     await expect(
       vscodeStub._test.completionProviders[1]?.provider.provideCompletionItems(document, new vscodeStub.Position(0, 9))
@@ -2430,11 +2434,11 @@ describe('definitions in completion and parameter hints (dist)', () => {
     expect(status()).toMatchObject({
       text: 'Definitions: diagram and includes (partial)',
       severity: vscodeStub.LanguageStatusSeverity.Warning,
-      detail: 'Some definitions are not offered. See the Output panel for the reasons.',
+      detail: 'Some definitions are missing. See the Output panel for the reasons.',
     });
     expect(vscodeStub._test.logs.slice(logged)).toEqual([
       expect.stringMatching(
-        /^info: Completion and parameter hints in defs\/partial\.puml did not read:\ndefs\/partial\.puml, line 2: <C4\/C4_Nothing> was not read\. No bundled library has this file\./
+        /^info: Completion, parameter hints and Go to Definition in defs\/partial\.puml did not read:\ndefs\/partial\.puml, line 2: <C4\/C4_Nothing> was not read\. No bundled library has this file\./
       ),
     ]);
 
@@ -2444,7 +2448,7 @@ describe('definitions in completion and parameter hints (dist)', () => {
     expect(status()).toMatchObject({
       text: 'Definitions: diagram and includes',
       severity: vscodeStub.LanguageStatusSeverity.Information,
-      detail: 'Completion and parameter hints offer what this diagram and the files it includes define.',
+      detail: 'Completion, parameter hints and Go to Definition read what this diagram and the files it includes define.',
     });
     vscodeStub._test.setActiveEditor(partial);
     expect(status()?.text).toBe('Definitions: diagram and includes (partial)');
@@ -2471,7 +2475,7 @@ describe('definitions in completion and parameter hints (dist)', () => {
       text: 'Definitions: not read',
       severity: vscodeStub.LanguageStatusSeverity.Warning,
       detail:
-        'The document is larger than 2 MiB or longer than 50000 lines, so completion and parameter hints do not read its definitions.',
+        'The document is larger than 2 MiB or longer than 50000 lines, so completion, parameter hints and Go to Definition do not read its definitions.',
     });
     vscodeStub._test.setActiveEditor(undefined);
   });
@@ -2495,6 +2499,301 @@ describe('definitions in completion and parameter hints (dist)', () => {
     expect(reads).toBeGreaterThan(0);
     // As it is, it answers.
     expect(await hints(document, 6, 7)).toMatchObject({ activeParameter: 1 });
+  });
+});
+
+describe('Go to Definition (dist)', () => {
+  type RangeLike = { start: { line: number; character: number }; end: { line: number; character: number } };
+  interface LinkStub {
+    originSelectionRange: RangeLike;
+    targetUri: { toString(): string };
+    targetRange: RangeLike;
+    targetSelectionRange?: RangeLike;
+  }
+  /** `line:character-line:character`. */
+  const span = (range: RangeLike | undefined): string =>
+    range === undefined
+      ? ''
+      : `${String(range.start.line)}:${String(range.start.character)}-${String(range.end.line)}:${String(range.end.character)}`;
+  /** Where Go to Definition at the position leads: the name it starts from, the URI, the range and the name there. */
+  const definitions = async (
+    document: TextEditorStub['document'],
+    line: number,
+    character: number,
+    options: { cancelled?: boolean } = {}
+  ): Promise<{ from: string; to: string; range: string; name: string }[] | undefined> => {
+    const registration = vscodeStub._test.definitionProviders[0];
+    if (registration === undefined) {
+      throw new Error('no definition provider registered');
+    }
+    const links = (await registration.provider.provideDefinition(document, new vscodeStub.Position(line, character), {
+      isCancellationRequested: options.cancelled === true,
+    })) as LinkStub[] | undefined;
+    return links?.map((link) => ({
+      from: span(link.originSelectionRange),
+      to: link.targetUri.toString(),
+      range: span(link.targetRange),
+      name: span(link.targetSelectionRange),
+    }));
+  };
+  const puml = (path: string, lines: readonly string[]): TextEditorStub['document'] =>
+    makeEditor(path, lines.join('\n'), 0, { languageId: 'plantuml' }).document;
+  /** The text the package bundles of a file of C4. */
+  const c4Text = (key: string): string =>
+    (JSON.parse(readFileSync(join(__dirname, '../../dist/stdlib/c4.json'), 'utf8')) as { entries: Record<string, string> })
+      .entries[key] ?? '';
+
+  it('goes to what the diagram the cursor is in declares, and not to the same name in another diagram', async () => {
+    const two = puml('file:///c/goto/two.puml', [
+      '@startuml(id=first)',
+      'participant "注文係" as A',
+      'participant Server as B',
+      'A -> B : hello A',
+      '@enduml',
+      '@startuml(id=second)',
+      'participant "Other" as A',
+      'A -> A : ping',
+      '@enduml',
+    ]);
+
+    expect(await definitions(two, 3, 0)).toEqual([
+      { from: '3:0-3:1', to: 'file:///c/goto/two.puml', range: '1:0-1:22', name: '1:21-1:22' },
+    ]);
+    expect(await definitions(two, 7, 5)).toEqual([
+      { from: '7:5-7:6', to: 'file:///c/goto/two.puml', range: '6:0-6:24', name: '6:23-6:24' },
+    ]);
+    // A word of a label, even an alias, names nothing; nor does a name nothing declares.
+    expect(await definitions(two, 3, 15)).toBeUndefined();
+    expect(await definitions(two, 3, 10)).toBeUndefined();
+  });
+
+  it('goes to each line that declares an element, a body to its end, in a Markdown block from its quote markers on', async () => {
+    const markdown = makeEditor(
+      'file:///c/goto/doc.md',
+      [
+        '# Order',
+        '> ```plantuml',
+        '> participant "注文係" as A',
+        '> package P {',
+        '>   class C',
+        '> }',
+        '> class C',
+        '> A -> C : hello',
+        '> ```',
+      ].join('\n'),
+      0
+    ).document;
+
+    expect(await definitions(markdown, 7, 2)).toEqual([
+      { from: '7:2-7:3', to: 'file:///c/goto/doc.md', range: '2:0-2:24', name: '2:23-2:24' },
+    ]);
+    expect(await definitions(markdown, 7, 7)).toEqual([
+      { from: '7:7-7:8', to: 'file:///c/goto/doc.md', range: '4:0-4:11', name: '4:10-4:11' },
+      { from: '7:7-7:8', to: 'file:///c/goto/doc.md', range: '6:0-6:9', name: '6:8-6:9' },
+    ]);
+    // In the text of the document, nothing.
+    expect(await definitions(markdown, 0, 3)).toBeUndefined();
+  });
+
+  it('goes to the definition a call stands for by the arguments it is given, from its line to the end of its body', async () => {
+    const calls = puml('file:///c/goto/calls.puml', [
+      '@startuml',
+      '!procedure P($a)',
+      '!endprocedure',
+      '!procedure P($a, $b = 2)',
+      '  A -> B : $b',
+      '!endprocedure',
+      '!$size = 3',
+      'P(1, "a, b")',
+      'P(1)',
+      'A -> B : "$size"',
+      "' P(1)",
+      'P(1, 2, 3)',
+      '@enduml',
+    ]);
+
+    expect(await definitions(calls, 7, 0)).toEqual([
+      { from: '7:0-7:1', to: 'file:///c/goto/calls.puml', range: '3:0-5:13', name: '3:11-3:12' },
+    ]);
+    expect(await definitions(calls, 8, 0)).toEqual([
+      { from: '8:0-8:1', to: 'file:///c/goto/calls.puml', range: '1:0-2:13', name: '1:11-1:12' },
+    ]);
+    // A variable in quoted text, the cursor on its `$`.
+    expect(await definitions(calls, 9, 10)).toEqual([
+      { from: '9:10-9:15', to: 'file:///c/goto/calls.puml', range: '6:0-6:10', name: '6:1-6:6' },
+    ]);
+    // A parameter in the body it is a parameter of: on the line that declares it.
+    expect(await definitions(calls, 4, 11)).toEqual([
+      { from: '4:11-4:13', to: 'file:///c/goto/calls.puml', range: '3:0-3:24', name: '3:17-3:19' },
+    ]);
+    // A comment, and a call no definition takes.
+    expect(await definitions(calls, 10, 2)).toBeUndefined();
+    expect(await definitions(calls, 11, 0)).toBeUndefined();
+  });
+
+  it('gives each definition a call may stand for, and none where text that was not read may define it again', async () => {
+    const branches = puml('file:///c/goto/branches.puml', [
+      '@startuml',
+      '!if %true()',
+      '!procedure P()',
+      '!endprocedure',
+      '!else',
+      '!procedure P()',
+      '!endprocedure',
+      '!endif',
+      'P()',
+      '@enduml',
+    ]);
+    expect((await definitions(branches, 8, 0))?.map(({ name }) => name)).toEqual(['2:11-2:12', '5:11-5:12']);
+
+    const dynamic = makeEditor(
+      'file:///c/goto/dynamic.puml',
+      ['@startuml', '!procedure P()', '!endprocedure', '!$file = "parts.puml"', '!include $file', 'P()', '@enduml'].join('\n'),
+      0,
+      { languageId: 'plantuml' }
+    );
+    vscodeStub._test.setActiveEditor(dynamic);
+    const logged = vscodeStub._test.logs.length;
+    expect(await definitions(dynamic.document, 5, 0)).toBeUndefined();
+    expect(vscodeStub._test.languageStatusItems.find((item) => item.id === 'plantumlLocal.definitions')).toMatchObject({
+      text: 'Definitions: diagram and includes (partial)',
+    });
+    expect(vscodeStub._test.logs.slice(logged)).toEqual([
+      expect.stringMatching(
+        /^info: Completion, parameter hints and Go to Definition in goto\/dynamic\.puml did not read:\ngoto\/dynamic\.puml, line 5: \$file was not read\./
+      ),
+    ]);
+    vscodeStub._test.setActiveEditor(undefined);
+  });
+
+  it('opens what a bundled library defines in its read-only view, at the definition the completion picks', async () => {
+    const context = puml('file:///c/goto/context.puml', [
+      '@startuml',
+      '!include <C4/C4_Context>',
+      'Person(user, "User")',
+      '@enduml',
+    ]);
+    const person = await definitions(context, 2, 3);
+    expect(person).toEqual([
+      {
+        from: '2:0-2:6',
+        to: 'plantuml-local-library:/C4/C4_Context.puml',
+        range: `365:0-379:${String(c4Text('c4_context').split('\n')[379]?.length)}`,
+        name: '365:20-365:26',
+      },
+    ]);
+    expect(c4Text('c4_context').split('\n')[365]?.slice(20, 26)).toBe('Person');
+
+    // In a Dynamic diagram, `Rel` with three arguments may be either of the two C4_Dynamic defines.
+    const dynamic = puml('file:///c/goto/dynamic-c4.puml', [
+      '@startuml',
+      '!include <C4/C4_Dynamic>',
+      'Person(a, "A")',
+      'Person(b, "B")',
+      'Rel(a, b, "asks")',
+      '@enduml',
+    ]);
+    const rel = await definitions(dynamic, 4, 1);
+    expect(rel?.map(({ to, name }) => `${to}#${name}`)).toEqual([
+      'plantuml-local-library:/C4/C4_Dynamic.puml#37:20-37:23',
+      'plantuml-local-library:/C4/C4_Dynamic.puml#33:20-33:23',
+    ]);
+    expect(c4Text('c4_dynamic').split('\n')[37]?.slice(20, 23)).toBe('Rel');
+  });
+
+  it('goes from the path of an include of a bundled library to its file, named as upstream writes it', async () => {
+    const includes = puml('file:///c/goto/includes.puml', [
+      '@startuml',
+      '!include <C4/C4_Context>',
+      '!include <azure/Compute/AzureFunction>',
+      '!include <C4/C4_Nothing>',
+      '@enduml',
+    ]);
+
+    expect(await definitions(includes, 1, 12)).toEqual([
+      { from: '1:9-1:24', to: 'plantuml-local-library:/C4/C4_Context.puml', range: '0:0-0:0', name: '' },
+    ]);
+    expect((await definitions(includes, 2, 20))?.map(({ to }) => to)).toEqual([
+      'plantuml-local-library:/azure/Compute/AzureFunction.puml',
+    ]);
+    // A file no bundled library has: nothing, as the engine includes nothing.
+    expect(await definitions(includes, 3, 12)).toBeUndefined();
+  });
+
+  it('leaves the path of a local include, an !includesub and a theme to the provider of include paths', async () => {
+    // A word of a path names nothing, not even a variable a label names.
+    for (const path of ['!include lib/shapes.iuml', '!includesub parts/a.iuml!shapes']) {
+      const words = puml('file:///c/goto/paths.puml', ['@startuml', '!shapes = "s"', 'A -> B : shapes', path, '@enduml']);
+      expect((await definitions(words, 2, 10))?.map(({ name }) => name)).toEqual(['1:1-1:7']);
+      expect(await definitions(words, 3, path.lastIndexOf('shapes') + 1)).toBeUndefined();
+    }
+    const paths = puml('file:///c/goto/paths.puml', [
+      '@startuml',
+      '!$dir = "lib"',
+      '!theme local from ../themes',
+      '!include $dir/shapes.iuml',
+      '@enduml',
+    ]);
+    expect(await definitions(paths, 2, 8)).toBeUndefined();
+    expect(await definitions(paths, 2, 22)).toBeUndefined();
+    // A name that starts with `$` in the path is a reference to its variable.
+    expect((await definitions(paths, 3, 11))?.map(({ name }) => name)).toEqual(['1:1-1:5']);
+  });
+
+  it('gives the text the package bundles of a library file, under the scheme of its read-only view', async () => {
+    expect(vscodeStub._test.contentProviders.map(({ scheme }) => scheme)).toEqual(['plantuml-local-library']);
+    const provider = vscodeStub._test.contentProviders[0]?.provider;
+    const view = (path: string): Promise<string | undefined> | string | undefined =>
+      provider?.provideTextDocumentContent(vscodeStub.Uri.from({ scheme: 'plantuml-local-library', path }));
+
+    expect(await view('/C4/C4_Context.puml')).toBe(c4Text('c4_context'));
+    expect(await view('/c4/c4_context.puml')).toBe(c4Text('c4_context'));
+    expect(await view('/C4/C4_Nothing.puml')).toBeUndefined();
+    expect(await view('/other/x.puml')).toBeUndefined();
+  });
+
+  it('finds nothing in a file with no start line, as the view of a library file or a file only included', async () => {
+    // In the view of C4_Context.puml, $toElementArg, which C4.puml defines, on the line after Person's.
+    const lines = c4Text('c4_context').split('\n');
+    expect(lines[366]?.slice(9, 22)).toBe('$toElementArg');
+    const view = puml('plantuml-local-library:/C4/C4_Context.puml', lines);
+    expect(await definitions(view, 366, 12)).toBeUndefined();
+
+    const body = ['!procedure P($name)', '  rectangle $name', '!endprocedure', 'P(x)'];
+    const included = puml('file:///c/goto/parts.iuml', body);
+    expect(await definitions(included, 1, 13)).toBeUndefined();
+    expect(await definitions(included, 3, 0)).toBeUndefined();
+    // The same lines in a diagram: the start line is what differs.
+    const diagram = puml('file:///c/goto/parts.puml', ['@startuml', ...body, '@enduml']);
+    expect((await definitions(diagram, 2, 13))?.map(({ name }) => name)).toEqual(['1:13-1:18']);
+    expect((await definitions(diagram, 4, 0))?.map(({ name }) => name)).toEqual(['1:11-1:12']);
+  });
+
+  it('answers nothing once the request is cancelled or the document changes while it reads', async () => {
+    const document = puml('file:///c/goto/cancelled.puml', ['@startuml', '!procedure P()', '!endprocedure', 'P()', '@enduml']);
+    expect(await definitions(document, 3, 0, { cancelled: true })).toBeUndefined();
+    expect(await definitions(document, 3, 0)).toHaveLength(1);
+
+    // Edited once the request has started: after what it first reads of the document.
+    const library = puml('file:///c/goto/changing.puml', [
+      '@startuml',
+      '!include <C4/C4_Context>',
+      'Person(a, "A")',
+      '@enduml',
+    ]);
+    let reads = 0;
+    const changing: TextEditorStub['document'] = {
+      ...library,
+      get version(): number {
+        reads += 1;
+        return reads === 1 ? 1 : 2;
+      },
+    };
+    expect(await definitions(changing, 1, 12)).toBeUndefined();
+    reads = 0;
+    expect(await definitions(changing, 2, 1)).toBeUndefined();
+    expect(await definitions(library, 1, 12)).toHaveLength(1);
+    expect(await definitions(library, 2, 1)).toHaveLength(1);
   });
 });
 

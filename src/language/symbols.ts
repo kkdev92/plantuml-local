@@ -31,6 +31,8 @@ export interface Declaration {
   /** The line it is declared on, and the last line of its body. */
   start: number;
   end: number;
+  /** Columns of `name` in its line; absent for a diagram. */
+  at?: { start: number; end: number };
   children: Declaration[];
 }
 
@@ -49,26 +51,39 @@ function valueOf(name: RegExpExecArray): string {
   return (name.slice(1).find((group) => group !== undefined) ?? '').trim();
 }
 
-/** The name and the alias at the start of `text`, or null. */
-function namesOf(text: string): { name: string; detail: string } | null {
+/** Columns of the value of a name found at column `from`. */
+function spanOf(name: RegExpExecArray, from: number): { start: number; end: number } {
+  const value = valueOf(name);
+  const start = from + name[0].indexOf(value);
+  return { start, end: start + value.length };
+}
+
+/** The name and the alias at the start of `text`, or null; `at` is where the name is. */
+function namesOf(text: string): { name: string; detail: string; at: { start: number; end: number } } | null {
   const first = NAME.exec(text);
   if (first === null) {
     return null;
   }
   let rest = text.slice(first[0].length);
   let name = valueOf(first);
+  let at = spanOf(first, 0);
   let detail = '';
   const as = AS.exec(rest);
   const second = as === null ? null : NAME.exec(rest.slice(as[0].length));
   if (as !== null && second !== null) {
     rest = rest.slice(as[0].length + second[0].length);
     // The identifier is the alias, on whichever side of `as` it is.
-    [name, detail] = second[6] !== undefined ? [valueOf(second), name] : [name, valueOf(second)];
+    if (second[6] !== undefined) {
+      [name, detail] = [valueOf(second), name];
+      at = spanOf(second, first[0].length + as[0].length);
+    } else {
+      detail = valueOf(second);
+    }
   }
   if (name === '' || !AFTER_NAMES.test(rest)) {
     return null;
   }
-  return { name, detail: detail === name ? '' : detail };
+  return { name, detail: detail === name ? '' : detail, at };
 }
 
 /**
@@ -97,12 +112,23 @@ export function declaredAlias(text: string): { alias: string; display: string } 
 
 function declarationAt(line: string, index: number): Declaration | null {
   const declared = DECLARATION.exec(line);
-  const names = declared === null ? null : namesOf(declared[2] ?? '');
+  const rest = declared?.[2] ?? '';
+  const names = declared === null ? null : namesOf(rest);
   if (declared === null || names === null) {
     return null;
   }
   const keyword = (declared[1] ?? '').toLowerCase().replace(/\s+class$/, '');
-  return { ...names, keyword, start: index, end: index, children: [] };
+  // The names are what the line ends with.
+  const from = line.length - rest.length;
+  return {
+    name: names.name,
+    detail: names.detail,
+    keyword,
+    start: index,
+    end: index,
+    at: { start: from + names.at.start, end: from + names.at.end },
+    children: [],
+  };
 }
 
 export function declarations(source: string): Declaration[] {

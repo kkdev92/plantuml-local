@@ -13,9 +13,10 @@ import {
 /**
  * The call the cursor is in, for the parameter hints: the procedure,
  * function or macro whose `(` the cursor follows, and its arguments up to
- * the cursor, read as the bundled engine (`@plantuml/core` 1.2026.9) reads
- * them (TContext.applyFunctionsAndVariables, EaterFunctionCall, TokenStack
- * and TokenType upstream).
+ * the cursor; and the call whose name the cursor is on, with all its
+ * arguments, for Go to Definition. Both are read as the bundled engine
+ * (`@plantuml/core` 1.2026.9) reads them (TContext.applyFunctionsAndVariables,
+ * EaterFunctionCall, TokenStack and TokenType upstream).
  *
  * A line of text calls a name declared before it, written right before a
  * `(` and not going on from a letter, a digit or `_` (unless it starts with
@@ -63,7 +64,7 @@ export interface Call {
   end: number;
   /** How its arguments are read: as its name declares, or as expressions within an expression. */
   reading: Reading;
-  /** The arguments up to the cursor; the last is the one the cursor is in. */
+  /** The arguments up to the cursor, the last being the one the cursor is in; or all of them ({@link callNamedAt}). */
   arguments: CallArgument[];
 }
 
@@ -325,6 +326,26 @@ function inLine(cut: CutLine, start: number, end: number): { start: number; end:
   return { start: from, end: end === start ? from : columnIn(cut, end - 1) + 1 };
 }
 
+/** A line without its inner comments, and where it starts reading for calls; null for a comment and a line that reads none. */
+function readable(line: string): { cut: CutLine; root: { expression: boolean; from: number } } | null {
+  const raw = lineType(line);
+  if (raw === 'comment' || raw === 'comment-start') {
+    return null;
+  }
+  const cut = withoutInnerComment(line);
+  const root = rootOf(cut.text);
+  return root === null ? null : { cut, root };
+}
+
+/** A call with its columns mapped back to the line. */
+function inLineCall(cut: CutLine, call: Call): Call {
+  return {
+    ...call,
+    ...inLine(cut, call.start, call.end),
+    arguments: call.arguments.map((argument) => ({ ...argument, ...inLine(cut, argument.start, argument.end) })),
+  };
+}
+
 /**
  * The innermost call around column `column` of `line`. `reading` tells how
  * a name declared before the line reads its arguments, or null for a name
@@ -332,18 +353,74 @@ function inLine(cut: CutLine, start: number, end: number): { start: number; end:
  * expressions. Null when the cursor is in no call, or in a comment.
  */
 export function callAt(line: string, column: number, reading: (name: string) => Reading | null): Call | null {
-  const raw = lineType(line);
-  if (raw === 'comment' || raw === 'comment-start') {
+  const read = readable(line);
+  const cursor = read === null ? null : columnOut(read.cut, column);
+  if (read === null || cursor === null) {
     return null;
   }
-  const cut = withoutInnerComment(line);
-  const text = cut.text;
-  const cursor = columnOut(cut, column);
-  const root = rootOf(text);
-  if (cursor === null || root === null) {
+  const call = readCalls(read.cut.text, read.root, cursor, reading).open.at(-1)?.call ?? null;
+  if (call === null) {
     return null;
   }
+  const last = call.arguments[call.arguments.length - 1];
+  if (last !== undefined) {
+    last.end = cursor;
+  }
+  return inLineCall(read.cut, call);
+}
 
+/**
+ * The call whose name starts at column `start` of `line`, with all its
+ * arguments: up to its `)`, or up to the end of the line when it has
+ * none. `reading` is as for {@link callAt}. Null when no call starts
+ * there.
+ */
+export function callNamedAt(line: string, start: number, reading: (name: string) => Reading | null): Call | null {
+  const read = readable(line);
+  const target = read === null ? null : columnOut(read.cut, start);
+  if (read === null || target === null) {
+    return null;
+  }
+  const text = read.cut.text;
+  const { open, closed } = readCalls(text, read.root, text.length, reading, target);
+  const call = closed ?? open.find((frame) => frame.call?.start === target)?.call ?? null;
+  if (call === null) {
+    return null;
+  }
+  const last = call.arguments[call.arguments.length - 1];
+  if (closed === null && last !== undefined) {
+    last.end = text.length;
+  }
+  return inLineCall(read.cut, call);
+}
+
+/**
+ * The arguments `call` has, read whole: how many are given by position,
+ * `name()` having none, and the names of those given by name.
+ */
+export function writtenArguments(call: Call, line: string): { count: number; named: string[] } {
+  const args = call.arguments;
+  const only = args.length === 1 ? args[0] : undefined;
+  const none = only !== undefined && only.name === undefined && line.slice(only.start, only.end).trim() === '';
+  return {
+    count: none ? 0 : args.filter((argument) => argument.name === undefined).length,
+    named: args.flatMap((argument) => (argument.name === undefined ? [] : [argument.name])),
+  };
+}
+
+/**
+ * Reads `text` for calls as the engine does, from where `root` starts up
+ * to `cursor`: the calls still open there, innermost last. With `target`,
+ * it stops at the `)` of the call whose name starts at that column, and
+ * gives that call, its last argument ending there.
+ */
+function readCalls(
+  text: string,
+  root: { expression: boolean; from: number },
+  cursor: number,
+  reading: (name: string) => Reading | null,
+  target?: number
+): { open: Frame[]; closed: Call | null } {
   const stack: Frame[] = root.expression ? [frameOf(text, null, root.from)] : [];
   let pending: Call | null = null;
   for (let at = root.from; at < cursor; at++) {
@@ -380,6 +457,12 @@ export function callAt(line: string, column: number, reading: (name: string) => 
         break;
       }
       const last = frame.call.arguments[frame.call.arguments.length - 1];
+      if (step === 'close' && frame.call.start === target) {
+        if (last !== undefined) {
+          last.end = at;
+        }
+        return { open: stack, closed: frame.call };
+      }
       if (step === 'close') {
         stack.pop();
       } else if (step === 'comma' && last !== undefined) {
@@ -406,19 +489,5 @@ export function callAt(line: string, column: number, reading: (name: string) => 
       stack.push(frameOf(text, call, at + 1));
     }
   }
-
-  const call = stack[stack.length - 1]?.call ?? null;
-  if (call === null) {
-    return null;
-  }
-  const last = call.arguments[call.arguments.length - 1];
-  if (last !== undefined) {
-    last.end = cursor;
-  }
-  // Back to the columns of the line.
-  return {
-    ...call,
-    ...inLine(cut, call.start, call.end),
-    arguments: call.arguments.map((argument) => ({ ...argument, ...inLine(cut, argument.start, argument.end) })),
-  };
+  return { open: stack, closed: null };
 }

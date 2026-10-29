@@ -11,7 +11,7 @@
       },
       "declarations": {
         "path": "assets/declarations/azure.json",
-        "sha256": "6d546a4c49c15daa942b6812af483fb0aae352b3f5f59274a73f2d53b422f0bc"
+        "sha256": "235701b6d4c181fec04cd1dbb706d17e67d2037793b68408a50fae79876406f2"
       },
       "files": {
         "stdlib/azure/AIMachineLearning/AzureBatchAI.puml": "145c0f949dc52f3f1e4f61b8e42953b17dcc91b34942c9cff9347b649727c0c2",
@@ -317,7 +317,7 @@
       },
       "declarations": {
         "path": "assets/declarations/c4.json",
-        "sha256": "ad370e85247a40260f6d0638993624d9f69437f72c3b6646c51adb1a23564f15"
+        "sha256": "05f4bdc80d8fd128d15be82bf2d5fe8a05ed31a4b57090b3dda15c48f09c7181"
       },
       "files": {
         "stdlib/C4/C4.puml": "7051481d92b53c0fa5cf9fedb629f9663741482130dea496fba0e2c8623d08ff",

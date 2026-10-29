@@ -105,6 +105,7 @@ describe('macroSources', () => {
       line: 2,
       start: 1,
       end: 7,
+      last: 2,
     });
     expect([...session.dependencies]).toEqual([join(root, 'docs', 'common.puml'), join(root, 'docs', 'parts.puml')]);
   });
