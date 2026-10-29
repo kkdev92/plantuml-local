@@ -28,6 +28,7 @@ const labels: MacroLabels = {
   },
   diagram: 'this diagram',
   file: (id) => `file ${id}`,
+  library: (library, key) => libraryFile(library, key),
   conditional: 'conditional',
   ambiguous: 'ambiguous',
   unresolved: 'unresolved',

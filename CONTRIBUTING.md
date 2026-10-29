@@ -46,7 +46,8 @@ src/
 │                    actions above each diagram, quick fixes, Go to Diagram, and
 │                    the preprocessor's definitions (what a text declares, what
 │                    is defined where the cursor is, the call it is in) for
-│                    the completion and the parameter hints
+│                    the completion, the parameter hints and Go to Definition,
+│                    which opens the bundled libraries' files read-only
 ├── preview/         markdown-it plugin: fence dispatch + cache-and-refresh cycle
 │                    (dependency-injected, no `vscode` import — unit-testable)
 ├── render/          extension-host side of the worker (request/response,
@@ -75,8 +76,9 @@ assets/
 ├── stdlib/          bundled standard-library data (the Azure icons and the C4
 │                    library)
 ├── declarations/    what each of those files declares (procedures, functions,
-│                    macros, variables, includes), for the completion and the
-│                    parameter hints
+│                    macros, variables, includes) and its path as upstream
+│                    writes it, for the completion, the parameter hints and Go
+│                    to Definition
 └── stdlib-sources.json  where that data came from: the upstream commit and the
                      SHA-256 of each file read and written
 test/

@@ -27,7 +27,8 @@
  * read in the same run from the text its asset holds, by the reader the
  * extension runs (src/language/declarations.ts), and written to
  * assets/declarations/<library>.json under the asset's keys, its lines
- * counted from the first of that text. Its SHA-256 is recorded beside the
+ * counted from the first of that text, with the file's path as upstream
+ * writes it (the keys are in lower case). Its SHA-256 is recorded beside the
  * asset's. `--declarations` writes them again from the committed assets
  * without fetching anything, as a change to the reader needs: the unit
  * tests read the assets again and fail until it is done.
@@ -245,19 +246,45 @@ async function declarationReader() {
 }
 
 /**
- * Writes what each file in `entries` declares, read as the engine reads a
- * library's file, and returns where it went with its hash.
+ * The path of each `.puml` file of `library` as upstream writes it, without
+ * the extension, by its key: `compute/azurefunction` -> `Compute/AzureFunction`.
+ * `files` is the record of the files read, by their paths upstream.
  */
-function writeDeclarations(name, entries, reader) {
+function upstreamNames(library, files) {
+  const prefix = `stdlib/${library.directory}/`;
+  /** @type {Record<string, string>} */
+  const names = {};
+  for (const path of Object.keys(files)) {
+    if (path.startsWith(prefix) && path.endsWith('.puml')) {
+      const file = path.slice(prefix.length, -'.puml'.length);
+      names[file.toLowerCase()] = file;
+    }
+  }
+  return names;
+}
+
+/**
+ * Writes what each file in `entries` declares, read as the engine reads a
+ * library's file, and the name upstream gives each (`names`, by key), and
+ * returns where it went with its hash.
+ */
+function writeDeclarations(name, entries, reader, names) {
   /** @type {Record<string, unknown[]>} */
   const declarations = {};
+  /** @type {Record<string, string>} */
+  const files = {};
   for (const [key, text] of Object.entries(entries)) {
     const read = reader.libraryLines(text);
     declarations[key] = reader.declarationsOf(read.lines, read.numbers);
+    const file = names[key];
+    if (file === undefined) {
+      throw new Error(`No file upstream for ${name}/${key}`);
+    }
+    files[key] = file;
   }
   mkdirSync(declarationsDir, { recursive: true });
   const out = join(declarationsDir, `${name}.json`);
-  const written = JSON.stringify({ library: name, declarations });
+  const written = JSON.stringify({ library: name, files, declarations });
   writeFileSync(out, written);
   console.log(`  ${name.padEnd(6)} declarations -> ${relative(root, out)} (${(statSync(out).size / 1024).toFixed(0)} KB)`);
   return { path: relative(root, out).split(sep).join(posix.sep), sha256: sha256(Buffer.from(written, 'utf8')) };
@@ -314,7 +341,7 @@ function fromUpstream(reader) {
       upstream: library.upstream,
       license: library.license,
       asset: { path: relative(root, out).split(sep).join(posix.sep), sha256: sha256(Buffer.from(asset, 'utf8')) },
-      declarations: writeDeclarations(library.name, entries, reader),
+      declarations: writeDeclarations(library.name, entries, reader, upstreamNames(library, sources)),
       files: Object.fromEntries(Object.entries(sources).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))),
     };
   }
@@ -334,7 +361,12 @@ function fromAssets(reader) {
     if (sha256(bytes) !== asset.sha256) {
       throw new Error(`${asset.path} is not the asset ${relative(root, sourcesFile)} records`);
     }
-    const declarations = writeDeclarations(library.name, JSON.parse(bytes.toString('utf8')).entries, reader);
+    const declarations = writeDeclarations(
+      library.name,
+      JSON.parse(bytes.toString('utf8')).entries,
+      reader,
+      upstreamNames(library, files)
+    );
     record.libraries[library.name] = { upstream, license, asset, declarations, files };
   }
   writeFileSync(sourcesFile, `${JSON.stringify(record, null, 2)}\n`);

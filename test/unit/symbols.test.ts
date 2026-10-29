@@ -181,3 +181,55 @@ describe('declarations', () => {
     expect(outline(['A -> B', 'B -> C : class X'])).toEqual([]);
   });
 });
+
+describe('declarations: where the name is', () => {
+  /** What each line declares, its name marked as `[name]` in the line. */
+  const marked = (lines: readonly string[]): string[] =>
+    declarations(lines.join('\n')).flatMap(function flat(declared: Declaration): string[] {
+      const own =
+        declared.at === undefined
+          ? []
+          : [
+              (lines[declared.start] ?? '').slice(0, declared.at.start) +
+                `[${(lines[declared.start] ?? '').slice(declared.at.start, declared.at.end)}]` +
+                (lines[declared.start] ?? '').slice(declared.at.end),
+            ];
+      return [...own, ...declared.children.flatMap(flat)];
+    });
+
+  it('marks the alias, on whichever side of `as` it is, and else the name', () => {
+    expect(
+      marked([
+        '@startuml',
+        'participant "注文係" as A',
+        'participant Server as "The server"',
+        '  actor   User',
+        'participant B as C',
+        'participant "Long  name"',
+        'class "  Shown " as Kept',
+        'component [Web] as W',
+        'usecase (Pay) as P',
+        'abstract class Base<T>',
+        '@enduml',
+      ])
+    ).toEqual([
+      'participant "注文係" as [A]',
+      'participant [Server] as "The server"',
+      '  actor   [User]',
+      'participant B as [C]',
+      'participant "[Long  name]"',
+      'class "  Shown " as [Kept]',
+      'component [Web] as [W]',
+      'usecase (Pay) as [P]',
+      'abstract class [Base]<T>',
+    ]);
+  });
+
+  it('marks the names of what a body declares, and gives a diagram none', () => {
+    expect(marked(['@startuml', 'package P {', '  class C', '}', '@enduml'])).toEqual([
+      'package [P] {',
+      '  class [C]',
+    ]);
+    expect(declarations(['@startuml(id=x)', 'class A'].join('\n'))[0]?.at).toBeUndefined();
+  });
+});

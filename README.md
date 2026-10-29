@@ -47,6 +47,7 @@ Your diagram source is processed locally and is not sent to a rendering service.
 - **Fault-Tolerant**: A syntax error shows up inline at the broken diagram; the rest of the page stays intact
 - **Problems Panel**: Errors, warnings and unsupported syntax in the diagrams of open Markdown and PlantUML files are listed with their line, preview or not
 - **Writing Help**: Completion for start lines, directives, themes and icons, the aliases and words of the diagram you are in, the procedures, functions and variables it and the files it includes define — with parameter hints for their calls — snippets of sequence and activity blocks, templates for sixteen kinds of diagram, and quick fixes that name a diagram for export and add a missing end line
+- **Go to Definition**: `F12`, Ctrl+Click and Peek on a call, a variable or a participant lead to where the diagram, a file it includes or a bundled library defines or declares it — never to another diagram — and a file of the C4 and Azure libraries opens read-only
 - **Actions Above Each Diagram**: *Preview*, *Export SVG* and *Export PNG* sit above the first line of each diagram, in `.puml` files and Markdown alike, and act on that diagram
 - **Go to Diagram**: *Go to Diagram in Document…* lists the diagram blocks of a Markdown file — with the heading above each, its kind and its title or first line — and moves the cursor to the one picked
 - **Colours**: A swatch beside each colour a diagram sets — a `skinparam` value, an element's colour, a `<style>` property — opens VS Code's colour picker, which writes the pick back as `#RRGGBB`
@@ -398,6 +399,43 @@ include was not read, in which case the *PlantUML Local* output says which
 and why, once each time that changes. A document or an included file larger
 than 2 MiB or longer than 50,000 lines is not read for definitions, and at
 most 5,000 are offered.
+
+### Going to a definition
+
+*Go to Definition* (`F12`), Ctrl+Click and *Peek Definition* (`Alt+F12`) on
+a name in a diagram lead to where it is defined:
+
+- a call of a procedure, a function or a macro, and a variable, to its
+  definition, found as the completion finds it: in the diagram before the
+  cursor, or in a file it includes — of the workspace, or of the bundled C4
+  and Azure libraries. A call leads to the definition the engine would pick
+  for it, by the number of arguments given by place and the names of those
+  given as `$name = value`; a parameter, in the body of its procedure or
+  function, to the line that declares it
+- a participant, a class, a component or another element a line declares
+  with its keyword (`participant`, `actor`, `class`, `component`, `usecase`
+  and the like), to each line that declares it — by its alias, or its name
+  when it has none — in the diagram the cursor is in: never to the same name
+  in another diagram of the file or the Markdown document
+- the path of an include of a bundled library, such as `<C4/C4_Context>`, to
+  the start of that file
+
+A definition is taken from its line to the end of its body, which holding
+`Ctrl` over the name previews, and opens with its name selected. Where
+several may hold — one in each branch of an `!if`, say — each of them is
+listed. Nothing is found for a definition marked *unresolved* above, which
+an include that is not read here may replace, for a name nothing declares,
+or in a comment. A word of a label, after the `:` of a line, names no
+element; in quoted text, a note or a title, and in the path of an include,
+only a name that starts with `$` leads anywhere. Included files of the
+workspace are read as for the completion, with their unsaved changes, and
+the Language Status and the output say which includes were not read.
+
+A file of a bundled library opens read-only, named as an include names it —
+`C4/C4_Context.puml` — with the text the extension bundles: the lines the
+engine reads, so a line there is the line the completion shows. The file
+holds no `@startuml` line, and, as in a file of the workspace without one, Go
+to Definition finds nothing from a name in it.
 
 ### Colours
 

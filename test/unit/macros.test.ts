@@ -121,6 +121,25 @@ describe('macrosAt', () => {
       expect(summary(await at(['!$v = 1', '‸!$w = 2']))).toEqual(['$v resolved']);
     });
 
+    it('marks where each definition is, from the line and columns of its name to its last line', async () => {
+      const macros = await at([
+        '!procedure P($a)',
+        'Alice -> Bob : $a',
+        '!endprocedure',
+        '  !function $f() return 1',
+        '!$v = 1',
+        '!procedure Q($q)',
+        '  ‸',
+        '!endprocedure',
+      ]);
+      const origin = (entry: MacroEntry | undefined): unknown => entry?.candidates[0]?.macro.origin;
+      expect(origin(macros.callables.get('P/1'))).toEqual({ source: 'document', line: 1, start: 11, end: 12, last: 3 });
+      expect(origin(macros.callables.get('$f/0'))).toEqual({ source: 'document', line: 4, start: 12, end: 14, last: 4 });
+      expect(origin(macros.variables.get('$v'))).toEqual({ source: 'document', line: 5, start: 1, end: 3, last: 5 });
+      // A parameter of the body the cursor is in is at the name that body declares.
+      expect(origin(macros.variables.get('$q'))).toEqual({ source: 'document', line: 6, start: 11, end: 12, last: 8 });
+    });
+
     it('lets a later definition with the same name and number of parameters stand for an earlier one', async () => {
       const macros = await at(['!procedure P()', '!endprocedure', '!procedure P()', '!endprocedure', '‸']);
       expect(summary(macros)).toEqual(['P/0 resolved']);

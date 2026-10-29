@@ -85,9 +85,10 @@ offline. The generator records the hash of every file it reads in
 
 `dist/declarations/` holds what each file of those libraries declares — its
 procedures, functions, macros and variables with their parameters, defaults,
-values and the comment lines above them, and the files it includes — read
-from the same text in the same run, for the completion and the parameter
-hints; the generator records their hashes in the same file.
+values and the comment lines above them, and the files it includes — and the
+file's path as upstream writes it, read from the same text in the same run,
+for the completion, the parameter hints and Go to Definition; the generator
+records their hashes in the same file.
 
 ### Azure-PlantUML
 

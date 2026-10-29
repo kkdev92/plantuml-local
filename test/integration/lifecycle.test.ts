@@ -54,6 +54,7 @@ it('releases on deactivate every listener, provider and command activation regis
       'languages.registerCodeLensProvider',
       'languages.registerColorProvider',
       'languages.registerCompletionItemProvider',
+      'languages.registerDefinitionProvider',
       'languages.registerDocumentSymbolProvider',
       'languages.registerFoldingRangeProvider',
       'languages.registerSignatureHelpProvider',
@@ -66,6 +67,7 @@ it('releases on deactivate every listener, provider and command activation regis
       'workspace.onDidCloseTextDocument',
       'workspace.onDidOpenTextDocument',
       'workspace.onDidSaveTextDocument',
+      'workspace.registerTextDocumentContentProvider',
     ])
   );
 

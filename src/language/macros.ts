@@ -48,8 +48,11 @@ export type Place =
   /** A file of a bundled library, by the key its asset has it under. */
   | { source: 'library'; library: string; key: string };
 
-/** Where a definition or an include is written: its line, and the columns of its name or path. */
-export type Origin = Place & { line: number; start: number; end: number };
+/**
+ * Where a definition or an include is written: its line, the columns of
+ * its name or path, and its last line, the `!end…` line of a body.
+ */
+export type Origin = Place & { line: number; start: number; end: number; last: number };
 
 /** What defines a name: a declaration, or a parameter of the body the cursor is in. */
 export type MacroKind = DefinitionKind | 'parameter';
@@ -198,8 +201,8 @@ function writtenOf(inclusion: Inclusion): string {
   return inclusion.selector === null ? inclusion.target : `${inclusion.target}!${inclusion.selector}`;
 }
 
-function originOf(place: Place, at: { line: number; start: number; end: number }): Origin {
-  return { ...place, line: at.line, start: at.start, end: at.end };
+function originOf(place: Place, at: { line: number; start: number; end: number; last?: number }): Origin {
+  return { ...place, line: at.line, start: at.start, end: at.end, last: at.last ?? at.line };
 }
 
 function macroOf(definition: Definition, place: Place): Macro {

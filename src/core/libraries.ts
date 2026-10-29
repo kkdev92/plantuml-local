@@ -38,3 +38,16 @@ export function bundledLibrary(name: string): BundledLibrary | undefined {
   const lowered = name.toLowerCase();
   return BUNDLED_LIBRARIES.find((library) => library.name === lowered);
 }
+
+/**
+ * How file `key` of `library` is named: the library as diagrams write it,
+ * and the file by `name`, its path as upstream writes it, when that is
+ * known; else as the library lists it, or by its key.
+ */
+export function libraryFileName(library: string, key: string, name?: string): { label: string; file: string } {
+  const bundled = bundledLibrary(library);
+  return {
+    label: bundled?.label ?? library,
+    file: name ?? bundled?.files?.find((listed) => listed.toLowerCase() === key) ?? key,
+  };
+}

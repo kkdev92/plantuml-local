@@ -1,5 +1,5 @@
 import { ANALYSIS_LIMITS } from '../core/constants';
-import { bundledLibrary } from '../core/libraries';
+import { libraryFileName } from '../core/libraries';
 import { splitLines } from '../core/lines';
 import { forEachCodeLine } from '../core/shape';
 import { goesOnFrom, readsFrom, type Call } from './calls';
@@ -33,6 +33,8 @@ export interface MacroLabels {
   diagram: string;
   /** Where a definition in a local file an include reads is, by the id the include session gives the file. */
   file(id: string): string;
+  /** Where a definition in a bundled library's file is, by the library and the file's key ({@link libraryFile}). */
+  library(library: string, key: string): string;
   /** How sure a definition is: one the text may leave out. */
   conditional: string;
   /** One of several, none of them sure. */
@@ -146,11 +148,14 @@ export function macroPlace(
   };
 }
 
-/** A bundled library's file as an include names it, such as `<C4/C4_Context>`. */
-export function libraryFile(library: string, key: string): string {
-  const bundled = bundledLibrary(library);
-  const file = bundled?.files?.find((name) => name.toLowerCase() === key) ?? key;
-  return `<${bundled?.label ?? library}/${file}>`;
+/**
+ * A bundled library's file as an include names it, such as
+ * `<C4/C4_Context>`: `name` is its path as upstream writes it, when known;
+ * else the files the library lists, or the key, name it.
+ */
+export function libraryFile(library: string, key: string, name?: string): string {
+  const { label, file } = libraryFileName(library, key, name);
+  return `<${label}/${file}>`;
 }
 
 /** The place a definition is in. */
@@ -161,7 +166,7 @@ function placeOf(origin: Origin, labels: MacroLabels): string {
     case 'file':
       return labels.file(origin.id);
     case 'library':
-      return libraryFile(origin.library, origin.key);
+      return labels.library(origin.library, origin.key);
   }
 }
 

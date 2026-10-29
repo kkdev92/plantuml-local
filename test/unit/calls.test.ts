@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { callAt, type Reading } from '../../src/language/calls';
+import { callAt, callNamedAt, writtenArguments, type Reading } from '../../src/language/calls';
 
 const NO_BREAK_SPACE = String.fromCharCode(0xa0);
 const TAB = '\t';
@@ -247,5 +247,81 @@ describe('callAt and comments', () => {
     expect(args("P(a, ‸/' c '/")).toEqual(['a', ' ']);
     expect(read("P(a, /' c‸ '/")).toBeNull();
     expect(read("/' c ‸'/ P(a, b")).toBeNull();
+  });
+});
+
+/**
+ * The call whose name starts at the `‸` of `marked`, read whole: its name,
+ * each argument as written, after its name when it names itself, and how
+ * many are given by position and by name.
+ */
+function whole(marked: string): { name: string; arguments: string[]; count: number; named: string[] } | null {
+  const column = marked.indexOf('‸');
+  const line = marked.slice(0, column) + marked.slice(column + 1);
+  const call = callNamedAt(line, column, (name) => DECLARED.get(name) ?? null);
+  if (call === null) {
+    return null;
+  }
+  return {
+    name: line.slice(call.start, call.end),
+    arguments: call.arguments.map(
+      (argument) => (argument.name === undefined ? '' : `${argument.name}: `) + line.slice(argument.start, argument.end)
+    ),
+    ...writtenArguments(call, line),
+  };
+}
+
+describe('callNamedAt', () => {
+  it('reads every argument of the call whose name starts at the column, up to its bracket', () => {
+    expect(whole('‸P(a, b) and more')).toEqual({ name: 'P', arguments: ['a', ' b'], count: 2, named: [] });
+    expect(whole('x ‸P(a, "b, c", (d, e)) and more')).toEqual({
+      name: 'P',
+      arguments: ['a', ' "b, c"', ' (d, e)'],
+      count: 3,
+      named: [],
+    });
+    expect(whole('‸U(a "b, c")')).toEqual({ name: 'U', arguments: ['a "b', ' c"'], count: 2, named: [] });
+  });
+
+  it('counts no argument for empty brackets, and one for an argument left empty after a comma', () => {
+    expect(whole('‸P()')).toEqual({ name: 'P', arguments: [''], count: 0, named: [] });
+    expect(whole('‸P( )')).toEqual({ name: 'P', arguments: [' '], count: 0, named: [] });
+    expect(whole('‸P(a, )')).toEqual({ name: 'P', arguments: ['a', ' '], count: 2, named: [] });
+  });
+
+  it('tells the arguments given by name from those given by position', () => {
+    expect(whole('‸P(a, $c = 1, $d="x, y")')).toEqual({
+      name: 'P',
+      arguments: ['a', '$c:  $c = 1', '$d:  $d="x, y"'],
+      count: 1,
+      named: ['$c', '$d'],
+    });
+    // A macro names none.
+    expect(whole('‸F($a = 1)')).toEqual({ name: 'F', arguments: ['$a = 1'], count: 1, named: [] });
+  });
+
+  it('reads the call within another, and the one around it', () => {
+    expect(whole('P(a, ‸Q(b, c), d)')).toEqual({ name: 'Q', arguments: ['b', ' c'], count: 2, named: [] });
+    expect(whole('‸P(a, Q(b, c), d)')).toEqual({ name: 'P', arguments: ['a', ' Q(b, c)', ' d'], count: 3, named: [] });
+    expect(whole('P(‸f(1, 2))')).toEqual({ name: 'f', arguments: ['1', ' 2'], count: 2, named: [] });
+  });
+
+  it('reads up to the end of the line a call that does not end on it', () => {
+    expect(whole('‸P(a, b')).toEqual({ name: 'P', arguments: ['a', ' b'], count: 2, named: [] });
+    expect(whole('‸P(')).toEqual({ name: 'P', arguments: [''], count: 0, named: [] });
+  });
+
+  it('finds no call where none starts, nor of a name not declared, nor in a comment', () => {
+    expect(whole('P‸(a)')).toBeNull();
+    expect(whole('‸R(a)')).toBeNull();
+    expect(whole('x‸P(a)')).toBeNull();
+    expect(whole("' ‸P(a)")).toBeNull();
+    expect(whole("P(a, /' ‸Q(b) '/ c)")).toBeNull();
+  });
+
+  it('reads a call on a line that reads an expression, and not where the line reads none', () => {
+    expect(whole('!$x = ‸P(1, 2) + 1')).toEqual({ name: 'P', arguments: ['1', ' 2'], count: 2, named: [] });
+    expect(whole('!if ‸$P(1) == 2')).toEqual({ name: '$P', arguments: ['1'], count: 1, named: [] });
+    expect(whole('!ifdef ‸P(1)')).toBeNull();
   });
 });

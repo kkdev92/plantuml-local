@@ -27,6 +27,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   has held a diagram's own words, no longer those of open include files; the
   names those files define are offered again, from the files the diagram
   includes, open or not.
+- **Go to Definition leads to what a diagram defines and declares.** *Go to
+  Definition*, Ctrl+Click and *Peek Definition* on a call or a variable lead
+  to its definition — in the diagram, in a file of the workspace it includes,
+  with its unsaved changes, or in a file of the bundled C4 and Azure
+  libraries — picked by the arguments given, as the engine picks it; on a
+  participant, a class or another element a line declares with its keyword,
+  to each line that declares it in the same diagram, never in another. Where
+  several definitions may hold, each is listed; where an include that is not
+  read may replace the definition, none is. The path of an include of a
+  bundled library, and a definition in one, open the library's file
+  read-only, as the extension bundles it.
 
 ## [0.17.1] - 2026-10-28
 

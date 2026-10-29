@@ -236,7 +236,19 @@ export interface ColorRegistrationStub {
 export interface DefinitionRegistrationStub {
   selector: unknown;
   provider: {
-    provideDefinition(document: TextEditorStub['document'], position: PositionStub): Promise<unknown>;
+    provideDefinition(
+      document: TextEditorStub['document'],
+      position: PositionStub,
+      token?: { isCancellationRequested: boolean }
+    ): Promise<unknown>;
+  };
+}
+
+/** A text document content provider as registered, with the scheme it was registered for. */
+export interface ContentRegistrationStub {
+  scheme: string;
+  provider: {
+    provideTextDocumentContent(uri: UriStub): Promise<string | undefined> | string | undefined;
   };
 }
 
@@ -503,6 +515,8 @@ export interface VscodeStub {
     parse: (value: string) => UriStub;
     joinPath: (base: UriStub | { toString(): string }, ...parts: string[]) => UriStub;
     file: (path: string) => UriStub;
+    /** Of a scheme and a path, without an authority. */
+    from: (components: { scheme: string; path: string }) => UriStub;
   };
   env: {
     uiKind: number;
@@ -609,6 +623,10 @@ export interface VscodeStub {
       isWritableFileSystem: (scheme: string) => boolean | undefined;
     };
     applyEdit: (edit: WorkspaceEditStub) => Promise<boolean>;
+    registerTextDocumentContentProvider: (
+      scheme: string,
+      provider: ContentRegistrationStub['provider']
+    ) => { dispose(): void };
   };
   commands: {
     registerCommand: (id: string, handler: (...args: unknown[]) => unknown) => { dispose(): void };
@@ -686,6 +704,8 @@ export interface VscodeStub {
     colorProviders: ColorRegistrationStub[];
     /** Signature help providers registered, in order. */
     signatureProviders: SignatureRegistrationStub[];
+    /** Text document content providers registered, in order. */
+    contentProviders: ContentRegistrationStub[];
     /** Language status items created, in order, disposed ones too. */
     languageStatusItems: LanguageStatusItemStub[];
     /** Webview panels created, in order. */
@@ -1000,6 +1020,7 @@ export function createVscodeStub(): VscodeStub {
     activeParameter = 0;
   }
   const signatureProviders: SignatureRegistrationStub[] = [];
+  const contentProviders: ContentRegistrationStub[] = [];
 
   const languageStatusItems: LanguageStatusItemStub[] = [];
   /** As VS Code 1.138.0 makes one (src/vs/workbench/api/common/extHostLanguages.ts), less its name, which is the extension's there. */
@@ -1276,6 +1297,8 @@ export function createVscodeStub(): VscodeStub {
       joinPath: (base, ...parts) => joinUri(base, parts),
       // As VS Code builds one: forward slashes, and a leading slash before a drive.
       file: (path: string) => makeUri(`file://${path.replace(/\\/g, '/').replace(/^(?!\/)/, '/')}`),
+      // As VS Code writes one without an authority (src/vs/base/common/uri.ts): no `//` after the scheme.
+      from: ({ scheme, path }) => ({ scheme, path, fsPath: path, toString: () => `${scheme}:${path}` }),
     },
     env: {
       uiKind: 1,
@@ -1595,6 +1618,10 @@ export function createVscodeStub(): VscodeStub {
         isWritableFileSystem: (scheme) => (scheme === 'file' ? true : scheme === 'git' ? false : undefined),
       },
       applyEdit,
+      registerTextDocumentContentProvider: (scheme, provider) => {
+        contentProviders.push({ scheme, provider });
+        return track('workspace.registerTextDocumentContentProvider');
+      },
     },
     commands: {
       registerCommand: (id, handler) => {
@@ -1684,6 +1711,7 @@ export function createVscodeStub(): VscodeStub {
       codeLensProviders,
       colorProviders,
       signatureProviders,
+      contentProviders,
       languageStatusItems,
       webviewPanels,
       webviewSerializers,
