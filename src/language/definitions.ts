@@ -1,9 +1,17 @@
-import { splitLines } from '../core/lines';
 import { callNamedAt, goesOnFrom, writtenArguments } from './calls';
 import { declarationsOf, lineType } from './declarations';
-import { macroPlace } from './macro-help';
-import { definitionsFor, readingOf, type DiagramLines, type MacroEntry, type Macros } from './macros';
-import { protect } from './protected';
+import { diagramLinesAt, placeIn, readDiagram, type DiagramText } from './macro-help';
+import {
+  definitionsFor,
+  macroOf,
+  parameterOf,
+  readingOf,
+  type DiagramLines,
+  type Macro,
+  type MacroEntry,
+  type Macros,
+  type Place,
+} from './macros';
 import { declarations, type Declaration } from './symbols';
 
 /**
@@ -97,8 +105,8 @@ function elementAround(text: string, column: number): { name: string; start: num
  * The name at column `column` of line `line` of `source`, as Go to
  * Definition reads it: `options` as for {@link macroPlace}. Null where no
  * name stands for anything: outside a diagram, in a comment, on the name a
- * line declares, and on a name not starting with `$` in quoted text or the
- * path of an include.
+ * line declares or a parameter it declares, and on a name not starting
+ * with `$` in quoted text or the path of an include.
  */
 export function nameAt(
   source: string,
@@ -106,20 +114,28 @@ export function nameAt(
   column: number,
   options: { bare: boolean; first: number }
 ): NameAt | null {
-  // On the `$` a name starts with, the name is the one it starts.
-  const written = splitLines(source)[line] ?? '';
-  const from = written.charAt(column) === '$' && goesOnFrom(written.charAt(column + 1)) ? column + 1 : column;
-  const place = macroPlace(source, line, from, options);
-  if (place === null) {
+  const found = diagramLinesAt(source, line, options);
+  if (found === null) {
     return null;
   }
-  const here = place.diagram.numbers.indexOf(place.cursor);
-  const text = place.diagram.lines[here] ?? '';
+  const at = nameIn(readDiagram(found.diagram), found.diagram.numbers.indexOf(found.cursor), column);
+  return at === null ? null : { ...found, ...at };
+}
+
+/** As {@link nameAt}, at column `column` of the line of index `here` of a diagram read by {@link readDiagram}. */
+export function nameIn(read: DiagramText, here: number, column: number): Omit<NameAt, 'diagram' | 'cursor'> | null {
+  const text = read.diagram.lines[here] ?? '';
+  // On the `$` a name starts with, the name is the one it starts.
+  const from = text.charAt(column) === '$' && goesOnFrom(text.charAt(column + 1)) ? column + 1 : column;
+  const place = placeIn(read, here, from);
+  if (place === null || declaresParameterAt(text, place.start)) {
+    return null;
+  }
   const name = text.slice(place.start, place.end);
   if (name === '' || (place.dollarOnly && !name.startsWith('$'))) {
     return null;
   }
-  const typed = protect(place.diagram.lines, false)[here];
+  const typed = read.typed[here];
   const around = elementAround(text, column);
   const element =
     !place.dollarOnly &&
@@ -130,15 +146,83 @@ export function nameAt(
     around.end <= labelStart(typed.code)
       ? around
       : null;
-  return {
-    diagram: place.diagram,
-    cursor: place.cursor,
-    name,
-    start: place.start,
-    end: place.end,
-    call: place.callOpen,
-    element,
+  return { name, start: place.start, end: place.end, call: place.callOpen, element };
+}
+
+/** Whether a parameter of what the line `text` declares starts at column `start`: a name declared, as the name the line declares is. */
+function declaresParameterAt(text: string, start: number): boolean {
+  return declarationsOf([text], [0]).some(
+    (declaration) =>
+      declaration.type === 'definition' &&
+      (declaration.parameters ?? []).some((parameter) => parameterAt(text, declaration.end, parameter.name) === start)
+  );
+}
+
+/** A name in a line of a diagram, as {@link nameIn} reads it there, and the index of its line. */
+export type Occurrence = Omit<NameAt, 'diagram' | 'cursor'> & { index: number };
+
+/**
+ * Each place in the lines of `read` where {@link nameIn} reads `name`, as
+ * a call, a variable or an element: written whole, from where it starts.
+ * The name and the parameters a line declares are not one, nor is anything
+ * in a comment or, but for a name that starts with `$`, in quoted text; a
+ * name in a label is one, though not as an element.
+ */
+export function occurrencesIn(read: DiagramText, name: string): Occurrence[] {
+  const found: Occurrence[] = [];
+  read.diagram.lines.forEach((text, index) => {
+    for (let at = text.indexOf(name); at !== -1; at = text.indexOf(name, at + 1)) {
+      const named = nameIn(read, index, at);
+      if (
+        named !== null &&
+        ((named.name === name && named.start === at) || (named.element?.name === name && named.element.start === at))
+      ) {
+        found.push({ ...named, index });
+      }
+    }
+  });
+  return found;
+}
+
+/**
+ * The definition whose name, or one of whose parameters, the line of index
+ * `here` of `diagram` declares at column `column`, as the walk of what is
+ * defined takes it at `place` (src/language/macros.ts); null elsewhere.
+ */
+export function declaredAt(diagram: DiagramLines, here: number, column: number, place: Place): Macro | null {
+  const line = diagram.numbers[here];
+  const text = diagram.lines[here];
+  if (line === undefined || text === undefined) {
+    return null;
+  }
+  for (const declaration of declarationsOf(diagram.lines, diagram.numbers)) {
+    if (declaration.type !== 'definition' || declaration.line !== line) {
+      continue;
+    }
+    if (column >= declaration.start && column <= declaration.end) {
+      return macroOf(declaration, place);
+    }
+    for (const parameter of declaration.parameters ?? []) {
+      const at = parameterAt(text, declaration.end, parameter.name);
+      if (at !== -1 && column >= at && column <= at + parameter.name.length) {
+        return parameterOf(declaration, parameter, place);
+      }
+    }
+  }
+  return null;
+}
+
+/** The name of the element a line of `diagram` declares with its keyword at column `column` of the line of index `here`; null elsewhere. */
+export function elementDeclaredAt(diagram: DiagramLines, here: number, column: number): string | null {
+  let found: string | null = null;
+  const visit = (declared: Declaration): void => {
+    if (declared.start === here && declared.at !== undefined && column >= declared.at.start && column <= declared.at.end) {
+      found = declared.name;
+    }
+    declared.children.forEach(visit);
   };
+  declarations(diagram.lines.join('\n')).forEach(visit);
+  return found;
 }
 
 /**
@@ -147,7 +231,11 @@ export function nameAt(
  * whole on its line `text`, as the engine picks one; those of a variable by
  * its name. Null when nothing defines it.
  */
-export function definitionsOfName(macros: Macros, at: NameAt, text: string): MacroEntry | null {
+export function definitionsOfName(
+  macros: Macros,
+  at: Pick<NameAt, 'name' | 'start' | 'call'>,
+  text: string
+): MacroEntry | null {
   if (at.call) {
     const call = callNamedAt(text, at.start, (name) => readingOf(macros, name));
     if (call === null) {

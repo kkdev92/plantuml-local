@@ -87,8 +87,8 @@ offline. The generator records the hash of every file it reads in
 procedures, functions, macros and variables with their parameters, defaults,
 values and the comment lines above them, and the files it includes — and the
 file's path as upstream writes it, read from the same text in the same run,
-for the completion, the parameter hints and Go to Definition; the generator
-records their hashes in the same file.
+for the completion, the parameter hints, Go to Definition and Find All
+References; the generator records their hashes in the same file.
 
 ### Azure-PlantUML
 

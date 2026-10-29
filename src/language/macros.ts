@@ -205,7 +205,8 @@ function originOf(place: Place, at: { line: number; start: number; end: number; 
   return { ...place, line: at.line, start: at.start, end: at.end, last: at.last ?? at.line };
 }
 
-function macroOf(definition: Definition, place: Place): Macro {
+/** The definition a declaration makes, as written at `place`. */
+export function macroOf(definition: Definition, place: Place): Macro {
   return {
     kind: definition.kind,
     name: definition.name,
@@ -219,6 +220,12 @@ function macroOf(definition: Definition, place: Place): Macro {
     ...(definition.final === true ? { final: true } : {}),
     origin: originOf(place, definition),
   };
+}
+
+/** A parameter of a procedure or function, as its body reads it: its origin is the line that declares the body. */
+export function parameterOf(definition: Definition, parameter: Parameter, place: Place): Macro {
+  const value = parameter.default === undefined ? {} : { value: parameter.default };
+  return { kind: 'parameter', name: parameter.name, ...value, origin: originOf(place, definition) };
 }
 
 /** Whether two definitions are one, written on the same line of the same text: a line declares one thing. */
@@ -273,6 +280,34 @@ const VARIABLE = /\$[_\p{L}]/u;
 type Seen = 'conditional' | 'unconditional';
 type Read = { id: string; text: string } | 'unreadable' | 'too-large';
 
+/**
+ * The body of a procedure, function or `!definelong` that line `cursor` is
+ * in, among `declarations` in order, or one after it: a body holds no
+ * other, and one never closed holds every line after it.
+ */
+function openBodyAt(declarations: readonly Declaration[], cursor: number): Definition | undefined {
+  return declarations.find(
+    (declaration): declaration is Definition =>
+      declaration.type === 'definition' &&
+      hasBody(declaration) &&
+      (declaration.last === declaration.line || cursor <= declaration.last)
+  );
+}
+
+/**
+ * What the walk takes of `declarations` up to line `cursor`: how many of
+ * them come before the line, and the body the line is in. Two lines alike
+ * in this are read alike.
+ */
+function readingKey(declarations: readonly Declaration[], cursor: number): string {
+  let before = 0;
+  while (before < declarations.length && (declarations[before]?.line ?? cursor) < cursor) {
+    before += 1;
+  }
+  const open = openBodyAt(declarations, cursor);
+  return `${String(before)}:${String(open !== undefined && open.line < cursor ? open.line : -1)}`;
+}
+
 class Walk {
   readonly callables = new Map<string, Candidate[]>();
   readonly variables = new Map<string, Candidate[]>();
@@ -284,12 +319,18 @@ class Walk {
   private readonly seen = new Map<string, Seen>();
   /** Each file read, by the file it is named from and its path. */
   private readonly files = new Map<string, Read>();
+  /** Each time a local file is read, in order, by the id the include session gives it: the lines read and what they declare. */
+  readonly readings = new Map<string, { numbers: readonly number[]; declarations: readonly Declaration[] }[]>();
+  /** Whether the walk came to {@link until}, where it stops. */
+  reached = false;
 
   constructor(
     private readonly sources: MacroSources,
     private readonly limits: AnalysisLimits,
     /** The bytes of text held. */
-    private held: number
+    private held: number,
+    /** A line of a local file to stop at, where the walk first reads it. */
+    private readonly until?: { id: string; line: number }
   ) {}
 
   get stopped(): boolean {
@@ -298,41 +339,60 @@ class Walk {
 
   /** Takes what the diagram declares before line `cursor`. */
   async diagram(declarations: readonly Declaration[], cursor: number): Promise<void> {
-    const place: Place = { source: 'document' };
+    await this.upTo(declarations, { source: 'document' }, cursor, false, 0);
+  }
+
+  /** Takes what `declarations`, read at `place`, declare before line `cursor`. */
+  private async upTo(
+    declarations: readonly Declaration[],
+    place: Place,
+    cursor: number,
+    conditional: boolean,
+    depth: number
+  ): Promise<void> {
     // The body the cursor is in is not taken yet, but its parameters and what it declares before the cursor are.
-    // A body holds no other, and one after the cursor is not come to.
-    const open = declarations.find(
-      (declaration): declaration is Definition =>
-        declaration.type === 'definition' &&
-        hasBody(declaration) &&
-        (declaration.last === declaration.line || cursor <= declaration.last)
-    );
+    const open = openBodyAt(declarations, cursor);
     for (const declaration of declarations) {
-      if (this.stopped || declaration.line >= cursor) {
+      if (this.stopped || this.reached || declaration.line >= cursor) {
         return;
       }
       if (declaration === open) {
         for (const parameter of open.parameters ?? []) {
-          const value = parameter.default === undefined ? {} : { value: parameter.default };
-          this.define({ kind: 'parameter', name: parameter.name, ...value, origin: originOf(place, open) }, false);
+          this.define(parameterOf(open, parameter, place), false);
         }
       } else if (declaration.body === undefined || declaration.body === open?.line) {
-        await this.take(declaration, place, declaration.conditional, 0);
+        await this.take(declaration, place, conditional || declaration.conditional, depth);
       } else if (declaration.type === 'include') {
         this.fall({ reason: 'in-body', path: writtenOf(declaration), at: originOf(place, declaration) });
       }
     }
   }
 
-  /** Takes what a file an include reads declares, all of it: `conditional` when the include may not read it. */
+  /**
+   * Takes what a file an include reads declares, all of it: `conditional`
+   * when the include may not read it. `numbers` are the lines of the file
+   * it reads; on {@link until}, it takes what comes before that line only,
+   * and the walk stops there.
+   */
   private async walk(
     declarations: readonly Declaration[],
     place: Place,
     conditional: boolean,
-    depth: number
+    depth: number,
+    numbers: readonly number[] = []
   ): Promise<void> {
+    if (place.source === 'file') {
+      const readings = this.readings.get(place.id) ?? [];
+      readings.push({ numbers, declarations });
+      this.readings.set(place.id, readings);
+      if (this.until?.id === place.id && numbers.includes(this.until.line)) {
+        await this.upTo(declarations, place, this.until.line, conditional, depth);
+        this.reached = true;
+        return;
+      }
+    }
     for (const declaration of declarations) {
-      if (this.stopped) {
+      if (this.stopped || this.reached) {
         return;
       }
       if (declaration.body === undefined) {
@@ -472,7 +532,7 @@ class Walk {
       if (section === null) {
         return fall('no-part');
       }
-      return this.walk(declarationsOf(section.lines, section.numbers), into, conditional, depth + 1);
+      return this.walk(declarationsOf(section.lines, section.numbers), into, conditional, depth + 1, section.numbers);
     }
     const key = `${file.id}\n${inclusion.selector ?? ''}`;
     const seen = this.seen.get(key);
@@ -492,7 +552,7 @@ class Walk {
     if ('problem' in lines) {
       return fall(lines.problem === 'pattern' ? 'pattern' : 'no-part');
     }
-    await this.walk(declarationsOf(lines.lines, lines.numbers), into, maybe, depth + 1);
+    await this.walk(declarationsOf(lines.lines, lines.numbers), into, maybe, depth + 1, lines.numbers);
   }
 
   /**
@@ -593,6 +653,85 @@ export async function macrosAt(
   const walk = new Walk(sources, limits, Buffer.byteLength(diagram.lines.join('\n'), 'utf8'));
   await walk.diagram(declarationsOf(diagram.lines, diagram.numbers), line);
   return walk.result();
+}
+
+/** What the whole of a diagram reads, and what is defined at each line it reads. */
+export interface DiagramReading {
+  /** What the diagram and its includes define by its end, and why an include was not read. */
+  macros: Macros;
+  /** The lines of each local file its includes read, by the id the include session gives the file. */
+  files: ReadonlyMap<string, ReadonlySet<number>>;
+  /** What is defined at line `line` of the document, as {@link macrosAt} reads it. */
+  at(line: number): Promise<Macros>;
+  /**
+   * What is defined at line `line` of the local file `id`, where the
+   * diagram first reads that line through an include: what is defined
+   * before that include, and what the file declares before the line. Null
+   * when no include of the diagram reads the line.
+   */
+  inFile(id: string, line: number): Promise<Macros | null>;
+}
+
+/**
+ * What the diagram whose lines are `diagram` reads, through `sources`: the
+ * whole of it, and what is defined at any line it reads, read once for
+ * the lines that what is declared before them makes alike.
+ */
+export async function diagramReading(
+  diagram: DiagramLines,
+  sources: MacroSources,
+  limits: AnalysisLimits = ANALYSIS_LIMITS
+): Promise<DiagramReading> {
+  const declarations = declarationsOf(diagram.lines, diagram.numbers);
+  const bytes = Buffer.byteLength(diagram.lines.join('\n'), 'utf8');
+  const whole = new Walk(sources, limits, bytes);
+  await whole.diagram(declarations, Number.POSITIVE_INFINITY);
+  const inDiagram = new Map<string, Promise<Macros>>();
+  const inFiles = new Map<string, Promise<Macros | null>>();
+  return {
+    macros: whole.result(),
+    files: new Map(
+      [...whole.readings].map(([id, readings]) => [id, new Set(readings.flatMap(({ numbers }) => numbers))])
+    ),
+    at: (line): Promise<Macros> => {
+      const key = readingKey(declarations, line);
+      let read = inDiagram.get(key);
+      if (read === undefined) {
+        const walk = new Walk(sources, limits, bytes);
+        read = walk.diagram(declarations, line).then(() => walk.result());
+        inDiagram.set(key, read);
+      }
+      return read;
+    },
+    inFile: (id, line): Promise<Macros | null> => {
+      // The walk to the line reads the same files in the same order as the walk of the whole.
+      const readings = whole.readings.get(id) ?? [];
+      const first = readings.findIndex(({ numbers }) => numbers.includes(line));
+      const reading = readings[first];
+      if (reading === undefined) {
+        return Promise.resolve(null);
+      }
+      const key = `${id}\n${String(first)}\n${readingKey(reading.declarations, line)}`;
+      let read = inFiles.get(key);
+      if (read === undefined) {
+        const walk = new Walk(sources, limits, bytes, { id, line });
+        read = walk
+          .diagram(declarations, Number.POSITIVE_INFINITY)
+          .then(() => (walk.reached || walk.stopped ? walk.result() : null));
+        inFiles.set(key, read);
+      }
+      return read;
+    },
+  };
+}
+
+/** Whether two definitions are one: the same name, a parameter or not, written on the same line of the same text. */
+export function sameMacro(one: Macro, other: Macro): boolean {
+  return (
+    one.name === other.name &&
+    (one.kind === 'parameter') === (other.kind === 'parameter') &&
+    sameOrigin(one.origin, other.origin)
+  );
 }
 
 /** The procedures, functions and macros named `name`, fewest parameters first. */

@@ -6,6 +6,7 @@ import { declarationsOf } from '../../src/language/declarations';
 import {
   covers,
   definitionsFor,
+  diagramReading,
   macrosAt,
   readingOf,
   type AnalysisLimits,
@@ -568,6 +569,113 @@ describe('macrosAt', () => {
       cancelAfter: 1,
     });
     expect(macros).toEqual({ status: 'cancelled', shortfalls: [], callables: new Map(), variables: new Map() });
+  });
+});
+
+describe('diagramReading', () => {
+  /** A diagram whose start line is line 0, so that line `n` of the document is `lines[n - 1]`. */
+  const diagramOf = (lines: readonly string[]): { lines: readonly string[]; numbers: readonly number[] } => ({
+    lines,
+    numbers: lines.map((_, index) => index + 1),
+  });
+
+  it('reads at each line what macrosAt reads there, once for the lines that what is declared before them makes alike', async () => {
+    const world: World = { files: { 'a.iuml': ['!procedure A()', '!endprocedure', '!$v = 1'] } };
+    const diagram = diagramOf([
+      '!procedure P($a)',
+      '  A -> B : $a',
+      '  !$inner = 1',
+      '  A -> B : $inner',
+      '!endprocedure',
+      'P(1)',
+      '!include a.iuml',
+      '!if $c',
+      '!$v = 2',
+      '!endif',
+      'P($v)',
+      '!$file = "x.iuml"',
+      '!include $file',
+      'P(2)',
+      '!procedure Q($q)',
+      'P(3)',
+    ]);
+    const reading = await diagramReading(diagram, sourcesOf(world, []));
+    for (let line = 1; line <= diagram.lines.length + 1; line++) {
+      expect(await reading.at(line), `line ${String(line)}`).toEqual(await macrosAt(diagram, line, sourcesOf(world, [])));
+    }
+    // The second line of a body, as the first: nothing is declared between them.
+    expect(reading.at(3)).toBe(reading.at(2));
+    expect(reading.at(4)).not.toBe(reading.at(3));
+    expect(reading.at(7)).toBe(reading.at(6));
+    // In the body never closed: every line after it.
+    expect(reading.at(17)).toBe(reading.at(16));
+    expect(summary(await reading.at(16))).toContain('$q resolved');
+
+    expect(summary(reading.macros)).toEqual(summary(await macrosAt(diagram, Infinity, sourcesOf(world, []))));
+    expect(reasons(reading.macros)).toEqual(['dynamic $file']);
+  });
+
+  it('lists the lines of each local file its includes read', async () => {
+    const world: World = {
+      files: {
+        'a.iuml': ['!procedure A()', '!endprocedure'],
+        'm.puml': ['@startuml', '!procedure B()', '!endprocedure', '@enduml', '@startuml(id=S)', '!procedure C()', '!endprocedure', '@enduml'],
+        's.iuml': ['!startsub X', '!$x = 1', '!endsub', '!$y = 2'],
+      },
+    };
+    const reading = await diagramReading(
+      diagramOf(['!include a.iuml', '!include m.puml!S', '!includesub s.iuml!X']),
+      sourcesOf(world, [])
+    );
+    expect([...reading.files].map(([id, lines]) => `${id} ${[...lines].join(',')}`)).toEqual([
+      '/w/a.iuml 0,1',
+      '/w/m.puml 5,6',
+      '/w/s.iuml 1',
+    ]);
+  });
+
+  it('reads a line of a local file as the diagram first reads it', async () => {
+    const world: World = {
+      files: {
+        'p.iuml': [
+          '!procedure Box($n)',
+          '  rectangle "$n"',
+          '!endprocedure',
+          '!procedure Boxes()',
+          '  Box(1)',
+          '!endprocedure',
+          'Box(2)',
+        ],
+        'q.iuml': ['R()'],
+      },
+    };
+    const reading = await diagramReading(
+      diagramOf([
+        '!procedure Box()',
+        '!endprocedure',
+        '!include p.iuml',
+        '!include_many q.iuml',
+        '!procedure R()',
+        '!endprocedure',
+        '!include_many q.iuml',
+      ]),
+      sourcesOf(world, [])
+    );
+    const inFile = async (id: string, line: number): Promise<string[] | null> => {
+      const macros = await reading.inFile(id, line);
+      return macros === null ? null : summary(macros);
+    };
+
+    // What the diagram defines before the include, and what the file declares before the line.
+    expect(await inFile('/w/p.iuml', 1)).toEqual(['Box/0 resolved', '$n resolved']);
+    expect(await inFile('/w/p.iuml', 4)).toEqual(['Box/0 resolved', 'Box/1 resolved']);
+    expect(await inFile('/w/p.iuml', 6)).toEqual(['Box/0 resolved', 'Box/1 resolved', 'Boxes/0 resolved']);
+    expect(reading.inFile('/w/p.iuml', 5)).toBe(reading.inFile('/w/p.iuml', 4));
+    // A file read twice, as it is read first: before R is defined.
+    expect(await inFile('/w/q.iuml', 0)).toEqual(['Box/0 resolved', 'Box/1 resolved', 'Boxes/0 resolved']);
+    // A line no include reads, and a file none reads.
+    expect(await inFile('/w/p.iuml', 7)).toBeNull();
+    expect(await inFile('/w/other.iuml', 0)).toBeNull();
   });
 });
 

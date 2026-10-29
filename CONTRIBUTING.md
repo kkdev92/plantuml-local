@@ -46,8 +46,9 @@ src/
 │                    actions above each diagram, quick fixes, Go to Diagram, and
 │                    the preprocessor's definitions (what a text declares, what
 │                    is defined where the cursor is, the call it is in) for
-│                    the completion, the parameter hints and Go to Definition,
-│                    which opens the bundled libraries' files read-only
+│                    the completion, the parameter hints, Go to Definition,
+│                    which opens the bundled libraries' files read-only, and
+│                    Find All References
 ├── preview/         markdown-it plugin: fence dispatch + cache-and-refresh cycle
 │                    (dependency-injected, no `vscode` import — unit-testable)
 ├── render/          extension-host side of the worker (request/response,

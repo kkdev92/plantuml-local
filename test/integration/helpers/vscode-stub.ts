@@ -244,6 +244,25 @@ export interface DefinitionRegistrationStub {
   };
 }
 
+/** A `vscode.Location` as the extension builds it. */
+export interface LocationStub {
+  uri: UriStub;
+  range: { start: PositionStub; end: PositionStub };
+}
+
+/** A reference provider as registered, with what it was registered for. */
+export interface ReferenceRegistrationStub {
+  selector: unknown;
+  provider: {
+    provideReferences(
+      document: TextEditorStub['document'],
+      position: PositionStub,
+      context: { includeDeclaration: boolean },
+      token: { isCancellationRequested: boolean }
+    ): Promise<LocationStub[] | undefined>;
+  };
+}
+
 /** A text document content provider as registered, with the scheme it was registered for. */
 export interface ContentRegistrationStub {
   scheme: string;
@@ -449,6 +468,10 @@ export interface VscodeStub {
       selector: unknown,
       provider: DefinitionRegistrationStub['provider']
     ) => { dispose(): void };
+    registerReferenceProvider: (
+      selector: unknown,
+      provider: ReferenceRegistrationStub['provider']
+    ) => { dispose(): void };
     registerCodeLensProvider: (
       selector: unknown,
       provider: CodeLensRegistrationStub['provider']
@@ -508,6 +531,7 @@ export interface VscodeStub {
     endLine?: number,
     endCharacter?: number
   ) => { start: PositionStub; end: PositionStub };
+  Location: new (uri: UriStub, range: { start: PositionStub; end: PositionStub }) => LocationStub;
   WorkspaceEdit: new () => WorkspaceEditStub;
   FileType: Record<'Unknown' | 'File' | 'Directory' | 'SymbolicLink', number>;
   FileSystemError: new (message: string, code: string) => Error & { code: string };
@@ -698,6 +722,8 @@ export interface VscodeStub {
     actionProviders: ActionRegistrationStub[];
     /** Definition providers registered, in order. */
     definitionProviders: DefinitionRegistrationStub[];
+    /** Reference providers registered, in order. */
+    referenceProviders: ReferenceRegistrationStub[];
     /** Code lens providers registered, in order. */
     codeLensProviders: CodeLensRegistrationStub[];
     /** Colour providers registered, in order. */
@@ -1078,6 +1104,13 @@ export function createVscodeStub(): VscodeStub {
   }
   const actionProviders: ActionRegistrationStub[] = [];
   const definitionProviders: DefinitionRegistrationStub[] = [];
+  const referenceProviders: ReferenceRegistrationStub[] = [];
+  class Location implements LocationStub {
+    constructor(
+      public uri: UriStub,
+      public range: LocationStub['range']
+    ) {}
+  }
   class CodeLens implements CodeLensStub {
     constructor(
       public range: CodeLensStub['range'],
@@ -1266,6 +1299,10 @@ export function createVscodeStub(): VscodeStub {
         definitionProviders.push({ selector, provider });
         return track('languages.registerDefinitionProvider');
       },
+      registerReferenceProvider: (selector, provider) => {
+        referenceProviders.push({ selector, provider });
+        return track('languages.registerReferenceProvider');
+      },
       registerCodeLensProvider: (selector, provider) => {
         codeLensProviders.push({ selector, provider });
         return track('languages.registerCodeLensProvider');
@@ -1283,6 +1320,7 @@ export function createVscodeStub(): VscodeStub {
     EndOfLine: { LF: 1, CRLF: 2 },
     Position,
     Range,
+    Location,
     WorkspaceEdit: WorkspaceEditStub,
     FileType,
     FileSystemError,
@@ -1708,6 +1746,7 @@ export function createVscodeStub(): VscodeStub {
       symbolProviders,
       actionProviders,
       definitionProviders,
+      referenceProviders,
       codeLensProviders,
       colorProviders,
       signatureProviders,

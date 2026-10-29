@@ -6,7 +6,7 @@ import { goesOnFrom, readsFrom, type Call } from './calls';
 import { diagramAt } from './completion';
 import { lineType, type Parameter } from './declarations';
 import { callablesNamed, type DiagramLines, type Macro, type MacroEntry, type MacroKind, type Macros, type Origin } from './macros';
-import { protect, protectedAt } from './protected';
+import { protect, protectedAt, type CodeLine } from './protected';
 
 /**
  * What the completion and the parameter hints show of what is defined where
@@ -121,15 +121,37 @@ export function macroPlace(
   if (found === null) {
     return null;
   }
-  const here = found.diagram.numbers.indexOf(found.cursor);
-  const lines = found.diagram.lines;
-  let code = false;
-  forEachCodeLine(lines.join('\n'), (_text, index) => {
-    code ||= index === here;
+  const place = placeIn(readDiagram(found.diagram), found.diagram.numbers.indexOf(found.cursor), column);
+  return place === null ? null : { ...found, ...place };
+}
+
+/** The lines of a diagram, with what is read of them once for any column: which are code, and the protected text of each. */
+export interface DiagramText {
+  diagram: DiagramLines;
+  /** The index of each line the engine reads as code, not a comment. */
+  code: ReadonlySet<number>;
+  /** Each line with its quoted text, notes and the like marked. */
+  typed: readonly CodeLine[];
+}
+
+/** Reads `diagram` for {@link placeIn}. */
+export function readDiagram(diagram: DiagramLines): DiagramText {
+  const code = new Set<number>();
+  forEachCodeLine(diagram.lines.join('\n'), (_text, index) => {
+    code.add(index);
   });
-  const text = lines[here] ?? '';
+  return { diagram, code, typed: protect(diagram.lines, false) };
+}
+
+/** As {@link macroPlace}, at column `column` of the line of index `here` of a diagram read by {@link readDiagram}. */
+export function placeIn(
+  read: DiagramText,
+  here: number,
+  column: number
+): Omit<MacroPlace, 'diagram' | 'cursor'> | null {
+  const text = read.diagram.lines[here] ?? '';
   const from = readsFrom(text);
-  if (!code || from === null) {
+  if (!read.code.has(here) || from === null) {
     return null;
   }
   const name = nameAround(text, column);
@@ -138,9 +160,8 @@ export function macroPlace(
     return null;
   }
   const type = lineType(text);
-  const typed = protect(lines, false)[here];
+  const typed = read.typed[here];
   return {
-    ...found,
     start: name.start,
     end: name.end,
     dollarOnly: type === 'include' || type === 'includesub' || (typed !== undefined && protectedAt(typed, column)),

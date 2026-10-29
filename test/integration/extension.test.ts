@@ -1,6 +1,8 @@
 import { existsSync, readFileSync } from 'node:fs';
+import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import Module from 'node:module';
 import { createRequire } from 'node:module';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
@@ -359,6 +361,8 @@ function makeEditor(
 ): TextEditorStub {
   // Mutable so the stub's workspace.applyEdit can write reference lines back.
   let current = text;
+  // Split once for each text, as VS Code keeps a document's lines.
+  let lines = text.split('\n');
   const inserted: { value: string; line: number; character: number; options: unknown }[] = [];
   return {
     document: {
@@ -373,7 +377,7 @@ function makeEditor(
       },
       getText: () => current,
       lineAt: (at: number) => {
-        const lineText = current.split('\n')[at] ?? '';
+        const lineText = lines[at] ?? '';
         return {
           text: lineText,
           range: new vscodeStub.Range(at, 0, at, lineText.length),
@@ -382,6 +386,7 @@ function makeEditor(
       },
       setText: (next: string) => {
         current = next;
+        lines = next.split('\n');
       },
     },
     selection: { active: { line } },
@@ -2438,7 +2443,7 @@ describe('definitions in completion and parameter hints (dist)', () => {
     });
     expect(vscodeStub._test.logs.slice(logged)).toEqual([
       expect.stringMatching(
-        /^info: Completion, parameter hints and Go to Definition in defs\/partial\.puml did not read:\ndefs\/partial\.puml, line 2: <C4\/C4_Nothing> was not read\. No bundled library has this file\./
+        /^info: Completion, parameter hints, Go to Definition and Find All References in defs\/partial\.puml did not read:\ndefs\/partial\.puml, line 2: <C4\/C4_Nothing> was not read\. No bundled library has this file\./
       ),
     ]);
 
@@ -2448,7 +2453,8 @@ describe('definitions in completion and parameter hints (dist)', () => {
     expect(status()).toMatchObject({
       text: 'Definitions: diagram and includes',
       severity: vscodeStub.LanguageStatusSeverity.Information,
-      detail: 'Completion, parameter hints and Go to Definition read what this diagram and the files it includes define.',
+      detail:
+        'Completion, parameter hints, Go to Definition and Find All References read what this diagram and the files it includes define.',
     });
     vscodeStub._test.setActiveEditor(partial);
     expect(status()?.text).toBe('Definitions: diagram and includes (partial)');
@@ -2459,6 +2465,17 @@ describe('definitions in completion and parameter hints (dist)', () => {
     expect(status()?.text).toBe('Definitions: diagram and includes');
     expect(vscodeStub._test.logs.slice(logged)).toHaveLength(1);
     vscodeStub._test.setActiveEditor(undefined);
+  });
+
+  it('reads a file with no start line whole, as a file only included', async () => {
+    const fragment = makeEditor(
+      'file:///c/defs/parts.iuml',
+      ['!procedure Box($a)', '!endprocedure', 'Bo', 'Box('].join('\n'),
+      0,
+      { languageId: 'plantuml' }
+    ).document;
+    expect((await provide(fragment, 2, 2))?.map(labelOf)).toContain('Box');
+    expect(await hints(fragment, 3, 4)).toMatchObject({ signatures: [{ label: 'Box($a)' }] });
   });
 
   it('reads no definitions of a document past the limits, and says so', async () => {
@@ -2475,7 +2492,7 @@ describe('definitions in completion and parameter hints (dist)', () => {
       text: 'Definitions: not read',
       severity: vscodeStub.LanguageStatusSeverity.Warning,
       detail:
-        'The document is larger than 2 MiB or longer than 50000 lines, so completion, parameter hints and Go to Definition do not read its definitions.',
+        'The document is larger than 2 MiB or longer than 50000 lines, so completion, parameter hints, Go to Definition and Find All References do not read its definitions.',
     });
     vscodeStub._test.setActiveEditor(undefined);
   });
@@ -2660,7 +2677,7 @@ describe('Go to Definition (dist)', () => {
     });
     expect(vscodeStub._test.logs.slice(logged)).toEqual([
       expect.stringMatching(
-        /^info: Completion, parameter hints and Go to Definition in goto\/dynamic\.puml did not read:\ngoto\/dynamic\.puml, line 5: \$file was not read\./
+        /^info: Completion, parameter hints, Go to Definition and Find All References in goto\/dynamic\.puml did not read:\ngoto\/dynamic\.puml, line 5: \$file was not read\./
       ),
     ]);
     vscodeStub._test.setActiveEditor(undefined);
@@ -2752,21 +2769,27 @@ describe('Go to Definition (dist)', () => {
     expect(await view('/other/x.puml')).toBeUndefined();
   });
 
-  it('finds nothing in a file with no start line, as the view of a library file or a file only included', async () => {
+  it('reads a file with no start line whole, as the view of a library file or a file only included', async () => {
     // In the view of C4_Context.puml, $toElementArg, which C4.puml defines, on the line after Person's.
     const lines = c4Text('c4_context').split('\n');
     expect(lines[366]?.slice(9, 22)).toBe('$toElementArg');
     const view = puml('plantuml-local-library:/C4/C4_Context.puml', lines);
-    expect(await definitions(view, 366, 12)).toBeUndefined();
+    expect((await definitions(view, 366, 12))?.map(({ from, to, name }) => `${from} ${to}#${name}`)).toEqual([
+      '366:9-366:22 plantuml-local-library:/C4/C4.puml#397:19-397:32',
+    ]);
+    expect(c4Text('c4').split('\n')[397]?.slice(19, 32)).toBe('$toElementArg');
 
     const body = ['!procedure P($name)', '  rectangle $name', '!endprocedure', 'P(x)'];
     const included = puml('file:///c/goto/parts.iuml', body);
-    expect(await definitions(included, 1, 13)).toBeUndefined();
-    expect(await definitions(included, 3, 0)).toBeUndefined();
-    // The same lines in a diagram: the start line is what differs.
+    expect((await definitions(included, 1, 13))?.map(({ name }) => name)).toEqual(['0:13-0:18']);
+    expect((await definitions(included, 3, 0))?.map(({ name }) => name)).toEqual(['0:11-0:12']);
+    // The same lines in a diagram: the same definitions, a line further down.
     const diagram = puml('file:///c/goto/parts.puml', ['@startuml', ...body, '@enduml']);
     expect((await definitions(diagram, 2, 13))?.map(({ name }) => name)).toEqual(['1:13-1:18']);
     expect((await definitions(diagram, 4, 0))?.map(({ name }) => name)).toEqual(['1:11-1:12']);
+    // In a file with a start line, a line outside its diagrams is in none.
+    const outside = puml('file:///c/goto/outside.puml', [...body, '@startuml', 'A -> B', '@enduml']);
+    expect(await definitions(outside, 3, 0)).toBeUndefined();
   });
 
   it('answers nothing once the request is cancelled or the document changes while it reads', async () => {
@@ -2794,6 +2817,297 @@ describe('Go to Definition (dist)', () => {
     expect(await definitions(changing, 2, 1)).toBeUndefined();
     expect(await definitions(library, 1, 12)).toHaveLength(1);
     expect(await definitions(library, 2, 1)).toHaveLength(1);
+  });
+});
+
+describe('Find All References (dist)', () => {
+  type RangeLike = { start: { line: number; character: number }; end: { line: number; character: number } };
+  /** What Find All References at the position lists: `uri#line:character-line:character`, in order. */
+  const references = async (
+    document: TextEditorStub['document'],
+    line: number,
+    character: number,
+    options: { includeDeclaration?: boolean; cancelled?: boolean } = {}
+  ): Promise<string[] | undefined> => {
+    const registration = vscodeStub._test.referenceProviders[0];
+    if (registration === undefined) {
+      throw new Error('no reference provider registered');
+    }
+    const locations = await registration.provider.provideReferences(
+      document,
+      new vscodeStub.Position(line, character),
+      { includeDeclaration: options.includeDeclaration ?? true },
+      { isCancellationRequested: options.cancelled === true }
+    );
+    const span = ({ start, end }: RangeLike): string =>
+      `${String(start.line)}:${String(start.character)}-${String(end.line)}:${String(end.character)}`;
+    return locations?.map(({ uri, range }) => `${uri.toString()}#${span(range)}`);
+  };
+  const puml = (path: string, lines: readonly string[]): TextEditorStub['document'] =>
+    makeEditor(path, lines.join('\n'), 0, { languageId: 'plantuml' }).document;
+  const status = (): (typeof vscodeStub._test.languageStatusItems)[number] | undefined =>
+    vscodeStub._test.languageStatusItems.find((item) => item.id === 'plantumlLocal.definitions');
+
+  it('finds the calls and variables that stand for the definition, in the diagram it is in alone', async () => {
+    const two = 'file:///c/refs/two.puml';
+    const document = puml(two, [
+      '@startuml(id=first)',
+      '!procedure P($a)',
+      '  A -> B : $a',
+      '!endprocedure',
+      '!procedure P($a, $b)',
+      '!endprocedure',
+      'P(1)',
+      "' P(2)",
+      'A -> B : "P(3)"',
+      'P(4, 5)',
+      'P(6)',
+      '@enduml',
+      '@startuml(id=second)',
+      '!procedure P($a)',
+      '!endprocedure',
+      'P(7)',
+      '@enduml',
+    ]);
+
+    // From a call or from the name its definition declares: the definition first, then each call that picks it.
+    const first = [`${two}#1:11-1:12`, `${two}#6:0-6:1`, `${two}#10:0-10:1`];
+    expect(await references(document, 6, 0)).toEqual(first);
+    expect(await references(document, 1, 11)).toEqual(first);
+    expect(await references(document, 10, 1, { includeDeclaration: false })).toEqual(first.slice(1));
+    // The definition the arguments pick instead; the one of the other diagram.
+    expect(await references(document, 9, 0)).toEqual([`${two}#4:11-4:12`, `${two}#9:0-9:1`]);
+    expect(await references(document, 15, 0)).toEqual([`${two}#13:11-13:12`, `${two}#15:0-15:1`]);
+    // A parameter, in the body of its procedure.
+    const parameter = [`${two}#1:13-1:15`, `${two}#2:11-2:13`];
+    expect(await references(document, 2, 12)).toEqual(parameter);
+    expect(await references(document, 1, 14)).toEqual(parameter);
+
+    // A variable given a new value is another definition from there on; a parameter of its name, another still.
+    const sizes = 'file:///c/refs/sizes.puml';
+    const variables = puml(sizes, [
+      '@startuml',
+      '!$size = 3',
+      'A -> B : $size',
+      '!$size = 4',
+      'A -> B : "$size"',
+      '!procedure Box($size)',
+      '  A -> B : $size',
+      '!endprocedure',
+      '@enduml',
+    ]);
+    expect(await references(variables, 2, 10)).toEqual([`${sizes}#1:1-1:6`, `${sizes}#2:9-2:14`]);
+    expect(await references(variables, 3, 2)).toEqual([`${sizes}#3:1-3:6`, `${sizes}#4:10-4:15`]);
+    expect(await references(variables, 6, 12)).toEqual([`${sizes}#5:15-5:20`, `${sizes}#6:11-6:16`]);
+  });
+
+  it('finds an element where a line names it before its label, and not in a label or another diagram', async () => {
+    const elements = 'file:///c/refs/elements.puml';
+    const document = puml(elements, [
+      '@startuml(id=first)',
+      'participant "Order" as A',
+      'participant B',
+      'A -> B : hello A',
+      'B -> A',
+      '@enduml',
+      '@startuml(id=second)',
+      'participant A',
+      'A -> A',
+      '@enduml',
+    ]);
+
+    const first = [`${elements}#1:23-1:24`, `${elements}#3:0-3:1`, `${elements}#4:5-4:6`];
+    expect(await references(document, 3, 0)).toEqual(first);
+    expect(await references(document, 1, 23)).toEqual(first);
+    expect(await references(document, 4, 5, { includeDeclaration: false })).toEqual(first.slice(1));
+    expect(await references(document, 3, 5)).toEqual([`${elements}#2:12-2:13`, `${elements}#3:5-3:6`, `${elements}#4:0-4:1`]);
+    expect(await references(document, 8, 5)).toEqual([
+      `${elements}#7:12-7:13`,
+      `${elements}#8:0-8:1`,
+      `${elements}#8:5-8:6`,
+    ]);
+  });
+
+  it('finds nothing on a comment, a word of a label or a name no line declares', async () => {
+    const document = puml('file:///c/refs/words.puml', ['@startuml', 'participant A', "' A", 'A -> B : hello', '@enduml']);
+    expect(await references(document, 2, 2)).toBeUndefined();
+    expect(await references(document, 3, 10)).toBeUndefined();
+    expect(await references(document, 3, 5)).toBeUndefined();
+    expect(await references(document, 3, 0)).toHaveLength(2);
+  });
+
+  it('counts the quote markers before the lines of a Markdown block', async () => {
+    const doc = 'file:///c/refs/doc.md';
+    const markdown = makeEditor(
+      doc,
+      ['# Order', '> ```plantuml', '> !procedure P()', '> !endprocedure', '> participant A', '> P()', '> A -> A', '> ```'].join('\n'),
+      0
+    ).document;
+
+    expect(await references(markdown, 5, 2)).toEqual([`${doc}#2:13-2:14`, `${doc}#5:2-5:3`]);
+    expect(await references(markdown, 6, 2)).toEqual([`${doc}#4:14-4:15`, `${doc}#6:2-6:3`, `${doc}#6:7-6:8`]);
+    // In the text of the document, nothing.
+    expect(await references(markdown, 0, 3)).toBeUndefined();
+  });
+
+  it('leaves out a place that text not read may define again, and says why', async () => {
+    const uri = 'file:///c/refs/dynamic.puml';
+    const dynamic = makeEditor(
+      uri,
+      ['@startuml', '!procedure P()', '!endprocedure', 'P()', '!$file = "parts.puml"', '!include $file', 'P()', '@enduml'].join('\n'),
+      0,
+      { languageId: 'plantuml' }
+    );
+    vscodeStub._test.setActiveEditor(dynamic);
+    const logged = vscodeStub._test.logs.length;
+
+    // From the call after it, nothing to look for, and why.
+    expect(await references(dynamic.document, 6, 0)).toBeUndefined();
+    expect(status()).toMatchObject({
+      text: 'Definitions: diagram and includes (partial)',
+      severity: vscodeStub.LanguageStatusSeverity.Warning,
+      detail: 'Some definitions are missing. See the Output panel for the reasons.',
+    });
+    expect(vscodeStub._test.logs.slice(logged)).toEqual([
+      expect.stringMatching(
+        /^info: Completion, parameter hints, Go to Definition and Find All References in refs\/dynamic\.puml did not read:\nrefs\/dynamic\.puml, line 6: \$file was not read\./
+      ),
+    ]);
+    // From the call before it, that call alone, for the same reason.
+    expect(await references(dynamic.document, 3, 0)).toEqual([`${uri}#1:11-1:12`, `${uri}#3:0-3:1`]);
+    expect(status()?.text).toBe('Definitions: diagram and includes (partial)');
+    expect(vscodeStub._test.logs.slice(logged)).toHaveLength(1);
+    vscodeStub._test.setActiveEditor(undefined);
+  });
+
+  it('lists the first 5000 references, and says that the list stops there', async () => {
+    const uri = 'file:///c/refs/many.puml';
+    const many = makeEditor(
+      uri,
+      ['@startuml', '!procedure P()', '!endprocedure', ...Array<string>(5_001).fill('P()'), '@enduml'].join('\n'),
+      0,
+      { languageId: 'plantuml' }
+    );
+    vscodeStub._test.setActiveEditor(many);
+    const logged = vscodeStub._test.logs.length;
+
+    const found = await references(many.document, 3, 0);
+    expect(found).toHaveLength(5_000);
+    expect(found?.slice(0, 2)).toEqual([`${uri}#1:11-1:12`, `${uri}#3:0-3:1`]);
+    expect(found?.at(-1)).toBe(`${uri}#5001:0-5001:1`);
+    expect(status()).toMatchObject({
+      text: 'Definitions: diagram and includes (partial)',
+      severity: vscodeStub.LanguageStatusSeverity.Warning,
+      detail: 'Only the first 5000 references are listed.',
+    });
+    expect(vscodeStub._test.logs.slice(logged)).toEqual([
+      expect.stringMatching(
+        /^info: Completion, parameter hints, Go to Definition and Find All References in refs\/many\.puml did not read:\nOnly the first 5000 references are listed\./
+      ),
+    ]);
+    // Without the definition, a call more.
+    expect((await references(many.document, 3, 0, { includeDeclaration: false }))?.at(-1)).toBe(`${uri}#5002:0-5002:1`);
+    expect(vscodeStub._test.logs.slice(logged)).toHaveLength(1);
+    vscodeStub._test.setActiveEditor(undefined);
+  });
+
+  it('answers nothing once the request is cancelled or the document changes while it reads', async () => {
+    const uri = 'file:///c/refs/cancelled.puml';
+    const document = puml(uri, ['@startuml', '!procedure P()', '!endprocedure', 'P()', '@enduml']);
+    expect(await references(document, 3, 0, { cancelled: true })).toBeUndefined();
+    expect(await references(document, 3, 0)).toEqual([`${uri}#1:11-1:12`, `${uri}#3:0-3:1`]);
+
+    // Edited once the request has started: after what it first reads of the document.
+    let reads = 0;
+    const changing: TextEditorStub['document'] = {
+      ...document,
+      get version(): number {
+        reads += 1;
+        return reads === 1 ? 1 : 2;
+      },
+    };
+    expect(await references(changing, 3, 0)).toBeUndefined();
+    reads = 0;
+    expect(await references(changing, 1, 11)).toBeUndefined();
+  });
+
+  describe('with the local files a diagram includes', () => {
+    const PARTS = [
+      '!procedure Box($n)',
+      '  rectangle "box $n"',
+      '!endprocedure',
+      '!procedure Boxes()',
+      '  Box(1)',
+      '  Box(2)',
+      '!endprocedure',
+    ];
+    const MAIN = ['@startuml', '!include parts.iuml', '!include <C4/C4_Context>', 'Box(1)', 'Person(a, "A")', '@enduml'];
+    let root = '';
+    let folderOf: VscodeStub['workspace']['getWorkspaceFolder'] = () => undefined;
+    const uriOf = (name: string): string => vscodeStub.Uri.file(join(root, name)).toString();
+    /** A document in the workspace folder on disk: its URI as VS Code writes it, its path as the platform does. */
+    const onDisk = (name: string, lines: readonly string[]): TextEditorStub['document'] => {
+      const document = puml(uriOf(name), lines);
+      return { ...document, uri: { ...document.uri, fsPath: join(root, name) } };
+    };
+
+    beforeAll(async () => {
+      root = await realpath(await mkdtemp(join(tmpdir(), 'plantuml-local-refs-')));
+      await writeFile(join(root, 'parts.iuml'), PARTS.join('\n'));
+      // The stub's folder, /c, is on no disk: this one is, so that its includes are read.
+      folderOf = vscodeStub.workspace.getWorkspaceFolder;
+      const folder = { uri: { ...vscodeStub.Uri.file(root), fsPath: root }, name: 'ws', index: 0 };
+      const under = `${vscodeStub.Uri.file(root).toString()}/`;
+      vscodeStub.workspace.getWorkspaceFolder = (uri) => (uri.toString().startsWith(under) ? folder : folderOf(uri));
+    });
+
+    afterAll(async () => {
+      vscodeStub.workspace.getWorkspaceFolder = folderOf;
+      await rm(root, { recursive: true, force: true });
+    });
+
+    it('looks in the local files the diagram includes, as the editor has them', async () => {
+      const main = onDisk('main.puml', MAIN);
+      const box = [
+        `${uriOf('parts.iuml')}#0:11-0:14`,
+        `${uriOf('main.puml')}#3:0-3:3`,
+        `${uriOf('parts.iuml')}#4:2-4:5`,
+        `${uriOf('parts.iuml')}#5:2-5:5`,
+      ];
+      expect(await references(main, 3, 0)).toEqual(box);
+      expect(await references(main, 3, 0, { includeDeclaration: false })).toEqual(box.slice(1));
+
+      // A change not saved yet.
+      const edited = onDisk('parts.iuml', [...PARTS.slice(0, 6), '  Box(3)', ...PARTS.slice(6)]);
+      vscodeStub._test.openDocument(edited);
+      try {
+        expect(await references(main, 3, 0)).toEqual([...box, `${uriOf('parts.iuml')}#6:2-6:5`]);
+      } finally {
+        vscodeStub._test.closeDocument(edited);
+      }
+
+      // Defined again after the include: the file's calls are to the one defined before them.
+      const again = onDisk('again.puml', ['@startuml', '!include parts.iuml', '!procedure Box($n)', '!endprocedure', 'Box(3)', '@enduml']);
+      expect(await references(again, 4, 0)).toEqual([`${uriOf('again.puml')}#2:11-2:14`, `${uriOf('again.puml')}#4:0-4:3`]);
+    });
+
+    it("lists where a bundled library defines a name, and not where the library's own files use it", async () => {
+      const main = onDisk('main.puml', MAIN);
+      expect(await references(main, 4, 0)).toEqual([
+        'plantuml-local-library:/C4/C4_Context.puml#365:20-365:26',
+        `${uriOf('main.puml')}#4:0-4:6`,
+      ]);
+      expect(await references(main, 4, 0, { includeDeclaration: false })).toEqual([`${uriOf('main.puml')}#4:0-4:6`]);
+    });
+
+    it('searches a file with no start line within itself, and not the diagrams that include it', async () => {
+      const parts = onDisk('parts.iuml', PARTS);
+      expect(await references(parts, 4, 2)).toEqual([
+        `${uriOf('parts.iuml')}#0:11-0:14`,
+        `${uriOf('parts.iuml')}#4:2-4:5`,
+        `${uriOf('parts.iuml')}#5:2-5:5`,
+      ]);
+    });
   });
 });
 

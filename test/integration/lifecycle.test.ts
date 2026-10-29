@@ -57,6 +57,7 @@ it('releases on deactivate every listener, provider and command activation regis
       'languages.registerDefinitionProvider',
       'languages.registerDocumentSymbolProvider',
       'languages.registerFoldingRangeProvider',
+      'languages.registerReferenceProvider',
       'languages.registerSignatureHelpProvider',
       'window.onDidChangeActiveColorTheme',
       'window.onDidChangeActiveTextEditor',
