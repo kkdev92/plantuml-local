@@ -29,27 +29,28 @@ updates:
 
       # @types/vscode moves by hand, in the same change as engines.vscode:
       # `vsce package` refuses types newer than the floor, so a bump on its own
-      # turns the package lane red. The floor follows @kkdev92/vscode-ext-kit's,
-      # which rises when the kit starts using an API older VS Code lacks, not
-      # whenever new types are published. Raise both when a kit release raises
-      # its floor, or when this extension needs a newer API itself.
+      # turns the package lane red. The floor is at least
+      # @kkdev92/vscode-ext-kit's, which rises when the kit starts using an API
+      # older VS Code lacks, not whenever new types are published. Raise both
+      # when a kit release raises its floor, when this extension needs a newer
+      # API itself, or when the floor is raised on purpose ahead of the kit, as
+      # it was to 1.144.
       - dependency-name: "@types/vscode"
 
       # @types/node: these types decide what Node API the code may compile
       # against, so they must not exceed the Node of the oldest VS Code this
-      # extension accepts. `engines.vscode: ^1.138.0` makes that VS Code 1.138,
-      # whose extension host is Electron 42.10.0 with Node 24.18.1 (`target` in
-      # microsoft/vscode's .npmrc at the 1.138.0 tag, then Electron's release
+      # extension accepts. `engines.vscode: ^1.144.0` makes that VS Code 1.144,
+      # whose extension host is Electron 43.8.3 with Node 24.22.0 (`target` in
+      # microsoft/vscode's .npmrc at the 1.144.0 tag, then Electron's release
       # list). A bump past that passes CI — nothing reaches for a newer API *yet*
       # — which is precisely why CI cannot be what catches it. Same rule as
       # @types/vscode, where the types floor is also the ceiling. Majors are held
-      # outright, and the range holds back minors past that Node: @types/node
-      # 24.x went from 24.13 straight to 24.19, which is already past it.
+      # outright, and the range holds back minors past that Node.
       # Revisit when the floor moves: look up the new floor's Node the same way
       # and move the range to just past it.
       - dependency-name: "@types/node"
         versions:
-          - ">=24.19.0"
+          - ">=24.23.0"
         update-types:
           - version-update:semver-major
 

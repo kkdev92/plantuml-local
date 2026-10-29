@@ -998,7 +998,7 @@ export function createVscodeStub(): VscodeStub {
   }
   const completionProviders: CompletionRegistrationStub[] = [];
 
-  /** Builds its value as VS Code 1.138.0 does (src/vs/base/common/htmlContent.ts). */
+  /** Builds its value as VS Code 1.144.0 does (src/vs/base/common/htmlContent.ts). */
   class MarkdownString implements MarkdownStringStub {
     parts: MarkdownStringStub['parts'] = [];
     constructor(public value = '') {}
@@ -1049,7 +1049,7 @@ export function createVscodeStub(): VscodeStub {
   const contentProviders: ContentRegistrationStub[] = [];
 
   const languageStatusItems: LanguageStatusItemStub[] = [];
-  /** As VS Code 1.138.0 makes one (src/vs/workbench/api/common/extHostLanguages.ts), less its name, which is the extension's there. */
+  /** As VS Code 1.144.0 makes one (src/vs/workbench/api/common/extHostLanguages.ts), less its name, which is the extension's there. */
   const createLanguageStatusItem = (id: string, selector: unknown): LanguageStatusItemStub => {
     if (languageStatusItems.some((item) => item.id === id && !item.disposed)) {
       throw new Error(`LanguageStatusItem with id '${id}' ALREADY exists`);

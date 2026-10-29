@@ -1,8 +1,8 @@
 # Grammar test fixtures
 
-These are grammars shipped with VS Code 1.138.0 (the lowest VS Code version
+These are grammars shipped with VS Code 1.144.0 (the lowest VS Code version
 this extension supports), taken from
-[microsoft/vscode](https://github.com/microsoft/vscode) at tag `1.138.0`. The
+[microsoft/vscode](https://github.com/microsoft/vscode) at tag `1.144.0`. The
 tests use them only to check how the PlantUML grammars behave where VS Code
 combines them with its own; none of them is packaged.
 
