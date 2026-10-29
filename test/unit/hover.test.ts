@@ -11,12 +11,14 @@ import {
   builtinAt,
   codeBlock,
   definitionSections,
+  escapeLines,
   escapeMarkdown,
   HELP_ENGINE,
   helpFor,
   helpMarkdown,
   HOVER_COMMENT,
   HOVER_DEFINITIONS,
+  inlineCode,
   type BuiltinTarget,
 } from '../../src/language/hover';
 import type { MacroDefinition } from '../../src/language/macro-help';
@@ -84,6 +86,61 @@ describe('codeBlock', () => {
     expect(html.match(/<pre>/g)).toHaveLength(1);
     const code = /^<pre><code class="language-text">([\s\S]*)<\/code><\/pre>\n$/.exec(html)?.[1];
     expect(textOf(code ?? '')).toBe(`${text}\n`);
+  });
+});
+
+describe('inlineCode', () => {
+  it('marks the text with one backtick more than its longest run of them, and pads a backtick or a space at an end', () => {
+    expect(inlineCode('!procedure Box($a)')).toBe('`!procedure Box($a)`');
+    expect(inlineCode('a `b` ``c``')).toBe('``` a `b` ``c`` ```');
+    expect(inlineCode('a `b` c')).toBe('``a `b` c``');
+    expect(inlineCode('`a`')).toBe('`` `a` ``');
+    expect(inlineCode(' a')).toBe('`  a `');
+  });
+
+  it.each([
+    '!unquoted procedure Person($alias, $label, $descr = "", $sprite = "", $tags = "")',
+    '!define X <b>bold</b> <img src="https://example.com/x.png"> https://example.com www.example.com',
+    '!$a = "``" + `b` + "```"',
+    '`a',
+    'a`',
+    ' a ',
+    '&amp; &#60; \\* [open](command:workbench.action.quit)',
+  ])('reads back as written, as one code span with no link, image or HTML: %j', (text) => {
+    const html = md.renderInline(inlineCode(text));
+    expect(html.match(/<code>/g)).toHaveLength(1);
+    expect(html).not.toMatch(/<(?:a|img|b|script)\b/);
+    const code = /^<code>([\s\S]*)<\/code>$/.exec(html)?.[1];
+    expect(textOf(code ?? '')).toBe(text);
+  });
+});
+
+describe('escapeLines', () => {
+  /** A no-break space, which a run of spaces keeps after its first. */
+  const NBSP = String.fromCharCode(160);
+
+  it('escapes each line, breaks where the text does, and keeps the spaces of a run', () => {
+    expect(escapeLines('A -> B\n<b>')).toBe('A \\-\\> B\\\n\\<b\\>');
+    expect(escapeLines('a  b\tc')).toBe('a &nbsp;b c');
+    expect(escapeLines('  a')).toBe('&nbsp;&nbsp;a');
+  });
+
+  it.each([
+    '<b>bold</b> <img src="https://example.com/x.png">\n<script>alert(1)</script>',
+    '[open](command:workbench.action.quit)\n![image](https://example.com/x.png)',
+    'https://example.com\nwww.example.com someone@example.com',
+    '# heading\n> quote\n- item\n1. item\n    indented\n---',
+    '```\ncode\n```',
+    '&amp; &#60; &lt; &nbsp;',
+    'a  b   c\\\nend\\',
+  ])('reads back as written, line by line, with no link, image or HTML: %j', (text) => {
+    const html = md.render(escapeLines(text));
+    expect(html).not.toMatch(/<(?:a|img|b|script|em|strong|code|s|del|h\d|blockquote|ul|ol|pre|hr)\b/);
+    expect(html.match(/<p>/g)).toHaveLength(1);
+    // A line break of the text is one of the paragraph, and no run of spaces is left for HTML to fold.
+    expect(html.match(/<br>/g) ?? []).toHaveLength(text.split('\n').length - 1);
+    expect(html).not.toMatch(/ {2}|\t/);
+    expect(textOf(html.replace(/<br>\n/g, '\n')).split(NBSP).join(' ')).toBe(`${text}\n`);
   });
 });
 

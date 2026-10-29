@@ -23,11 +23,11 @@ updates.
   files of the workspace, read as the preview reads them, and the bundled C4
   and Azure libraries. Each shows its parameters, where it is defined and
   what defines it, and in its details how it is declared, its line and the
-  comment above it; picking one writes the call with a placeholder for each
-  parameter up to the last that has no default. The parameter hints, on `(`
-  and `,`, show each definition of the name called with its parameters as
-  declared, and the one the cursor is in, by place or by name. Nothing is run
-  to find them: a definition under `!if` is marked conditional, several of
+  comment above it as written; picking one writes the call with a placeholder
+  for each parameter up to the last that has no default. The parameter hints,
+  on `(` and `,`, show each definition of the name called with its parameters
+  as declared, and the one the cursor is in, by place or by name. Nothing is
+  run to find them: a definition under `!if` is marked conditional, several of
   one name and number of parameters ambiguous, and those an include that is
   not read may change, unresolved. The Language Status says what is offered,
   and the output which includes were not read and why. Since 0.17.0 the list
