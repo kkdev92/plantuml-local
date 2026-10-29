@@ -16,6 +16,18 @@ export interface RenderResponseMessage {
   id: number;
   svg?: string;
   error?: string;
+  /** The files of the bundled libraries the engine read, in the order first read. */
+  libraries?: LibraryRead[];
+}
+
+/** A file of a bundled library the engine read, by the key it looked up. */
+export interface LibraryRead {
+  /** The library, as the extension bundles it: `c4`. */
+  library: string;
+  /** The file's key: its path in the library, in lower case, without the extension. */
+  key: string;
+  /** Whether the library has it. */
+  found: boolean;
 }
 
 /** Sent by the worker when the engine asks for the file of a local include. */
@@ -72,6 +84,37 @@ export interface DiagramRender {
    * when they set anything.
    */
   includedStyle?: IncludedStyle;
+  /** What it asked for, when drawn for a document (src/includes/host.ts). */
+  log?: DrawingLog;
+}
+
+/**
+ * What a drawing asked for: the requests for local files, in the order the
+ * engine asked, and the files of the bundled libraries it read.
+ */
+export interface DrawingLog {
+  requests: readonly DrawnRequest[];
+  libraries: readonly LibraryRead[];
+}
+
+/** How a request for a local file ended. */
+export type DrawnRequestState = 'read' | 'missing' | 'refused' | 'unavailable' | 'outside' | 'path' | 'limit';
+
+/** A request for a local file, as answered. Paths are as the editor knows them. */
+export interface DrawnRequest {
+  /** The file the directive names, as the engine handed it over. */
+  path: string;
+  /** The id of the file it was asked from, or null for the diagram. */
+  from: string | null;
+  kind?: IncludeKind;
+  state: DrawnRequestState;
+  /** The id of the file read; `file` is its path. */
+  id?: string;
+  file?: string;
+  /** The places looked at first and found empty, and the one refused. */
+  looked: readonly string[];
+  /** Why it failed, in the words the preview uses. */
+  reason?: string;
 }
 
 /** What the files a diagram included set for its palette. */

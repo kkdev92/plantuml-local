@@ -1,7 +1,7 @@
 import { INCLUDE_LIMITS } from '../core/constants';
 import { splitLines } from '../core/lines';
 import { forEachCodeLine } from '../core/shape';
-import type { IncludedFile, IncludeLoader } from '../core/types';
+import type { IncludedFile, IncludeKind, IncludeLoader } from '../core/types';
 import { includesWhitePageLibrary, themeLines } from '../render/palette';
 import { parseIncludePath, type PathRefusal } from './path-policy';
 import { readIncludeFile, type ReadRefusal } from './reader';
@@ -20,7 +20,8 @@ import { includeCandidates, isWithin, type IncludeScope, type SearchFoldersProbl
  * Every failure is kept, with why, so the preview, the Problems panel and
  * the export can say more than the engine's "cannot include". So is every
  * path looked at, the files read and the ones found missing: a later change
- * to any of them can change the diagram.
+ * to any of them can change the diagram. So is every request, with its
+ * answer, for the list of what a diagram read.
  */
 
 /** Why a document's diagrams get no local includes at all. */
@@ -56,9 +57,33 @@ export interface IncludeFailure {
   reason: IncludeFailureReason;
 }
 
+/** The answer to one request. */
+export type IncludeAnswer =
+  /** The file delivered, by its id, and the places looked at first and found empty. */
+  | { delivered: string; missing: readonly string[] }
+  /** Why it failed, and the places looked at. */
+  | { failed: IncludeFailureReason; looked: readonly string[] };
+
+/** One request of the engine, as it asked and as it was answered. */
+export interface IncludeRequest {
+  /** The file the directive names, as the engine handed it over. */
+  path: string;
+  /**
+   * Where the engine reads it from: the id of a file delivered, or null for
+   * the diagram. A theme read from a folder passes on its caller's, so the
+   * lines of such a theme ask from where the theme was asked from.
+   */
+  from: string | null;
+  /** The operation, when the engine says. */
+  kind?: IncludeKind;
+  answer: IncludeAnswer;
+}
+
 export class IncludeSession {
   /** Failed includes, in the order the engine asked. */
   readonly failures: IncludeFailure[] = [];
+  /** Every request, answered, in the order the engine asked. */
+  readonly requests: IncludeRequest[] = [];
   /** Every path looked at: a later change to one of them can change the diagram. */
   readonly dependencies = new Set<string>();
   /**
@@ -82,8 +107,12 @@ export class IncludeSession {
   ) {}
 
   readonly load: IncludeLoader = async (path, from, kind) => {
+    const asked = { path, from, ...(kind === undefined ? {} : { kind }) };
+    /** The places looked at so far: found empty, or, last, refused. */
+    const looked: string[] = [];
     const fail = (reason: IncludeFailureReason): never => {
       this.failures.push({ path, reason });
+      this.requests.push({ ...asked, answer: { failed: reason, looked: [...looked] } });
       // The engine writes this to the console; the failure above is what is shown.
       throw new Error(`${path}: ${reason.kind}`);
     };
@@ -124,9 +153,11 @@ export class IncludeSession {
         maxBytes: this.limits.bytes - this.bytes,
       });
       if (outcome.kind === 'missing') {
+        looked.push(candidate);
         continue;
       }
       if (outcome.kind === 'refused') {
+        looked.push(candidate);
         return fail(
           outcome.refusal === 'too-large'
             ? { kind: 'limit', limit: 'bytes' }
@@ -141,6 +172,7 @@ export class IncludeSession {
       // engine knows which operation requested it; selection stays there too.
       this.themes.push(...(kind === 'theme' ? themeContent(outcome.text) : themeLines(outcome.text)));
       this.whitePageLibrary ||= includesWhitePageLibrary(outcome.text);
+      this.requests.push({ ...asked, answer: { delivered: outcome.id, missing: [...looked] } });
       const file: IncludedFile = { id: outcome.id, text: outcome.text };
       return file;
     }

@@ -13,6 +13,9 @@
   "command.diagramAction.title": "図の操作を実行する",
   "command.insertTemplate.title": "図のテンプレートを挿入する",
   "command.goToDiagram.title": "文書内の図へ移動…",
+  "command.showDependencies.title": "図の依存関係を表示",
+  "command.openDependency.title": "図の依存先を開く",
+  "command.goToIncludeLine.title": "読み込みの行へ移動",
   "command.openPreview.title": "図のプレビューを開く",
   "command.openPreviewToSide.title": "図のプレビューを横に開く",
   "command.zoomToArea.title": "範囲を拡大",
@@ -32,5 +35,7 @@
   "config.codeLens.enabled.description": "Markdown ファイルと PlantUML ファイルの各図の上に「プレビュー」「SVG に書き出す」「PNG に書き出す」を表示します。editor.codeLens の設定も有効である必要があります。",
   "config.includePaths.description": "!include で読み込むファイルの検索先を追加します。!include を記述したファイルのフォルダーから先に検索します。追加するフォルダーは、ワークスペースのフォルダーからの相対パスで 16 個まで指定できます。common.puml や styles/common.puml のような指定が対象です。./ や ../ で始まるパスには適用されず、!include を記述したファイルからの相対パスとして扱われます。読み込めるのは、信頼済みのワークスペースで、その文書が属するワークスペースフォルダー内のファイルだけです。",
   "capability.untrustedWorkspaces.description": "制限モードでも図をプレビューできます。ワークスペース内のファイルの読み込みと図の書き出しには、ワークスペースの信頼が必要です。図はネットワークを使わず、ローカル環境で描画します。",
-  "capability.virtualWorkspaces.description": "ローカルファイルの !include はディスク上のファイルを必要とするため、仮想ワークスペースでは利用できません。"
+  "capability.virtualWorkspaces.description": "ローカルファイルの !include はディスク上のファイルを必要とするため、仮想ワークスペースでは利用できません。",
+  "view.dependencies.name": "図の依存関係",
+  "view.dependencies.welcome": "Markdown か PlantUML のファイルを開くと、その図が読み込むファイルを、最後に描画したときのとおりに一覧します。"
 }

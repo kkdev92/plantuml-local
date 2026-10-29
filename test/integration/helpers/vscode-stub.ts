@@ -447,6 +447,45 @@ export interface FileWatcherStub {
   dispose(): void;
 }
 
+/** A tree item as the extension makes it. */
+export interface TreeItemStub {
+  label: string;
+  collapsibleState?: number;
+  description?: string;
+  tooltip?: unknown;
+  iconPath?: { id: string };
+  resourceUri?: UriStub;
+  command?: { command: string; title: string; arguments?: unknown[] };
+  contextValue?: string;
+}
+
+/** The data of a tree view, as the extension provides it. */
+export interface TreeDataProviderStub {
+  getChildren(element?: unknown): unknown[] | Promise<unknown[]>;
+  getTreeItem(element: unknown): TreeItemStub | Promise<TreeItemStub>;
+  getParent?(element: unknown): unknown;
+  onDidChangeTreeData?: (listener: () => void) => { dispose(): void };
+}
+
+/** A tree view as created. */
+export interface TreeViewStub {
+  readonly visible: boolean;
+  description: string | undefined;
+  reveal(element: unknown, options?: unknown): Promise<void>;
+  onDidChangeVisibility: (listener: (event: { visible: boolean }) => void) => { dispose(): void };
+  dispose(): void;
+}
+
+/** A tree view as a test sees it: its data, and a way to show or hide it. */
+export interface TreeViewHandle {
+  provider: TreeDataProviderStub;
+  view: TreeViewStub;
+  /** What `reveal` was given, in order. */
+  revealed: unknown[];
+  /** Shows or hides the view, firing its visibility listeners. */
+  setVisible(visible: boolean): void;
+}
+
 export interface VscodeStub {
   ColorThemeKind: Record<'Light' | 'Dark' | 'HighContrast' | 'HighContrastLight', number>;
   DiagnosticSeverity: Record<'Error' | 'Warning' | 'Information' | 'Hint', number>;
@@ -543,6 +582,9 @@ export interface VscodeStub {
   StatusBarAlignment: Record<'Left' | 'Right', number>;
   LanguageStatusSeverity: Record<'Information' | 'Warning' | 'Error', number>;
   TreeItemCheckboxState: Record<'Unchecked' | 'Checked', number>;
+  TreeItemCollapsibleState: Record<'None' | 'Collapsed' | 'Expanded', number>;
+  TreeItem: new (label: string, collapsibleState?: number) => TreeItemStub;
+  ThemeIcon: (new (id: string) => { id: string }) & { File: { id: string } };
   ViewColumn: Record<'Active' | 'Beside' | 'One', number>;
   EndOfLine: Record<'LF' | 'CRLF', number>;
   Position: new (line: number, character: number) => PositionStub;
@@ -621,6 +663,16 @@ export interface VscodeStub {
      * `_test.quickPickReply`, defaulting to a dismissal.
      */
     createQuickPick: () => QuickPickStub;
+    /** The short form of a picker; answers with `_test.quickPickReply` too. */
+    showQuickPick: <T extends { label: string }>(
+      items: readonly T[],
+      options?: { placeHolder?: string }
+    ) => Promise<T | undefined>;
+    /** A tree view; `_test.treeViews` has it by its id. */
+    createTreeView: (
+      viewId: string,
+      options: { treeDataProvider: TreeDataProviderStub; showCollapseAll?: boolean }
+    ) => TreeViewStub;
   };
   workspace: {
     getConfiguration: (
@@ -780,6 +832,8 @@ export interface VscodeStub {
     quickPickReply: string | null;
     /** Quick picks shown, with their titles and item labels. */
     quickPicksShown: { title: string | undefined; labels: string[] }[];
+    /** The tree views created, by id. */
+    treeViews: Map<string, TreeViewHandle>;
     /** Documents `window.showTextDocument` showed, with the line selected. */
     shownDocuments: { uri: string; line: number | undefined }[];
     /** What `workspace.textDocuments` returns; empty unless a test fills it. */
@@ -1009,6 +1063,65 @@ export function createVscodeStub(): VscodeStub {
         this.end = startCharacter as PositionStub;
       }
     }
+  }
+
+  class TreeItem implements TreeItemStub {
+    description?: string;
+    tooltip?: unknown;
+    iconPath?: { id: string };
+    resourceUri?: UriStub;
+    command?: { command: string; title: string; arguments?: unknown[] };
+    contextValue?: string;
+    constructor(
+      public label: string,
+      public collapsibleState?: number
+    ) {}
+  }
+
+  class ThemeIcon {
+    static readonly File = new ThemeIcon('file');
+    constructor(readonly id: string) {}
+  }
+
+  /** The tree views created, by id. */
+  const treeViews = new Map<string, TreeViewHandle>();
+
+  function createTreeView(
+    viewId: string,
+    options: { treeDataProvider: TreeDataProviderStub; showCollapseAll?: boolean }
+  ): TreeViewStub {
+    const listeners: ((event: { visible: boolean }) => void)[] = [];
+    const revealed: unknown[] = [];
+    let visible = false;
+    const tracked = track('window.createTreeView', { dispose: () => treeViews.delete(viewId) });
+    const view: TreeViewStub = {
+      get visible() {
+        return visible;
+      },
+      description: undefined,
+      reveal: async (element) => {
+        revealed.push(element);
+      },
+      onDidChangeVisibility: (listener) => {
+        listeners.push(listener);
+        return { dispose: () => void listeners.splice(listeners.indexOf(listener), 1) };
+      },
+      dispose: () => {
+        tracked.dispose();
+      },
+    };
+    treeViews.set(viewId, {
+      provider: options.treeDataProvider,
+      view,
+      revealed,
+      setVisible: (shown) => {
+        visible = shown;
+        for (const listener of [...listeners]) {
+          listener({ visible: shown });
+        }
+      },
+    });
+    return view;
   }
 
   class CompletionItem implements CompletionItemStub {
@@ -1366,6 +1479,9 @@ export function createVscodeStub(): VscodeStub {
     StatusBarAlignment: { Left: 1, Right: 2 },
     LanguageStatusSeverity: { Information: 0, Warning: 1, Error: 2 },
     TreeItemCheckboxState: { Unchecked: 0, Checked: 1 },
+    TreeItemCollapsibleState: { None: 0, Collapsed: 1, Expanded: 2 },
+    TreeItem,
+    ThemeIcon,
     ViewColumn: { Active: -1, Beside: -2, One: 1 },
     Uri: {
       parse: makeUri,
@@ -1500,6 +1616,11 @@ export function createVscodeStub(): VscodeStub {
         };
         return pick;
       },
+      showQuickPick: async (items, options) => {
+        hooks.quickPicksShown.push({ title: options?.placeHolder, labels: items.map((item) => item.label) });
+        return items.find((item) => item.label === hooks.quickPickReply);
+      },
+      createTreeView,
       createInputBox: () => {
         const accept: (() => void)[] = [];
         const hide: (() => void)[] = [];
@@ -1750,6 +1871,7 @@ export function createVscodeStub(): VscodeStub {
         hooks.quickPickReply = value;
       },
       quickPicksShown: hooks.quickPicksShown,
+      treeViews,
       shownDocuments: hooks.shownDocuments,
       get messageReply() {
         return hooks.messageReply;

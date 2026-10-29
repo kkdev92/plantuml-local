@@ -62,6 +62,7 @@ it('releases on deactivate every listener, provider and command activation regis
       'window.onDidChangeActiveColorTheme',
       'window.onDidChangeActiveTextEditor',
       'window.onDidChangeTextEditorSelection',
+      'window.createTreeView',
       'window.registerWebviewPanelSerializer',
       'workspace.onDidChangeConfiguration',
       'workspace.onDidChangeTextDocument',

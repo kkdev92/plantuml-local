@@ -156,8 +156,10 @@ import {
   type ProblemLabels,
   type RenderOutcome,
 } from './diagnostics/problems';
+import { DependencyView, type ViewDiagram } from './includes/dependency-view';
 import { describeIncludeFailure, type IncludeLabels } from './includes/describe';
 import { asWritten, definedWords, includeDirectives } from './includes/directives';
+import { DrawingRecords } from './includes/drawings';
 import { includeCompletions, includeDefinitions } from './includes/editor';
 import { drawInDocuments, openSession, type DrawDiagram } from './includes/host';
 import { INCLUDE_EXTENSIONS } from './includes/path-policy';
@@ -304,6 +306,24 @@ export const GoToDiagram = defineCommandContract<readonly [], void>({
   id: COMMANDS.GO_TO_DIAGRAM,
 });
 
+/**
+ * Shows the Diagram Dependencies view, at the diagram under the cursor
+ * (src/includes/dependency-view.ts).
+ */
+export const ShowDependencies = defineCommandContract<readonly [], void>({
+  id: COMMANDS.SHOW_DEPENDENCIES,
+});
+
+/** Opens what an item of the Diagram Dependencies view stands for. It is given the item. */
+export const OpenDependency = defineCommandContract<readonly unknown[], void>({
+  id: COMMANDS.OPEN_DEPENDENCY,
+});
+
+/** Goes to the line that asked for a file listed in the Diagram Dependencies view. It is given the item. */
+export const GoToIncludeLine = defineCommandContract<readonly unknown[], void>({
+  id: COMMANDS.GO_TO_INCLUDE_LINE,
+});
+
 /** Inserts a diagram template where a diagram can start (src/language/templates.ts). */
 export const InsertTemplate = defineCommandContract<readonly [], void>({
   id: COMMANDS.INSERT_TEMPLATE,
@@ -401,6 +421,12 @@ const Palettes: ServiceToken<ThemePalettes> = serviceToken<ThemePalettes>('plant
 
 /** Renders shared by the preview and the diagnostics, so a diagram both need is drawn once. */
 const Renders: ServiceToken<SharedRender> = serviceToken<SharedRender>('plantuml.renders');
+
+/** The last drawing of each diagram the shared renders drew for a document, with what it asked for. */
+const Drawings: ServiceToken<DrawingRecords> = serviceToken<DrawingRecords>('plantuml.drawings');
+
+/** The Diagram Dependencies view. An object with `dispose`, so the container removes it. */
+const Dependencies: ServiceToken<DependencyView> = serviceToken<DependencyView>('plantuml.dependencies');
 
 /**
  * Watches the files that diagrams with local includes depend on. An object
@@ -901,6 +927,55 @@ function shortfallReason(shortfall: Shortfall, failures: readonly IncludeFailure
     case 'depth':
       return includeLabels(l10n).tooDeep(INCLUDE_LIMITS.depth);
   }
+}
+
+/** What the Problems panel says of the problems of a diagram, in the user's language. */
+function problemLabels(l10n: L10n): ProblemLabels {
+  return {
+    errorMessage: (message) => errorMessage(message, l10n),
+    remoteReference: l10n.t('Loading files or themes from URLs (!include, !theme) is not supported. Use files in your workspace or bundled libraries and themes.'),
+    severalDiagrams: l10n.t(
+      'Each PlantUML code block can contain only one diagram. Move each diagram into a separate code block.'
+    ),
+    pages: l10n.t(
+      'Multi-page diagrams (newpage) are not supported. Split the pages into separate diagrams, each in its own code block.'
+    ),
+    missingEnd: (end) =>
+      l10n.t('The closing {0} line is missing. It has been added for rendering; the source is unchanged.', end),
+    beforeStart: (start) => l10n.t('Lines before {0} are ignored when rendering this diagram.', start),
+    formula: (tag) => l10n.t('The bundled engine does not draw {0} formulas; the formula is left out of the diagram.', tag),
+    embeddedDiagram: l10n.t('The bundled engine does not draw a diagram embedded with {{ … }}; it is left out of the diagram.'),
+    image: l10n.t('The bundled engine draws only images written inline as PNG (data:image/png;base64,…); any other image is drawn as placeholder text.'),
+    themeFrom: l10n.t('Use a bundled theme or a theme file in your workspace.'),
+    libraryNotBundled: (library) => libraryNotBundled(library, l10n),
+    emojiUnavailable: l10n.t('Emoji syntax (<:name:>) is not supported because emoji images are not included with this extension.'),
+  };
+}
+
+/**
+ * The diagrams of `document` as the Problems panel checks them, for the
+ * Diagram Dependencies view: none in a document it does not check, and in a
+ * PlantUML file none without a start line unless `viewers` shows the file.
+ */
+function viewDiagrams(document: vscode.TextDocument, labels: ProblemLabels, viewers: ViewerSet, l10n: L10n): ViewDiagram[] {
+  if (!isDiagramFile(document)) {
+    return [];
+  }
+  return diagramsOf(document, document.getText())
+    .filter((block) => document.languageId !== 'plantuml' || viewers.shows(document.uri) || hasStartLine(block.source))
+    .map((block): ViewDiagram => {
+      const check = checkSource(block, labels);
+      const refused = check.problems.find((problem) => problem.severity === 'error')?.message;
+      return {
+        name: block.name,
+        text: block.source,
+        sourceLine: block.sourceLine,
+        openLine: block.openLine,
+        closeLine: block.closeLine,
+        startLine: check.startLine,
+        render: check.render ?? { notDrawn: refused ?? l10n.t('There is no PlantUML code to render.') },
+      };
+    });
 }
 
 /**
@@ -1640,9 +1715,21 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
 
   module.services.singleton(IncludeWatch, () => new IncludeWatcher());
 
+  module.services.singleton(Drawings, () => new DrawingRecords());
+
   module.services.singleton(Renders, {
-    inject: { renderer: Renderer, settings: Settings.token, l10n: Localization, watch: IncludeWatch },
-    create: ({ renderer, settings, l10n, watch }) => shareRenders(drawWith(renderer, settings, l10n, watch)),
+    inject: { renderer: Renderer, settings: Settings.token, l10n: Localization, watch: IncludeWatch, drawings: Drawings },
+    create: ({ renderer, settings, l10n, watch, drawings }) => {
+      const shared = shareRenders(drawWith(renderer, settings, l10n, watch));
+      // Cleared when what a drawing reads may have changed: the search
+      // folders, the workspace folders or trust; or by the user.
+      return Object.assign(drawings.around(shared), {
+        clear(): void {
+          shared.clear();
+          drawings.outdateAll();
+        },
+      });
+    },
   });
 
   module.services.singleton(RequestRefresh, {
@@ -2751,25 +2838,7 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
       // drawn once, unless it includes local files: those renders are not
       // kept, as the files may change.
       const collection = registrations.own(vscode.languages.createDiagnosticCollection(EXTENSION_ID));
-      const labels: ProblemLabels = {
-        errorMessage: (message) => errorMessage(message, l10n),
-        remoteReference: l10n.t('Loading files or themes from URLs (!include, !theme) is not supported. Use files in your workspace or bundled libraries and themes.'),
-        severalDiagrams: l10n.t(
-          'Each PlantUML code block can contain only one diagram. Move each diagram into a separate code block.'
-        ),
-        pages: l10n.t(
-          'Multi-page diagrams (newpage) are not supported. Split the pages into separate diagrams, each in its own code block.'
-        ),
-        missingEnd: (end) =>
-          l10n.t('The closing {0} line is missing. It has been added for rendering; the source is unchanged.', end),
-        beforeStart: (start) => l10n.t('Lines before {0} are ignored when rendering this diagram.', start),
-        formula: (tag) => l10n.t('The bundled engine does not draw {0} formulas; the formula is left out of the diagram.', tag),
-        embeddedDiagram: l10n.t('The bundled engine does not draw a diagram embedded with {{ … }}; it is left out of the diagram.'),
-        image: l10n.t('The bundled engine draws only images written inline as PNG (data:image/png;base64,…); any other image is drawn as placeholder text.'),
-        themeFrom: l10n.t('Use a bundled theme or a theme file in your workspace.'),
-        libraryNotBundled: (library) => libraryNotBundled(library, l10n),
-        emojiUnavailable: l10n.t('Emoji syntax (<:name:>) is not supported because emoji images are not included with this extension.'),
-      };
+      const labels = problemLabels(l10n);
       const timers = new Map<string, NodeJS.Timeout>();
       // Bumped on every change, so a check that finishes after the text moved
       // on does not bring back what it found in the old text.
@@ -4273,6 +4342,77 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
       undoStopAfter: true,
       keepWhitespace: true,
     });
+  });
+
+  module.services.singleton(Dependencies, {
+    inject: {
+      drawings: Drawings,
+      renders: Renders,
+      palettes: Palettes,
+      settings: Settings.token,
+      l10n: Localization,
+      viewers: Viewers,
+    },
+    create: ({ drawings, renders, palettes, settings, l10n, viewers }) => {
+      const labels = problemLabels(l10n);
+      return new DependencyView({
+        records: drawings,
+        includePaths: (document: vscode.Uri): unknown => includePathsOf(settings, document),
+        diagrams: (document: vscode.TextDocument): ViewDiagram[] => viewDiagrams(document, labels, viewers, l10n),
+        // As the Problems panel draws it, so that the drawing can be shared.
+        draw: async (source: string, document: vscode.Uri): Promise<unknown> =>
+          renders(source, await palettes.resolve(source, isDark(settings.read().values[CONFIG.THEME])), document.toString()),
+        l10n,
+      });
+    },
+  });
+
+  module.raw.register({
+    id: 'plantuml.dependencies',
+    inject: { drawings: Drawings, watch: IncludeWatch, view: Dependencies },
+    bind: ({ registrations }, { drawings, watch }): undefined => {
+      // The view is made as the extension starts, so that VS Code finds it
+      // whenever it is shown. What it lists goes out of date as the files
+      // drawn change, and away as their documents close.
+      registrations.own(
+        watch.onDidChange((changes) => {
+          drawings.changed(changes);
+        })
+      );
+      registrations.own(
+        vscode.workspace.onDidCloseTextDocument((document) => {
+          drawings.forget(document.uri.toString());
+        })
+      );
+      return undefined;
+    },
+  });
+
+  module.commands.handle(ShowDependencies, {
+    inject: { view: Dependencies },
+    execute: async (_context: OperationContext, _args, { view }): Promise<void> => {
+      await view.show();
+    },
+  });
+
+  module.commands.handle(OpenDependency, {
+    inject: { view: Dependencies },
+    execute: async (context: OperationContext, args, { view }): Promise<void> => {
+      const said = await view.open(args[0]);
+      if (said !== undefined) {
+        void context.notify.info(said);
+      }
+    },
+  });
+
+  module.commands.handle(GoToIncludeLine, {
+    inject: { view: Dependencies },
+    execute: async (context: OperationContext, args, { view }): Promise<void> => {
+      const said = await view.goToInclude(args[0]);
+      if (said !== undefined) {
+        void context.notify.info(said);
+      }
+    },
   });
 
   module.commands.handle(GoToDiagram, async (context: OperationContext): Promise<void> => {

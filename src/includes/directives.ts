@@ -1,4 +1,5 @@
 import { forEachCodeLine } from '../core/shape';
+import type { IncludeKind } from '../core/types';
 import { PROCEDURE } from '../language/folding';
 
 /**
@@ -38,6 +39,8 @@ export interface IncludeDirective {
   end: number;
   /** The path as written; for a theme read from a folder, its file there. */
   path: string;
+  /** The operation the engine asks for it with. */
+  kind: IncludeKind;
   /** Whether the engine asks for `path` as written. */
   literal: boolean;
   /** Whether it is written in a procedure or a function, so that it is read when that runs. */
@@ -165,17 +168,19 @@ export function includeDirectives(source: string): IncludeDirective[] {
     }
     inBody ||= PROCEDURE.open.test(line);
     const include = includePathOf(line);
+    const sub = /^[ \t]*!includesub/.test(line);
     // An !includesub with no `!` after its path names a section of the diagram itself.
-    const ownSection = /^[ \t]*!includesub/.test(line) && include !== null && line.charAt(include.end) !== '!';
+    const ownSection = sub && include !== null && line.charAt(include.end) !== '!';
     if (include !== null && include.path !== '' && !ownSection) {
-      found.push({ line: index, ...include, written: include.path, inBody });
+      found.push({ line: index, ...include, kind: sub ? 'includesub' : 'include', written: include.path, inBody });
     }
     const theme = themeFolderOf(line);
     if (theme !== null && theme.path !== '' && theme.name !== '') {
       const path = themeFile(theme.name, theme.path);
       const written = `${theme.name} ${theme.path}`;
-      found.push({ line: index, start: theme.nameStart, end: theme.nameStart + theme.name.length, path, written, inBody });
-      found.push({ line: index, start: theme.start, end: theme.end, path, written, inBody });
+      const nameEnd = theme.nameStart + theme.name.length;
+      found.push({ line: index, start: theme.nameStart, end: nameEnd, path, kind: 'theme', written, inBody });
+      found.push({ line: index, start: theme.start, end: theme.end, path, kind: 'theme', written, inBody });
     }
   });
   return found.map(({ written, ...include }) => ({

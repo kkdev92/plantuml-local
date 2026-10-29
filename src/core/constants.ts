@@ -30,6 +30,9 @@ export const COMMANDS = {
   DIAGRAM_ACTION: `${EXTENSION_ID}.diagramAction`,
   COPY_SVG_TEXT: `${EXTENSION_ID}.copySvgText`,
   GO_TO_DIAGRAM: `${EXTENSION_ID}.goToDiagram`,
+  SHOW_DEPENDENCIES: `${EXTENSION_ID}.showDependencies`,
+  OPEN_DEPENDENCY: `${EXTENSION_ID}.openDependency`,
+  GO_TO_INCLUDE_LINE: `${EXTENSION_ID}.goToIncludeLine`,
   ZOOM_TO_AREA: `${EXTENSION_ID}.zoomToArea`,
   SCROLL_TO_TOP: `${EXTENSION_ID}.scrollToTop`,
   SCROLL_TO_BOTTOM: `${EXTENSION_ID}.scrollToBottom`,
@@ -40,6 +43,9 @@ export const COMMANDS = {
 
 /** The view type of the diagram viewer's panels. */
 export const VIEWER_TYPE = `${EXTENSION_ID}.viewer`;
+
+/** The id of the Diagram Dependencies view, in the Explorer. */
+export const DEPENDENCIES_VIEW = `${EXTENSION_ID}.dependencies`;
 
 /**
  * What the diagram viewer's page sets on its drawing area for the panel's
