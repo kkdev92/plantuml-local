@@ -1,3 +1,4 @@
+import { Window } from 'happy-dom';
 import MarkdownIt from 'markdown-it';
 import { createRequire } from 'node:module';
 import { describe, expect, it } from 'vitest';
@@ -33,14 +34,13 @@ const at = (text: string, column: number): BuiltinTarget | null => builtinAt(tex
  * shows.
  */
 const md = new MarkdownIt({ html: true, linkify: true });
-/** The text of HTML, its tags dropped and its entities read. */
-const textOf = (html: string): string =>
-  html
-    .replace(/<[^>]*>/g, '')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&amp;/g, '&');
+const { document } = new Window();
+/** The text of HTML as an HTML parser reads it: its tags dropped and its entities read. */
+const textOf = (html: string): string => {
+  const template = document.createElement('template');
+  template.innerHTML = html;
+  return template.content.textContent;
+};
 
 describe('escapeMarkdown', () => {
   const PUNCTUATION = '!"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~';
