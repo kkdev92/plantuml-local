@@ -1,14 +1,18 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  declaredAt,
   definitionsOfName,
+  elementDeclaredAt,
   elementsNamed,
   labelStart,
   libraryIncludeAt,
   nameAt,
+  occurrencesIn,
   parameterAt,
   type NameAt,
 } from '../../src/language/definitions';
+import { readDiagram } from '../../src/language/macro-help';
 import { macrosAt, type MacroSources } from '../../src/language/macros';
 
 /** No include reads anything. */
@@ -105,6 +109,16 @@ describe('nameAt', () => {
   it('does not read a preprocessor line as naming an element', () => {
     expect(at(['@startuml', '!$x = ‸A', '@enduml']).found).toMatchObject({ name: 'A', element: null });
   });
+
+  it('reads nothing on the name or a parameter a line declares, and reads the names in a default', async () => {
+    expect(at(['@startuml', '!procedure ‸P($a)', '!endprocedure', '@enduml']).found).toBeNull();
+    expect(at(['@startuml', '!procedure P(‸$a)', '!endprocedure', '@enduml']).found).toBeNull();
+    expect(at(['@startuml', '!function $f($a, ‸$b = 1)', '!endfunction', '@enduml']).found).toBeNull();
+    expect(at(['@startuml', '!define F(‸x) [x]', '@enduml']).found).toBeNull();
+    expect(at(['@startuml', '!procedure P($a = ‸$x)', '!endprocedure', '@enduml']).found).toMatchObject({ name: '$x' });
+    // Not the variable of the same name defined before it.
+    expect(await definedOn(['@startuml', '!$a = 1', '!procedure P(‸$a)', '!endprocedure', '@enduml'])).toBeNull();
+  });
 });
 
 describe('definitionsOfName', () => {
@@ -144,6 +158,69 @@ describe('definitionsOfName', () => {
       lines: [2, 5],
       certainty: 'ambiguous',
     });
+  });
+});
+
+describe('occurrencesIn', () => {
+  /** Each place the diagram of `lines` reads `name` at: `line:start-end`, `()` for a call, `@` for what may name an element. */
+  const found = (lines: readonly string[], name: string): string[] =>
+    occurrencesIn(readDiagram({ lines, numbers: lines.map((_, index) => index) }), name).map(
+      ({ index, start, end, call, element }) =>
+        `${String(index)}:${String(start)}-${String(end)}${call ? '()' : ''}${element === null ? '' : '@'}`
+    );
+
+  it('finds each call and variable written whole, and not in a comment, quoted text or what a line declares', () => {
+    const lines = [
+      '!procedure P($a)',
+      '  A -> B : $a "$a"',
+      '!endprocedure',
+      'P(1) P(2)',
+      "' P(3) $a",
+      'A -> B : "P(4)"',
+      'PP(5) $ab',
+    ];
+    expect(found(lines, 'P')).toEqual(['3:0-1()@', '3:5-6()@']);
+    expect(found(lines, '$a')).toEqual(['1:11-13', '1:15-17']);
+  });
+
+  it('finds a name as an element before the label of its line, and as a name only after it', () => {
+    const lines = ['participant "Order" as A', 'A -> B : hello A', 'B -> A'];
+    expect(found(lines, 'A')).toEqual(['0:23-24@', '1:0-1@', '1:15-16', '2:5-6@']);
+  });
+});
+
+describe('declaredAt', () => {
+  const diagram = { lines: ['!procedure P($a, $b = 1)', '!endprocedure', '!$v = 2', 'P(1)'], numbers: [1, 2, 3, 4] };
+  const place = { source: 'document' } as const;
+
+  it('reads the definition whose name or parameter the cursor is on, as the walk of what is defined takes it', () => {
+    expect(declaredAt(diagram, 0, 11, place)).toMatchObject({
+      kind: 'procedure',
+      name: 'P',
+      origin: { source: 'document', line: 1, start: 11, end: 12, last: 2 },
+    });
+    expect(declaredAt(diagram, 0, 12, place)?.name).toBe('P');
+    expect(declaredAt(diagram, 0, 14, place)).toMatchObject({ kind: 'parameter', name: '$a', origin: { line: 1, start: 11 } });
+    expect(declaredAt(diagram, 0, 18, place)).toMatchObject({ kind: 'parameter', name: '$b', value: '1' });
+    expect(declaredAt(diagram, 2, 2, place)).toMatchObject({ kind: 'variable', name: '$v', origin: { line: 3 } });
+  });
+
+  it('reads nothing on the keyword, on a call or off the lines of the diagram', () => {
+    expect(declaredAt(diagram, 0, 3, place)).toBeNull();
+    expect(declaredAt(diagram, 3, 0, place)).toBeNull();
+    expect(declaredAt(diagram, 9, 0, place)).toBeNull();
+  });
+});
+
+describe('elementDeclaredAt', () => {
+  it('reads the name of the element a line declares with its keyword, where the cursor is on that name', () => {
+    const diagram = { lines: ['participant "Order" as A', 'class C {', '}', 'A -> C'], numbers: [1, 2, 3, 4] };
+    expect(elementDeclaredAt(diagram, 0, 23)).toBe('A');
+    expect(elementDeclaredAt(diagram, 0, 24)).toBe('A');
+    expect(elementDeclaredAt(diagram, 1, 6)).toBe('C');
+    // Its display name, and a line that only uses it.
+    expect(elementDeclaredAt(diagram, 0, 14)).toBeNull();
+    expect(elementDeclaredAt(diagram, 3, 0)).toBeNull();
   });
 });
 

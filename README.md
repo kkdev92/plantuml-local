@@ -48,6 +48,7 @@ Your diagram source is processed locally and is not sent to a rendering service.
 - **Problems Panel**: Errors, warnings and unsupported syntax in the diagrams of open Markdown and PlantUML files are listed with their line, preview or not
 - **Writing Help**: Completion for start lines, directives, themes and icons, the aliases and words of the diagram you are in, the procedures, functions and variables it and the files it includes define — with parameter hints for their calls — snippets of sequence and activity blocks, templates for sixteen kinds of diagram, and quick fixes that name a diagram for export and add a missing end line
 - **Go to Definition**: `F12`, Ctrl+Click and Peek on a call, a variable or a participant lead to where the diagram, a file it includes or a bundled library defines or declares it — never to another diagram — and a file of the C4 and Azure libraries opens read-only
+- **Find All References**: `Shift+Alt+F12`, `Shift+F12` and Peek list each call and use of a procedure, function or variable, and each line naming a participant, that leads to the same definition — in the diagram and the files it includes, never in another diagram
 - **Actions Above Each Diagram**: *Preview*, *Export SVG* and *Export PNG* sit above the first line of each diagram, in `.puml` files and Markdown alike, and act on that diagram
 - **Go to Diagram**: *Go to Diagram in Document…* lists the diagram blocks of a Markdown file — with the heading above each, its kind and its title or first line — and moves the cursor to the one picked
 - **Colours**: A swatch beside each colour a diagram sets — a `skinparam` value, an element's colour, a `<style>` property — opens VS Code's colour picker, which writes the pick back as `#RRGGBB`
@@ -388,7 +389,10 @@ file past the size limits below — may define anything again, so what is
 defined before it is marked *unresolved*. An include of a file that cannot be
 read at all, such as a missing file or a file of the workspace in Restricted
 Mode, defines nothing and marks nothing before it. Comments, quoted text and
-the data of a sprite define nothing.
+the data of a sprite define nothing. A PlantUML file with no start line — one
+that only other files include — is read whole, as one diagram, as its preview
+draws it: what it and the files it includes define is offered there, and not
+what a file that includes it defines.
 
 Files of the workspace are read as for the preview (see
 [Including files](#including-files)): in a trusted workspace, from the
@@ -434,8 +438,38 @@ the Language Status and the output say which includes were not read.
 A file of a bundled library opens read-only, named as an include names it —
 `C4/C4_Context.puml` — with the text the extension bundles: the lines the
 engine reads, so a line there is the line the completion shows. The file
-holds no `@startuml` line, and, as in a file of the workspace without one, Go
-to Definition finds nothing from a name in it.
+holds no `@startuml` line, so it is read whole, as a file of the workspace
+without one: a name in it leads on to where the file, or a file it includes,
+defines it.
+
+### Finding references
+
+*Find All References* (`Shift+Alt+F12`), *Go to References* (`Shift+F12`) and
+*Peek References* on a name in a diagram list each place Go to Definition
+would lead from to the same definition:
+
+- for a procedure, a function or a macro, each call that picks that
+  definition, and for a variable, each use that reads it — from a call, a use
+  or the name its definition declares; for a parameter, each use in the body
+  of its procedure or function
+- for an element a line declares with its keyword, each line of the diagram
+  that names it before its label
+
+The list starts with the definition, or each line that declares the element,
+unless the command leaves them out. It covers the diagram the cursor is in
+and the files of the workspace its includes read, with their unsaved changes
+— each line of an included file read with what is defined where the diagram
+includes it — but not another diagram of the file or the Markdown document,
+the files of the bundled libraries, whose definitions are listed but not
+searched, or the files that include the one searched. A file with no start
+line is searched within itself and the files it includes.
+
+A name in a comment, an element's name in a label, a name not starting with
+`$` in quoted text, a note, a title or the path of an include, and a use
+marked *unresolved* above — one an include that is not read here may define
+again — are not listed; the Language Status then says *(partial)* and the
+output which includes were not read. At most 5,000 places are listed, and
+when the list stops there, the Language Status and the output say so.
 
 ### Colours
 
@@ -823,6 +857,9 @@ and would show the referenced image as a second copy.
   the diagram once more for each included file it has not loaded yet and
   stops after 20 rounds
   ([plantuml/plantuml#2943](https://github.com/plantuml/plantuml/issues/2943))
+- Find All References searches a diagram and the files it includes: from a
+  file that other files include, the diagrams that include it are not
+  searched, nor are the files of the bundled libraries
 - Highlighting cannot tell which diagram type a `@startuml` block will turn
   into, so it colours the syntax of all of them: a line the engine rejects in
   one diagram type can still be coloured. Nor can it tell which names

@@ -94,14 +94,39 @@ import {
   libraryFile,
   macroPlace,
   macroSuggestions,
+  readDiagram,
   signaturesFor,
   type MacroDefinition,
   type MacroLabels,
   type MacroPlace,
 } from './language/macro-help';
 import { LibraryDeclarations, macroSources } from './language/macro-sources';
-import { macrosAt, pastAnalysisLimits, readingOf, type DiagramLines, type Macro, type MacroKind, type Macros, type Origin, type Shortfall } from './language/macros';
-import { definitionsOfName, elementsNamed, libraryIncludeAt, nameAt, parameterAt } from './language/definitions';
+import {
+  diagramReading,
+  macrosAt,
+  pastAnalysisLimits,
+  readingOf,
+  sameMacro,
+  type DiagramLines,
+  type Macro,
+  type MacroKind,
+  type Macros,
+  type MacroSources,
+  type Origin,
+  type Shortfall,
+} from './language/macros';
+import {
+  declaredAt,
+  definitionsOfName,
+  elementDeclaredAt,
+  elementsNamed,
+  libraryIncludeAt,
+  nameAt,
+  nameIn,
+  occurrencesIn,
+  parameterAt,
+  type Occurrence,
+} from './language/definitions';
 import { LIBRARY_SCHEME, libraryOfPath, libraryPath, libraryText } from './language/library-view';
 import { templatePlace } from './language/templates';
 import { missingEndAt, namesDiagram, unnamedAt, withName } from './language/code-actions';
@@ -3024,7 +3049,9 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
        * The diagram source the line at `position` is read in: the PlantUML
        * file, or the Markdown block the line lies in without its quote
        * markers, with the line's index in it and the width of the markers on
-       * the line. Null in the text of a Markdown document.
+       * the line. Null in the text of a Markdown document. Either, with no
+       * start line, is one diagram, as the preview draws it: a file that is
+       * only included is read whole.
        */
       const sourceAt = (
         document: vscode.TextDocument,
@@ -3032,7 +3059,7 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         text: string
       ): { source: string; line: number; offset: number; bare: boolean } | null => {
         if (document.languageId === 'plantuml') {
-          return { source: document.getText(), line: position.line, offset: 0, bare: false };
+          return { source: document.getText(), line: position.line, offset: 0, bare: true };
         }
         const block = blockAt(document, position);
         if (block === undefined) {
@@ -3076,26 +3103,32 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
       registrations.own(status);
       status.name = l10n.t('PlantUML Definitions');
       /** What was last read for each document: nothing, as it is past the limits, or what was not read, as logged. */
-      const reads = new Map<string, { tooLarge: true } | { partial: boolean; logged: string; cut: boolean }>();
+      const reads = new Map<
+        string,
+        { tooLarge: true } | { partial: boolean; logged: string; cut: false | 'definitions' | 'references' }
+      >();
       const showStatus = (document: vscode.TextDocument | undefined): void => {
         const read = document === undefined ? undefined : reads.get(document.uri.toString());
         if (read !== undefined && 'tooLarge' in read) {
           status.text = l10n.t('Definitions: not read');
           status.severity = vscode.LanguageStatusSeverity.Warning;
           status.detail = l10n.t(
-            'The document is larger than {0} MiB or longer than {1} lines, so completion, parameter hints and Go to Definition do not read its definitions.',
+            'The document is larger than {0} MiB or longer than {1} lines, so completion, parameter hints, Go to Definition and Find All References do not read its definitions.',
             String(ANALYSIS_LIMITS.fileBytes / (1024 * 1024)),
             String(ANALYSIS_LIMITS.fileLines)
           );
         } else if (read?.partial === true) {
           status.text = l10n.t('Definitions: diagram and includes (partial)');
           status.severity = vscode.LanguageStatusSeverity.Warning;
-          status.detail = l10n.t('Some definitions are missing. See the Output panel for the reasons.');
+          status.detail =
+            read.logged === '' && read.cut === 'references'
+              ? l10n.t('Only the first {0} references are listed.', String(ANALYSIS_LIMITS.results))
+              : l10n.t('Some definitions are missing. See the Output panel for the reasons.');
         } else {
           status.text = l10n.t('Definitions: diagram and includes');
           status.severity = vscode.LanguageStatusSeverity.Information;
           status.detail = l10n.t(
-            'Completion, parameter hints and Go to Definition read what this diagram and the files it includes define.'
+            'Completion, parameter hints, Go to Definition and Find All References read what this diagram and the files it includes define.'
           );
         }
       };
@@ -3111,10 +3144,13 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         })
       );
 
-      /** Keeps what was read for `document` and shows it; logs why something was not when that changes. */
+      /**
+       * Keeps what was read for `document` and shows it; logs why something
+       * was not, and which list stopped at the limit, when that changes.
+       */
       const report = (
         document: vscode.TextDocument,
-        read: { tooLarge: true } | { reasons: readonly string[]; cut: boolean }
+        read: { tooLarge: true } | { reasons: readonly string[]; cut: false | 'definitions' | 'references' }
       ): void => {
         const key = document.uri.toString();
         const before = reads.get(key);
@@ -3122,16 +3158,20 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
           reads.set(key, read);
         } else {
           const logged = read.reasons.join('\n');
-          reads.set(key, { partial: read.reasons.length > 0 || read.cut, logged, cut: read.cut });
+          reads.set(key, { partial: read.reasons.length > 0 || read.cut !== false, logged, cut: read.cut });
           const known = before !== undefined && !('tooLarge' in before) && before.logged === logged;
-          if ((logged !== '' && !known) || (read.cut && (!known || !before.cut))) {
-            const cut = read.cut
-              ? [l10n.t('Only the first {0} definitions are offered.', String(ANALYSIS_LIMITS.results))]
-              : [];
+          if ((logged !== '' && !known) || (read.cut !== false && (!known || before.cut !== read.cut))) {
+            const limit = String(ANALYSIS_LIMITS.results);
+            const cut =
+              read.cut === 'definitions'
+                ? [l10n.t('Only the first {0} definitions are offered.', limit)]
+                : read.cut === 'references'
+                  ? [l10n.t('Only the first {0} references are listed.', limit)]
+                  : [];
             logger.info(
               [
                 l10n.t(
-                  'Completion, parameter hints and Go to Definition in {0} did not read:',
+                  'Completion, parameter hints, Go to Definition and Find All References in {0} did not read:',
                   vscode.workspace.asRelativePath(document.uri)
                 ),
                 ...read.reasons,
@@ -3175,24 +3215,38 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
           report(document, { tooLarge: true });
           return null;
         }
+        const reading = await readingFor(document, stale);
+        const macros = await macrosAt(diagram, cursor, reading.sources);
+        if (stale() || macros.status === 'cancelled') {
+          return undefined;
+        }
+        const { labels, opened, texts } = reading;
+        return { macros, labels, reasons: reading.reasonsOf(macros), opened, texts };
+      };
+
+      /**
+       * Where the definitions of `document` are read from for one request:
+       * its include session, as the documents are now, with each local file
+       * asked of it once whatever reads it again, the text read of each and
+       * the path VS Code has it under, by the id the session gives it; and
+       * why each include was not read, as the output lists it.
+       */
+      const readingFor = async (
+        document: vscode.TextDocument,
+        stale: () => boolean
+      ): Promise<{
+        sources: MacroSources;
+        labels: MacroLabels;
+        opened: (id: string) => string;
+        texts: ReadonlyMap<string, string>;
+        reasonsOf: (macros: Macros) => string[];
+      }> => {
         const { session, root, opened } = await openSession(document.uri, {
           includePaths: (uri) => includePathsOf(settings, uri),
         });
         const sources = macroSources(session, libraries, stale);
         const texts = new Map<string, string>();
-        const macros = await macrosAt(diagram, cursor, {
-          ...sources,
-          file: async (path, from, kind) => {
-            const file = await sources.file(path, from, kind);
-            if (file !== null) {
-              texts.set(file.id, file.text);
-            }
-            return file;
-          },
-        });
-        if (stale() || macros.status === 'cancelled') {
-          return undefined;
-        }
+        const asked = new Map<string, Promise<{ id: string; text: string } | null>>();
         const labels = macroLabels(l10n, root, libraries);
         const writtenIn = (at: Origin): string =>
           labels.line(
@@ -3203,15 +3257,38 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
                 : labels.library(at.library, at.key),
             at.line + 1
           );
-        const reasons = macros.shortfalls.map((shortfall) =>
-          l10n.t(
-            '{0}: {1} was not read. {2}',
-            writtenIn(shortfall.at),
-            shortfall.path,
-            shortfallReason(shortfall, session.failures, l10n)
-          )
-        );
-        return { macros, labels, reasons, opened, texts };
+        return {
+          sources: {
+            ...sources,
+            // The session counts each file it gives, read before or not.
+            file: (path, from, kind): Promise<{ id: string; text: string } | null> => {
+              const key = `${from ?? ''}\n${kind}\n${path}`;
+              let file = asked.get(key);
+              if (file === undefined) {
+                file = sources.file(path, from, kind).then((read) => {
+                  if (read !== null) {
+                    texts.set(read.id, read.text);
+                  }
+                  return read;
+                });
+                asked.set(key, file);
+              }
+              return file;
+            },
+          },
+          labels,
+          opened,
+          texts,
+          reasonsOf: (macros) =>
+            macros.shortfalls.map((shortfall) =>
+              l10n.t(
+                '{0}: {1} was not read. {2}',
+                writtenIn(shortfall.at),
+                shortfall.path,
+                shortfallReason(shortfall, session.failures, l10n)
+              )
+            ),
+        };
       };
 
       /** How each definition is declared, where, and the comment above it. */
@@ -3241,7 +3318,7 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
           return read === null ? [] : undefined;
         }
         const { items, cut } = macroSuggestions(read.macros, place, read.labels);
-        report(document, { reasons: read.reasons, cut });
+        report(document, { reasons: read.reasons, cut: cut ? 'definitions' : false });
         const start = new vscode.Position(position.line, offset + place.start);
         const range = {
           inserting: new vscode.Range(start, position),
@@ -3478,6 +3555,80 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         return help;
       };
 
+      /** The columns of line `at` of the document before the text of `diagram`: a Markdown block's quote markers. */
+      const quoteWidth = (document: vscode.TextDocument, diagram: DiagramLines, at: number): number => {
+        const written = document.lineAt(at).text;
+        const index = diagram.numbers.indexOf(at);
+        return written.length - (diagram.lines[index] ?? written).length;
+      };
+
+      /**
+       * Where each definition is, as Go to Definition and Find All References
+       * show it, for a request on `document` in `diagram`: the file, the
+       * columns of its name on its line (of a parameter, in the line that
+       * declares its procedure or function), and the last line of its body
+       * with that line's length. Null for a file that cannot be read now.
+       * The lines of each file of a bundled library are read once.
+       */
+      const placesIn = (
+        document: vscode.TextDocument,
+        diagram: DiagramLines,
+        read: { texts: ReadonlyMap<string, string>; opened: (id: string) => string }
+      ): ((
+        macro: Macro
+      ) => Promise<{ uri: vscode.Uri; line: number; start: number; end: number; last: number; length: number } | null>) => {
+        const libraryLines = new Map<string, Promise<readonly string[] | null>>();
+        const targetOf = async (
+          at: Origin
+        ): Promise<{ uri: vscode.Uri; lineOf: (line: number) => string; indent: number } | null> => {
+          switch (at.source) {
+            case 'document':
+              return {
+                uri: document.uri,
+                lineOf: (index) => document.lineAt(index).text,
+                indent: quoteWidth(document, diagram, at.line),
+              };
+            case 'file': {
+              const written = read.texts.get(at.id);
+              if (written === undefined) {
+                return null;
+              }
+              const lines = splitLines(written);
+              return { uri: vscode.Uri.file(read.opened(at.id)), lineOf: (index) => lines[index] ?? '', indent: 0 };
+            }
+            case 'library': {
+              const key = `${at.library}/${at.key}`;
+              let lines = libraryLines.get(key);
+              if (lines === undefined) {
+                lines = libraryText(stdlib, at.library, at.key).then(
+                  (written) => (written === null ? null : splitLines(written)),
+                  () => null
+                );
+                libraryLines.set(key, lines);
+              }
+              const known = await lines;
+              return known === null
+                ? null
+                : { uri: libraryUri(at.library, at.key), lineOf: (index) => known[index] ?? '', indent: 0 };
+            }
+          }
+        };
+        return async (macro) => {
+          const at = macro.origin;
+          const target = await targetOf(at);
+          if (target === null) {
+            return null;
+          }
+          const { uri, lineOf, indent } = target;
+          // A parameter is defined in the line that declares its procedure or function, after the name.
+          const column = macro.kind === 'parameter' ? parameterAt(lineOf(at.line), indent + at.end, macro.name) : -1;
+          const start = column === -1 ? indent + at.start : column;
+          const end = column === -1 ? indent + at.end : column + macro.name.length;
+          const last = macro.kind === 'parameter' ? at.line : at.last;
+          return { uri, line: at.line, start, end, last, length: lineOf(last).length };
+        };
+      };
+
       /** The read-only view of file `key` of the bundled library `library` (src/language/library-view.ts). */
       const libraryUri = (library: string, key: string): vscode.Uri =>
         vscode.Uri.from({ scheme: LIBRARY_SCHEME, path: libraryPath(library, key, libraries.fileName(library, key)) });
@@ -3533,12 +3684,7 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         }
         report(document, { reasons: read.reasons, cut: false });
 
-        /** The columns of line `at` of the document before the text of the diagram: a Markdown block's quote markers. */
-        const indentOf = (at: number): number => {
-          const written = document.lineAt(at).text;
-          const index = found.diagram.numbers.indexOf(at);
-          return written.length - (found.diagram.lines[index] ?? written).length;
-        };
+        const indentOf = (at: number): number => quoteWidth(document, found.diagram, at);
         const entry = definitionsOfName(read.macros, found, line);
         if (entry === null) {
           // No procedure, function, macro or variable has the name: an element the diagram declares may.
@@ -3566,60 +3712,20 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
           return undefined;
         }
 
-        // The lines of each file a definition is in, read once.
-        const libraryLines = new Map<string, Promise<readonly string[] | null>>();
-        const targetOf = async (
-          at: Origin
-        ): Promise<{ uri: vscode.Uri; lineOf: (line: number) => string; indent: number } | null> => {
-          switch (at.source) {
-            case 'document':
-              return { uri: document.uri, lineOf: (index) => document.lineAt(index).text, indent: indentOf(at.line) };
-            case 'file': {
-              const written = read.texts.get(at.id);
-              if (written === undefined) {
-                return null;
-              }
-              const lines = splitLines(written);
-              return { uri: vscode.Uri.file(read.opened(at.id)), lineOf: (index) => lines[index] ?? '', indent: 0 };
-            }
-            case 'library': {
-              const key = `${at.library}/${at.key}`;
-              let lines = libraryLines.get(key);
-              if (lines === undefined) {
-                lines = libraryText(stdlib, at.library, at.key).then(
-                  (written) => (written === null ? null : splitLines(written)),
-                  () => null
-                );
-                libraryLines.set(key, lines);
-              }
-              const known = await lines;
-              return known === null
-                ? null
-                : { uri: libraryUri(at.library, at.key), lineOf: (index) => known[index] ?? '', indent: 0 };
-            }
-          }
-        };
+        const placeOf = placesIn(document, found.diagram, read);
         const linkTo = async (macro: Macro): Promise<{ key: string; link: vscode.LocationLink } | null> => {
-          const at = macro.origin;
-          const target = await targetOf(at);
-          if (target === null) {
-            return null;
-          }
-          const { uri, lineOf, indent } = target;
-          // A parameter is defined in the line that declares its procedure or function, after the name.
-          const column = macro.kind === 'parameter' ? parameterAt(lineOf(at.line), indent + at.end, macro.name) : -1;
-          const start = column === -1 ? indent + at.start : column;
-          const end = column === -1 ? indent + at.end : column + macro.name.length;
-          const last = macro.kind === 'parameter' ? at.line : at.last;
-          return {
-            key: `${uri.toString()}#${String(at.line)}:${String(start)}`,
-            link: {
-              originSelectionRange: here(found.start, found.end),
-              targetUri: uri,
-              targetRange: new vscode.Range(at.line, 0, last, lineOf(last).length),
-              targetSelectionRange: new vscode.Range(at.line, start, at.line, end),
-            },
-          };
+          const place = await placeOf(macro);
+          return place === null
+            ? null
+            : {
+                key: `${place.uri.toString()}#${String(place.line)}:${String(place.start)}`,
+                link: {
+                  originSelectionRange: here(found.start, found.end),
+                  targetUri: place.uri,
+                  targetRange: new vscode.Range(place.line, 0, place.last, place.length),
+                  targetSelectionRange: new vscode.Range(place.line, place.start, place.line, place.end),
+                },
+              };
         };
         const linked = await Promise.all(entry.candidates.map(({ macro }) => linkTo(macro)));
         if (stale()) {
@@ -3633,6 +3739,175 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
           }
         }
         return links.size === 0 ? undefined : [...links.values()];
+      };
+
+      /**
+       * Find All References, Go to References and Peek References at
+       * `position` (src/language/definitions.ts): each place where Go to
+       * Definition would go to what the name at the cursor stands for, or to
+       * the definition whose name the cursor is on; with `includeDeclaration`,
+       * that definition too. A procedure, function, macro or variable is
+       * looked for in the diagram and in the local files its includes read,
+       * each line of a file as the diagram first reads it; an element, in the
+       * diagram alone. Other diagrams and the files of the bundled libraries
+       * are not searched. A place where text that was not read may stand for
+       * the name is not counted, which the Language Status and the output
+       * tell, as they tell when the list stops at its limit.
+       */
+      const referenceLocations = async (
+        document: vscode.TextDocument,
+        position: vscode.Position,
+        context: vscode.ReferenceContext,
+        token: vscode.CancellationToken
+      ): Promise<vscode.Location[] | undefined> => {
+        const version = document.version;
+        const stale = (): boolean => token.isCancellationRequested || document.version !== version;
+        const text = document.lineAt(position.line).text;
+        const where = sourceAt(document, position, text);
+        const found =
+          where === null
+            ? null
+            : diagramLinesAt(where.source, where.line, { bare: where.bare, first: position.line - where.line });
+        if (where === null || found === null) {
+          return undefined;
+        }
+        if (pastAnalysisLimits(document.getText())) {
+          report(document, { tooLarge: true });
+          return undefined;
+        }
+        const { diagram } = found;
+        const here = diagram.numbers.indexOf(found.cursor);
+        const column = position.character - where.offset;
+        const inDiagram = readDiagram(diagram);
+        const declared = declaredAt(diagram, here, column, { source: 'document' });
+        const declaredElement = declared === null ? elementDeclaredAt(diagram, here, column) : null;
+        const at = declared === null && declaredElement === null ? nameIn(inDiagram, here, column) : null;
+        if (declared === null && declaredElement === null && at === null) {
+          return undefined;
+        }
+        const reading = await readingFor(document, stale);
+        const whole = await diagramReading(diagram, reading.sources);
+        if (stale() || whole.macros.status === 'cancelled') {
+          return undefined;
+        }
+
+        // What the cursor names: the definition whose name it is on, or what Go to Definition goes to from it.
+        let target: { macros: readonly Macro[] } | { element: string };
+        if (declared !== null) {
+          target = { macros: [declared] };
+        } else if (declaredElement !== null) {
+          target = { element: declaredElement };
+        } else {
+          const macros = await whole.at(found.cursor);
+          if (stale() || macros.status === 'cancelled') {
+            return undefined;
+          }
+          const entry = at === null ? null : definitionsOfName(macros, at, diagram.lines[here] ?? '');
+          if (entry !== null && entry.certainty !== 'unresolved') {
+            target = { macros: entry.candidates.map(({ macro }) => macro) };
+          } else if (entry === null && at?.call === false && at.element !== null && elementsNamed(diagram, at.element.name).length > 0) {
+            target = { element: at.element.name };
+          } else {
+            // Nothing to look for, maybe as text that was not read defines it: why, as Go to Definition says.
+            report(document, { reasons: reading.reasonsOf(whole.macros), cut: false });
+            return undefined;
+          }
+        }
+        const goal = target;
+
+        const locations = new Map<string, vscode.Location>();
+        let cut = false;
+        const add = (uri: vscode.Uri, line: number, start: number, end: number): void => {
+          const key = `${uri.toString()}#${String(line)}:${String(start)}`;
+          if (locations.has(key)) {
+            return;
+          }
+          if (locations.size >= ANALYSIS_LIMITS.results) {
+            cut = true;
+            return;
+          }
+          locations.set(key, new vscode.Location(uri, new vscode.Range(line, start, line, end)));
+        };
+        const quote = (at: number): number => quoteWidth(document, diagram, at);
+        const declarations =
+          'element' in goal ? elementsNamed(diagram, goal.element).map(({ line, start, end }) => ({ line, start, end })) : [];
+        // The definitions first, so that the limit leaves them in.
+        if (context.includeDeclaration) {
+          if ('element' in goal) {
+            for (const { line, start, end } of declarations) {
+              const indent = quote(line);
+              add(document.uri, line, indent + start, indent + end);
+            }
+          } else {
+            const placeOf = placesIn(document, diagram, reading);
+            for (const macro of goal.macros) {
+              const place = await placeOf(macro);
+              if (place !== null) {
+                add(place.uri, place.line, place.start, place.end);
+              }
+            }
+          }
+        }
+
+        /** Whether Go to Definition from `at`, on line `written` where `macros` are defined, goes to the target. */
+        const goesToTarget = (macros: Macros, at: Occurrence, written: string): boolean => {
+          const entry = definitionsOfName(macros, at, written);
+          if ('element' in goal) {
+            return entry === null && !at.call && at.element?.name === goal.element;
+          }
+          return (
+            entry !== null &&
+            entry.certainty !== 'unresolved' &&
+            entry.candidates.some(({ macro }) => goal.macros.some((one) => sameMacro(one, macro)))
+          );
+        };
+        const name = 'element' in goal ? goal.element : (goal.macros[0]?.name ?? '');
+
+        // In the diagram, with what is defined at each line.
+        for (const occurrence of occurrencesIn(inDiagram, name)) {
+          const line = diagram.numbers[occurrence.index] ?? 0;
+          const { start, end } = 'element' in goal && occurrence.element !== null ? occurrence.element : occurrence;
+          // A line that declares the element is a definition, not a reference to it.
+          if (declarations.some((declared) => declared.line === line && declared.start === start)) {
+            continue;
+          }
+          const read = await whole.at(line);
+          if (stale() || read.status === 'cancelled') {
+            return undefined;
+          }
+          if (goesToTarget(read, occurrence, diagram.lines[occurrence.index] ?? '')) {
+            const indent = quote(line);
+            add(document.uri, line, indent + start, indent + end);
+          }
+        }
+        // In the local files the includes read, what is defined is what the diagram has defined where it first reads each line.
+        if (!('element' in goal)) {
+          for (const [id, numbers] of whole.files) {
+            const written = reading.texts.get(id);
+            if (written === undefined) {
+              continue;
+            }
+            const all = splitLines(written);
+            const lines = [...numbers].sort((one, other) => one - other);
+            const inFile = readDiagram({ lines: lines.map((line) => all[line] ?? ''), numbers: lines });
+            const uri = vscode.Uri.file(reading.opened(id));
+            for (const occurrence of occurrencesIn(inFile, name)) {
+              const line = lines[occurrence.index] ?? 0;
+              const read = await whole.inFile(id, line);
+              if (stale() || read?.status === 'cancelled') {
+                return undefined;
+              }
+              if (read !== null && goesToTarget(read, occurrence, inFile.diagram.lines[occurrence.index] ?? '')) {
+                add(uri, line, occurrence.start, occurrence.end);
+              }
+            }
+          }
+        }
+        if (stale()) {
+          return undefined;
+        }
+        report(document, { reasons: reading.reasonsOf(whole.macros), cut: cut ? 'references' : false });
+        return locations.size === 0 ? undefined : [...locations.values()];
       };
 
       registrations.own(
@@ -3656,6 +3931,11 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
       registrations.own(
         vscode.languages.registerDefinitionProvider([{ language: 'markdown' }, { language: 'plantuml' }], {
           provideDefinition: definitionLinks,
+        })
+      );
+      registrations.own(
+        vscode.languages.registerReferenceProvider([{ language: 'markdown' }, { language: 'plantuml' }], {
+          provideReferences: referenceLocations,
         })
       );
       // The files of the bundled libraries, as Go to Definition opens them:

@@ -38,6 +38,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   read may replace the definition, none is. The path of an include of a
   bundled library, and a definition in one, open the library's file
   read-only, as the extension bundles it.
+- **Find All References lists where a diagram uses what it defines and
+  declares.** *Find All References*, *Go to References* and *Peek References*
+  on a call, a variable or the name a definition declares list each call and
+  use that Go to Definition leads from to the same definition — in the
+  diagram and in the files of the workspace it includes, with their unsaved
+  changes — and on a participant or another element a line declares, each
+  line of the diagram that names it before its label. Another diagram, the
+  files of the bundled libraries and the files that include the one searched
+  are not searched. The definition is listed unless the command leaves it
+  out. A use that an include that is not read may define again is not
+  listed, and the Language Status says the list is partial, as it does when
+  the list stops at 5,000 places. The completion, the parameter hints, Go to
+  Definition and Find All References read a PlantUML file with no start line,
+  one that only other files include, whole, as its preview draws it.
 
 ## [0.17.1] - 2026-10-28
 
