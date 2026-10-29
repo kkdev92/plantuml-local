@@ -45,6 +45,7 @@ import {
   VIEWER_DEBOUNCE_MS,
   VIEWER_TYPE,
   VIEWER_URI_CONTEXT,
+  remoteReferenceIn,
 } from './core/constants';
 import {
   blockAtLine,
@@ -78,6 +79,7 @@ import { hasStartLine } from './core/shape';
 import { errorMessage, libraryNotBundled } from './core/messages';
 import { lineAfterEdits, planReferenceEdits, type ReferenceEdit } from './export/references';
 import {
+  diagramAt,
   lineContext,
   mightSuggest,
   readCompletionData,
@@ -90,6 +92,8 @@ import {
 } from './language/completion';
 import { callAt } from './language/calls';
 import {
+  definitionsOf,
+  describeEntry,
   diagramLinesAt,
   libraryFile,
   macroPlace,
@@ -127,6 +131,7 @@ import {
   parameterAt,
   type Occurrence,
 } from './language/definitions';
+import { builtinAt, definitionSections, escapeMarkdown, helpFor, helpMarkdown } from './language/hover';
 import { LIBRARY_SCHEME, libraryOfPath, libraryPath, libraryText } from './language/library-view';
 import { templatePlace } from './language/templates';
 import { missingEndAt, namesDiagram, unnamedAt, withName } from './language/code-actions';
@@ -143,6 +148,7 @@ import {
   type RenderOutcome,
 } from './diagnostics/problems';
 import { describeIncludeFailure, type IncludeLabels } from './includes/describe';
+import { asWritten, definedWords, includeDirectives } from './includes/directives';
 import { includeCompletions, includeDefinitions } from './includes/editor';
 import { drawInDocuments, openSession, type DrawDiagram } from './includes/host';
 import { INCLUDE_EXTENSIONS } from './includes/path-policy';
@@ -3033,17 +3039,17 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         return { found: where === null ? null : inDiagram(before, after, where.open), offset };
       };
 
-      /** Suggestions on a diagram line: templates only where a diagram can start. */
-      const inDiagram = (before: string, after: string, open: string | null): Suggestions | null => {
-        data ??= readCompletionData(
+      /** The themes and icons the bundled engine ships, read when first asked for. */
+      const completionData = (): CompletionData =>
+        (data ??= readCompletionData(
           readFileSync(join(__dirname, 'engine', 'themes.cjs'), 'utf8'),
           readFileSync(join(__dirname, 'engine', 'openiconic.cjs'), 'utf8')
-        );
-        return (
-          suggest(before, after, open, data) ??
-          (open === null ? suggestTemplates(before, after, false, names) : null)
-        );
-      };
+        ));
+
+      /** Suggestions on a diagram line: templates only where a diagram can start. */
+      const inDiagram = (before: string, after: string, open: string | null): Suggestions | null =>
+        suggest(before, after, open, completionData()) ??
+        (open === null ? suggestTemplates(before, after, false, names) : null);
 
       /**
        * The diagram source the line at `position` is read in: the PlantUML
@@ -3113,7 +3119,7 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
           status.text = l10n.t('Definitions: not read');
           status.severity = vscode.LanguageStatusSeverity.Warning;
           status.detail = l10n.t(
-            'The document is larger than {0} MiB or longer than {1} lines, so completion, parameter hints, Go to Definition and Find All References do not read its definitions.',
+            'The document is larger than {0} MiB or longer than {1} lines, so completion, parameter hints, hovers, Go to Definition and Find All References do not read its definitions.',
             String(ANALYSIS_LIMITS.fileBytes / (1024 * 1024)),
             String(ANALYSIS_LIMITS.fileLines)
           );
@@ -3128,7 +3134,7 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
           status.text = l10n.t('Definitions: diagram and includes');
           status.severity = vscode.LanguageStatusSeverity.Information;
           status.detail = l10n.t(
-            'Completion, parameter hints, Go to Definition and Find All References read what this diagram and the files it includes define.'
+            'Completion, parameter hints, hovers, Go to Definition and Find All References read what this diagram and the files it includes define.'
           );
         }
       };
@@ -3171,7 +3177,7 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
             logger.info(
               [
                 l10n.t(
-                  'Completion, parameter hints, Go to Definition and Find All References in {0} did not read:',
+                  'Completion, parameter hints, hovers, Go to Definition and Find All References in {0} did not read:',
                   vscode.workspace.asRelativePath(document.uri)
                 ),
                 ...read.reasons,
@@ -3910,6 +3916,153 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         return locations.size === 0 ? undefined : [...locations.values()];
       };
 
+      /** Markdown for a hover: untrusted and without HTML, so that nothing in it runs a command or loads anything. */
+      const untrusted = (value: string): vscode.MarkdownString => {
+        const markdown = new vscode.MarkdownString(value);
+        markdown.isTrusted = false;
+        markdown.supportHtml = false;
+        return markdown;
+      };
+
+      /**
+       * The hover at `position` (src/language/hover.ts): on a preprocessor
+       * directive, the kind of a diagram after `@start`, a bundled theme or an
+       * OpenIconic icon, built-in help; on the path of an include, the file
+       * it reads, found as a drawing finds it, or why it reads none; on a
+       * call or a variable, each definition it may stand for, with how sure
+       * that is, as the completion describes it. Nothing in a comment, on the
+       * keywords of a diagram or its skinparam and style names, nor on a name
+       * nothing defines.
+       */
+      const hoverAt = async (
+        document: vscode.TextDocument,
+        position: vscode.Position,
+        token: vscode.CancellationToken
+      ): Promise<vscode.Hover | undefined> => {
+        const version = document.version;
+        const stale = (): boolean => token.isCancellationRequested || document.version !== version;
+        const text = document.lineAt(position.line).text;
+        const where = sourceAt(document, position, text);
+        if (where === null || lineContext(where.source, where.line) === null) {
+          return undefined;
+        }
+        const line = text.slice(where.offset);
+        const column = position.character - where.offset;
+        const hover = (sections: readonly string[], start: number, end: number): vscode.Hover =>
+          new vscode.Hover(
+            sections.map(untrusted),
+            new vscode.Range(position.line, where.offset + start, position.line, where.offset + end)
+          );
+
+        // The diagram the line lies in, which the preview draws alone: what
+        // another diagram of the file defines does not reach it.
+        const diagram = diagramAt(where.source, where.line, where.bare);
+        const diagramText = (): string =>
+          diagram === null ? '' : splitLines(where.source).slice(diagram.from, diagram.to).join('\n');
+
+        let defined: ReadonlySet<string> | undefined;
+        const builtin = builtinAt(line, column, completionData(), (name) =>
+          asWritten(name, (defined ??= definedWords(diagramText())))
+        );
+        if (builtin !== null) {
+          const help = helpFor(builtin, l10n);
+          return help === null ? undefined : hover([helpMarkdown(help, l10n)], builtin.start, builtin.end);
+        }
+
+        // A diagram that reads a URL is not drawn at all.
+        const remote = remoteReferenceIn(line);
+        if (remote !== null && column >= remote.start && column <= remote.end) {
+          const reason = l10n.t(
+            'Loading files or themes from URLs (!include, !theme) is not supported. Use files in your workspace or bundled libraries and themes.'
+          );
+          return hover([escapeMarkdown(reason)], remote.start, remote.end);
+        }
+
+        const included = libraryIncludeAt(line, column);
+        if (included !== null) {
+          const declared = await libraries.declared(included.library, included.key).then(
+            (read) => ({ read }),
+            () => null
+          );
+          if (declared === null || stale()) {
+            return undefined;
+          }
+          const written = line.slice(included.start, included.end);
+          const said =
+            declared.read === undefined
+              ? l10n.t('{0} is not read. {1}', written, libraryNotBundled(written.slice(1, written.indexOf('/')), l10n))
+              : declared.read === null
+                ? l10n.t('{0} is not read. {1}', written, l10n.t('No bundled library has this file.'))
+                : l10n.t(
+                    'Reads {0}, bundled with this extension.',
+                    libraryFile(included.library, included.key, libraries.fileName(included.library, included.key))
+                  );
+          return hover([escapeMarkdown(said)], included.start, included.end);
+        }
+
+        // A path taken as written is looked for as a drawing looks for it; any
+        // other may hold a variable, whose definitions come first.
+        const directive =
+          diagram !== null && /^[ \t]*!(?:include|theme)/.test(line)
+            ? includeDirectives(diagramText()).find(
+                (found) => found.line === where.line - diagram.from && column >= found.start && column <= found.end
+              )
+            : undefined;
+        if (directive?.literal === true) {
+          const { session, root } = await openSession(document.uri, {
+            includePaths: (uri) => includePathsOf(settings, uri),
+          });
+          const kind = /^[ \t]*!theme/.test(line) ? 'theme' : /^[ \t]*!includesub/.test(line) ? 'includesub' : 'include';
+          const file = await session.load(directive.path, null, kind).catch(() => null);
+          if (stale()) {
+            return undefined;
+          }
+          const failure = session.failures.at(-1);
+          const said =
+            file !== null
+              ? l10n.t('Reads {0}.', root === undefined ? basename(file.id) : relative(root, file.id).split(sep).join('/'))
+              : l10n.t(
+                  '{0} is not read. {1}',
+                  directive.path,
+                  failure === undefined
+                    ? includeLabels(l10n).unreadable
+                    : describeIncludeFailure(failure.reason, includeLabels(l10n), INCLUDE_EXTENSIONS, INCLUDE_LIMITS)
+                );
+          return hover([escapeMarkdown(said)], directive.start, directive.end);
+        }
+
+        const found = nameAt(where.source, where.line, column, { bare: where.bare, first: position.line - where.line });
+        if (found !== null) {
+          const read = await definitionsAt(document, found.diagram, found.cursor, token);
+          if (read === undefined || stale()) {
+            return undefined;
+          }
+          if (read !== null) {
+            report(document, { reasons: read.reasons, cut: false });
+            const entry = definitionsOfName(read.macros, found, line);
+            if (entry !== null) {
+              return hover(
+                definitionSections(describeEntry(entry, read.labels), definitionsOf(entry, read.labels), l10n),
+                found.start,
+                found.end
+              );
+            }
+          }
+        }
+
+        if (directive === undefined) {
+          return undefined;
+        }
+        const reason = directive.inBody
+          ? l10n.t('It is read when the procedure or function it is written in runs.')
+          : l10n.t('Its path is put together when the diagram is drawn.');
+        return hover(
+          [escapeMarkdown(l10n.t('{0} is not looked up here. {1}', directive.path, reason))],
+          directive.start,
+          directive.end
+        );
+      };
+
       registrations.own(
         vscode.languages.registerCompletionItemProvider(
           [{ language: 'markdown' }, { language: 'plantuml' }],
@@ -3936,6 +4089,11 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
       registrations.own(
         vscode.languages.registerReferenceProvider([{ language: 'markdown' }, { language: 'plantuml' }], {
           provideReferences: referenceLocations,
+        })
+      );
+      registrations.own(
+        vscode.languages.registerHoverProvider([{ language: 'markdown' }, { language: 'plantuml' }], {
+          provideHover: hoverAt,
         })
       );
       // The files of the bundled libraries, as Go to Definition opens them:

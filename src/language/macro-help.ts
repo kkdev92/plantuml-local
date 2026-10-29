@@ -234,7 +234,7 @@ function surenessOf(entry: MacroEntry, labels: MacroLabels): string | null {
 }
 
 /** Where an entry is defined and what defines it, and how sure that is. */
-function describe(entry: MacroEntry, labels: MacroLabels): string {
+export function describeEntry(entry: MacroEntry, labels: MacroLabels): string {
   const first = entry.candidates[0]?.macro;
   const kinds = new Set(entry.candidates.map(({ macro }) => macro.kind));
   const where =
@@ -253,7 +253,8 @@ export interface MacroDefinition {
   comment?: string;
 }
 
-function definitionsOf(entry: MacroEntry, labels: MacroLabels): MacroDefinition[] {
+/** The definitions of an entry, in the order they were taken. */
+export function definitionsOf(entry: MacroEntry, labels: MacroLabels): MacroDefinition[] {
   return entry.candidates.map(({ macro }) => ({
     declaration: declarationOf(macro),
     where: labels.line(placeOf(macro.origin, labels), macro.origin.line + 1),
@@ -316,7 +317,7 @@ function suggestionOf(entry: MacroEntry, callOpen: boolean, labels: MacroLabels)
     name: first.name,
     kind: first.kind,
     ...(call ? { parameters: lists.size === 1 ? `(${[...lists][0] ?? ''})` : `(${count > 0 ? '…' : ''})` } : {}),
-    description: describe(entry, labels),
+    description: describeEntry(entry, labels),
     definitions: definitionsOf(entry, labels),
     snippet,
     call,
@@ -380,7 +381,7 @@ export function signaturesFor(
 
   const signatures: (SignatureSuggestion & { takes: boolean })[] = [];
   for (const entry of callablesNamed(macros, call.name)) {
-    const description = describe(entry, labels);
+    const description = describeEntry(entry, labels);
     for (const { macro } of entry.candidates) {
       const parameters = macro.parameters ?? [];
       const texts = parameterTexts(parameters);

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { includeDirectives, includePathOf, themeFolderOf } from '../../src/includes/directives';
+import { asWritten, definedWords, includeDirectives, includePathOf, themeFolderOf } from '../../src/includes/directives';
 
 const IDEOGRAPHIC_SPACE = String.fromCharCode(0x3000);
 const NO_BREAK_SPACE = String.fromCharCode(0xa0);
@@ -105,8 +105,8 @@ describe('includeDirectives', () => {
       '@enduml',
     ].join('\n');
     expect(includeDirectives(source)).toEqual([
-      { line: 1, start: 9, end: 15, path: 'a.puml', literal: true },
-      { line: 6, start: 16, end: 24, path: 'b/c.iuml', literal: true },
+      { line: 1, start: 9, end: 15, path: 'a.puml', literal: true, inBody: false },
+      { line: 6, start: 16, end: 24, path: 'b/c.iuml', literal: true, inBody: false },
     ]);
   });
 
@@ -116,15 +116,15 @@ describe('includeDirectives', () => {
 
   it('finds the file of an !includesub, and none for a section of the diagram itself', () => {
     expect(includeDirectives('!includesub parts.puml!PART\n!includesub PART')).toEqual([
-      { line: 0, start: 12, end: 22, path: 'parts.puml', literal: true },
+      { line: 0, start: 12, end: 22, path: 'parts.puml', literal: true, inBody: false },
     ]);
   });
 
   it('finds the file of a theme read from a folder, from its name and from its folder', () => {
     const path = 'themes/puml-theme-local.puml';
     expect(includeDirectives('!theme local from themes\n!theme plain\n!theme local from ')).toEqual([
-      { line: 0, start: 7, end: 12, path, literal: true },
-      { line: 0, start: 18, end: 24, path, literal: true },
+      { line: 0, start: 7, end: 12, path, literal: true, inBody: false },
+      { line: 0, start: 18, end: 24, path, literal: true, inBody: false },
     ]);
     expect(paths('!theme $name from themes\n!theme local from %dirpath()\n!folder = "x"\n!theme local from folder')).toEqual([
       [0, 'themes/puml-theme-$name.puml', false],
@@ -182,5 +182,44 @@ describe('includeDirectives', () => {
       [6, 'in-function.puml', false],
       [9, 'after.puml', true],
     ]);
+    expect(includeDirectives(source).map((found) => found.inBody)).toEqual([true, false, true, false]);
+    expect(includeDirectives('!procedure $look()\n!theme local from themes\n!endprocedure')).toMatchObject([
+      { literal: false, inBody: true },
+      { literal: false, inBody: true },
+    ]);
+  });
+});
+
+describe('definedWords', () => {
+  it('finds the words the code lines define, in lower case', () => {
+    const source = [
+      '!a = 1',
+      '!$b = 2',
+      '!global C ?= 3',
+      '!define D x',
+      '!definelong E(x)',
+      '!enddefinelong',
+      "' !g = 1",
+      '!final procedure F()',
+      '!endprocedure',
+      '!unquoted function H() !return 1',
+      '!procedure $p()',
+      '!endprocedure',
+    ].join('\n');
+    expect([...definedWords(source)].sort()).toEqual(['a', 'c', 'd', 'e', 'f', 'h']);
+  });
+});
+
+describe('asWritten', () => {
+  it.each([
+    ['star', [], true],
+    ['star', ['sta', 'stars'], true],
+    ['$star', [], false],
+    ['%star', [], false],
+    ['star', ['star'], false],
+    ['Star', ['star'], false],
+    ['cloud-upload', ['upload'], false],
+  ])('reads %j as written when %j are defined: %s', (written, defined, expected) => {
+    expect(asWritten(written, new Set(defined))).toBe(expected);
   });
 });

@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from 'node:fs';
-import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import Module from 'node:module';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
@@ -23,6 +23,8 @@ import {
   type VscodeStub,
   type WebviewPanelStub,
 } from './helpers/vscode-stub';
+import { englishMessages } from '../../src/core/messages';
+import { codeBlock, escapeMarkdown, helpFor, helpMarkdown, type BuiltinTarget } from '../../src/language/hover';
 
 /**
  * Loads the built dist/extension.js with a stubbed `vscode` module and
@@ -2443,7 +2445,7 @@ describe('definitions in completion and parameter hints (dist)', () => {
     });
     expect(vscodeStub._test.logs.slice(logged)).toEqual([
       expect.stringMatching(
-        /^info: Completion, parameter hints, Go to Definition and Find All References in defs\/partial\.puml did not read:\ndefs\/partial\.puml, line 2: <C4\/C4_Nothing> was not read\. No bundled library has this file\./
+        /^info: Completion, parameter hints, hovers, Go to Definition and Find All References in defs\/partial\.puml did not read:\ndefs\/partial\.puml, line 2: <C4\/C4_Nothing> was not read\. No bundled library has this file\./
       ),
     ]);
 
@@ -2454,7 +2456,7 @@ describe('definitions in completion and parameter hints (dist)', () => {
       text: 'Definitions: diagram and includes',
       severity: vscodeStub.LanguageStatusSeverity.Information,
       detail:
-        'Completion, parameter hints, Go to Definition and Find All References read what this diagram and the files it includes define.',
+        'Completion, parameter hints, hovers, Go to Definition and Find All References read what this diagram and the files it includes define.',
     });
     vscodeStub._test.setActiveEditor(partial);
     expect(status()?.text).toBe('Definitions: diagram and includes (partial)');
@@ -2492,7 +2494,7 @@ describe('definitions in completion and parameter hints (dist)', () => {
       text: 'Definitions: not read',
       severity: vscodeStub.LanguageStatusSeverity.Warning,
       detail:
-        'The document is larger than 2 MiB or longer than 50000 lines, so completion, parameter hints, Go to Definition and Find All References do not read its definitions.',
+        'The document is larger than 2 MiB or longer than 50000 lines, so completion, parameter hints, hovers, Go to Definition and Find All References do not read its definitions.',
     });
     vscodeStub._test.setActiveEditor(undefined);
   });
@@ -2677,7 +2679,7 @@ describe('Go to Definition (dist)', () => {
     });
     expect(vscodeStub._test.logs.slice(logged)).toEqual([
       expect.stringMatching(
-        /^info: Completion, parameter hints, Go to Definition and Find All References in goto\/dynamic\.puml did not read:\ngoto\/dynamic\.puml, line 5: \$file was not read\./
+        /^info: Completion, parameter hints, hovers, Go to Definition and Find All References in goto\/dynamic\.puml did not read:\ngoto\/dynamic\.puml, line 5: \$file was not read\./
       ),
     ]);
     vscodeStub._test.setActiveEditor(undefined);
@@ -2970,7 +2972,7 @@ describe('Find All References (dist)', () => {
     });
     expect(vscodeStub._test.logs.slice(logged)).toEqual([
       expect.stringMatching(
-        /^info: Completion, parameter hints, Go to Definition and Find All References in refs\/dynamic\.puml did not read:\nrefs\/dynamic\.puml, line 6: \$file was not read\./
+        /^info: Completion, parameter hints, hovers, Go to Definition and Find All References in refs\/dynamic\.puml did not read:\nrefs\/dynamic\.puml, line 6: \$file was not read\./
       ),
     ]);
     // From the call before it, that call alone, for the same reason.
@@ -3002,7 +3004,7 @@ describe('Find All References (dist)', () => {
     });
     expect(vscodeStub._test.logs.slice(logged)).toEqual([
       expect.stringMatching(
-        /^info: Completion, parameter hints, Go to Definition and Find All References in refs\/many\.puml did not read:\nOnly the first 5000 references are listed\./
+        /^info: Completion, parameter hints, hovers, Go to Definition and Find All References in refs\/many\.puml did not read:\nOnly the first 5000 references are listed\./
       ),
     ]);
     // Without the definition, a call more.
@@ -3107,6 +3109,406 @@ describe('Find All References (dist)', () => {
         `${uriOf('parts.iuml')}#4:2-4:5`,
         `${uriOf('parts.iuml')}#5:2-5:5`,
       ]);
+    });
+  });
+});
+
+describe('hovers (dist)', () => {
+  type RangeLike = { start: { line: number; character: number }; end: { line: number; character: number } };
+  /** The hover at the position: its sections, as Markdown, and the range it is for, `line:character-line:character`. */
+  const hoverAt = async (
+    document: TextEditorStub['document'],
+    line: number,
+    character: number,
+    options: { cancelled?: boolean } = {}
+  ): Promise<{ sections: string[]; range: string } | undefined> => {
+    const registration = vscodeStub._test.hoverProviders[0];
+    if (registration === undefined) {
+      throw new Error('no hover provider registered');
+    }
+    const hover = await registration.provider.provideHover(document, new vscodeStub.Position(line, character), {
+      isCancellationRequested: options.cancelled === true,
+    });
+    if (hover === undefined) {
+      return undefined;
+    }
+    // Nothing a hover shows may run a command or let HTML through.
+    for (const section of hover.contents) {
+      expect(section.isTrusted).toBe(false);
+      expect(section.supportHtml).toBe(false);
+    }
+    const span = ({ start, end }: RangeLike): string =>
+      `${String(start.line)}:${String(start.character)}-${String(end.line)}:${String(end.character)}`;
+    return { sections: hover.contents.map((section) => section.value), range: hover.range === undefined ? '' : span(hover.range) };
+  };
+  const puml = (path: string, lines: readonly string[]): TextEditorStub['document'] =>
+    makeEditor(path, lines.join('\n'), 0, { languageId: 'plantuml' }).document;
+  /** The Markdown of the built-in help of `target`, as the module that writes it gives it. */
+  const help = (target: BuiltinTarget): string => {
+    const found = helpFor(target, englishMessages);
+    if (found === null) {
+      throw new Error(`no help for ${target.name}`);
+    }
+    return helpMarkdown(found, englishMessages);
+  };
+
+  it('is registered for Markdown and PlantUML files', () => {
+    expect(vscodeStub._test.hoverProviders.map(({ selector }) => selector)).toEqual([
+      [{ language: 'markdown' }, { language: 'plantuml' }],
+    ]);
+  });
+
+  it('gives built-in help on a directive, the kind of a diagram, a bundled theme and an icon, in their own case only', async () => {
+    const document = puml('file:///c/hover/builtin.puml', [
+      '@startgantt',
+      '[Design] lasts 5 days',
+      '@endgantt',
+      '@startuml',
+      '!theme plain',
+      '  !foreach $name in ["Alice", "Bob"]',
+      'participant $name <&heart>',
+      '!endfor',
+      '!final procedure $box($a) ',
+      '!endprocedure',
+      '!function $twice($n) !return $n * 2',
+      '!Include common.puml',
+      '!theme Plain',
+      'A -> B : <&Heart>',
+      '@enduml',
+    ]);
+
+    expect(await hoverAt(document, 0, 4)).toEqual({
+      sections: [help({ kind: 'diagram', name: 'gantt', start: 0, end: 0 })],
+      range: '0:0-0:11',
+    });
+    expect(await hoverAt(document, 2, 4)).toBeUndefined();
+    expect(await hoverAt(document, 4, 2)).toEqual({
+      sections: [help({ kind: 'directive', name: 'theme', start: 0, end: 0 })],
+      range: '4:0-4:6',
+    });
+    expect(await hoverAt(document, 4, 9)).toEqual({
+      sections: [help({ kind: 'theme', name: 'plain', start: 0, end: 0 })],
+      range: '4:7-4:12',
+    });
+    expect(await hoverAt(document, 5, 3)).toEqual({
+      sections: [help({ kind: 'directive', name: 'foreach', start: 0, end: 0 })],
+      range: '5:2-5:10',
+    });
+    expect(await hoverAt(document, 6, 20)).toEqual({
+      sections: [help({ kind: 'icon', name: 'heart', start: 0, end: 0 })],
+      range: '6:18-6:26',
+    });
+    expect((await hoverAt(document, 8, 2))?.range).toBe('8:0-8:6');
+    expect((await hoverAt(document, 8, 10))?.sections).toEqual([help({ kind: 'directive', name: 'procedure', start: 0, end: 0 })]);
+    expect(await hoverAt(document, 10, 23)).toEqual({
+      sections: [help({ kind: 'directive', name: 'return', start: 0, end: 0 })],
+      range: '10:21-10:28',
+    });
+    for (const [line, character] of [
+      [11, 3],
+      [12, 9],
+      [13, 11],
+    ] as const) {
+      expect(await hoverAt(document, line, character), `${String(line)}:${String(character)}`).toBeUndefined();
+    }
+  });
+
+  it('shows the variable, not built-in help, on an icon or a theme whose name the text defines, as the engine puts its value there', async () => {
+    const document = puml('file:///c/hover/replaced.puml', [
+      '@startuml',
+      '!heart = "person"',
+      '!plain = "cerulean"',
+      '!theme plain',
+      'A -> B : <&heart> <&person>',
+      '@enduml',
+    ]);
+
+    expect((await hoverAt(document, 4, 11))?.sections).toEqual([
+      escapeMarkdown('this diagram · variable'),
+      [codeBlock('!heart = "person"', 'plantuml'), escapeMarkdown('this diagram, line 2')].join('\n\n'),
+    ]);
+    expect((await hoverAt(document, 4, 21))?.sections).toEqual([help({ kind: 'icon', name: 'person', start: 0, end: 0 })]);
+    expect(await hoverAt(document, 3, 9)).toEqual({
+      sections: [
+        escapeMarkdown('this diagram · variable'),
+        [codeBlock('!plain = "cerulean"', 'plantuml'), escapeMarkdown('this diagram, line 3')].join('\n\n'),
+      ],
+      range: '3:7-3:12',
+    });
+  });
+
+  it('gives built-in help on an icon or a theme that only another diagram of the file defines, as each diagram is drawn alone', async () => {
+    const document = puml('file:///c/hover/diagrams.puml', [
+      '@startuml',
+      '!theme plain',
+      'A -> B : <&heart>',
+      '@enduml',
+      '@startuml',
+      '!heart = "person"',
+      '!plain = "cerulean"',
+      '@enduml',
+    ]);
+
+    expect((await hoverAt(document, 1, 9))?.sections).toEqual([help({ kind: 'theme', name: 'plain', start: 0, end: 0 })]);
+    expect((await hoverAt(document, 2, 11))?.sections).toEqual([help({ kind: 'icon', name: 'heart', start: 0, end: 0 })]);
+  });
+
+  it('counts the quote markers before the lines of a Markdown block, and gives nothing in the text around it', async () => {
+    const markdown = makeEditor(
+      'file:///c/hover/doc.md',
+      ['# Notes', '> ```plantuml', '> !foreach $x in [1, 2]', '> A -> B : <&heart> $x', '> !endfor', '> ```'].join('\n'),
+      0
+    ).document;
+
+    expect((await hoverAt(markdown, 2, 3))?.range).toBe('2:2-2:10');
+    expect((await hoverAt(markdown, 3, 14))?.range).toBe('3:11-3:19');
+    expect(await hoverAt(markdown, 0, 3)).toBeUndefined();
+  });
+
+  it('gives nothing on the keywords of a diagram, its skinparam, an element, a comment or a word of a label', async () => {
+    const document = puml('file:///c/hover/keywords.puml', [
+      '@startuml',
+      'skinparam monochrome true',
+      'participant Alice',
+      "' !include common.puml",
+      'Alice -> Alice : hello',
+      '@enduml',
+    ]);
+    for (const [line, character] of [
+      [1, 3],
+      [1, 12],
+      [2, 3],
+      [2, 13],
+      [3, 4],
+      [4, 0],
+      [4, 18],
+    ] as const) {
+      expect(await hoverAt(document, line, character), `${String(line)}:${String(character)}`).toBeUndefined();
+    }
+  });
+
+  it('shows each definition a name may stand for, with how sure that is, and the comment above it as written', async () => {
+    const comment = [
+      '<img src="https://example.com/x.png"> <b>bold</b> <script>alert(1)</script>',
+      '[run](command:workbench.action.quit) ![image](https://example.com/y.png)',
+    ];
+    const document = puml('file:///c/hover/defined.puml', [
+      '@startuml',
+      ...comment.map((line) => `' ${line}`),
+      '!procedure Box($name)',
+      '  rectangle $name',
+      '!endprocedure',
+      'Box("a")',
+      '!if %true()',
+      '!procedure P()',
+      '!endprocedure',
+      '!else',
+      '!procedure P()',
+      '!endprocedure',
+      '!endif',
+      'P()',
+      '@enduml',
+    ]);
+
+    expect(await hoverAt(document, 6, 1)).toEqual({
+      sections: [
+        escapeMarkdown('this diagram · procedure'),
+        [
+          codeBlock('!procedure Box($name)', 'plantuml'),
+          escapeMarkdown('this diagram, line 4'),
+          codeBlock(comment.join('\n'), 'text'),
+        ].join('\n\n'),
+      ],
+      range: '6:0-6:3',
+    });
+    // A parameter, in the body of its procedure.
+    expect(await hoverAt(document, 4, 14)).toEqual({
+      sections: [
+        escapeMarkdown('this diagram · parameter'),
+        [codeBlock('$name', 'plantuml'), escapeMarkdown('this diagram, line 4')].join('\n\n'),
+      ],
+      range: '4:12-4:17',
+    });
+    expect(await hoverAt(document, 14, 0)).toEqual({
+      sections: [
+        escapeMarkdown('2 definitions · procedure · ambiguous'),
+        [codeBlock('!procedure P()', 'plantuml'), escapeMarkdown('this diagram, line 9')].join('\n\n'),
+        [codeBlock('!procedure P()', 'plantuml'), escapeMarkdown('this diagram, line 12')].join('\n\n'),
+      ],
+      range: '14:0-14:1',
+    });
+    // The keyword of the body, and the end of the diagram.
+    expect(await hoverAt(document, 4, 4)).toBeUndefined();
+    expect(await hoverAt(document, 15, 3)).toBeUndefined();
+  });
+
+  it('says what a bundled library or a URL an include names is, or why it is not read', async () => {
+    const document = puml('file:///c/hover/libraries.puml', [
+      '@startuml',
+      '!include <C4/C4_Context>',
+      '!include <C4/C4_Nothing>',
+      '!include <nosuchlibrary/x>',
+      '!include https://example.com/x.puml',
+      '@enduml',
+    ]);
+
+    expect(await hoverAt(document, 1, 12)).toEqual({
+      sections: [escapeMarkdown('Reads <C4/C4_Context>, bundled with this extension.')],
+      range: '1:9-1:24',
+    });
+    expect((await hoverAt(document, 2, 12))?.sections).toEqual([
+      escapeMarkdown('<C4/C4_Nothing> is not read. No bundled library has this file.'),
+    ]);
+    const notBundled = escapeMarkdown(
+      '<nosuchlibrary/x> is not read. The nosuchlibrary standard library is not included with this extension. The bundled standard libraries are '
+    );
+    expect((await hoverAt(document, 3, 12))?.sections[0]?.startsWith(notBundled)).toBe(true);
+    expect(await hoverAt(document, 4, 20)).toEqual({
+      sections: [
+        escapeMarkdown(
+          'Loading files or themes from URLs (!include, !theme) is not supported. Use files in your workspace or bundled libraries and themes.'
+        ),
+      ],
+      range: '4:9-4:35',
+    });
+  });
+
+  it('answers nothing once the request is cancelled or the document changes while it reads', async () => {
+    const document = puml('file:///c/hover/cancelled.puml', [
+      '@startuml',
+      '!include <C4/C4_Context>',
+      '!procedure P()',
+      '!endprocedure',
+      'P()',
+      '@enduml',
+    ]);
+    expect(await hoverAt(document, 1, 12, { cancelled: true })).toBeUndefined();
+    expect(await hoverAt(document, 4, 0, { cancelled: true })).toBeUndefined();
+    let reads = 0;
+    const changing: TextEditorStub['document'] = {
+      ...document,
+      get version(): number {
+        reads += 1;
+        return reads === 1 ? 1 : 2;
+      },
+    };
+    expect(await hoverAt(changing, 1, 12)).toBeUndefined();
+    reads = 0;
+    expect(await hoverAt(changing, 4, 0)).toBeUndefined();
+    expect(await hoverAt(document, 4, 0)).toBeDefined();
+  });
+
+  describe('with the local files a diagram includes', () => {
+    let base = '';
+    let root = '';
+    let folderOf: VscodeStub['workspace']['getWorkspaceFolder'] = () => undefined;
+    const uriOf = (name: string): string => vscodeStub.Uri.file(join(root, name)).toString();
+    /** A document in the workspace folder on disk: its URI as VS Code writes it, its path as the platform does. */
+    const onDisk = (name: string, lines: readonly string[]): TextEditorStub['document'] => {
+      const document = puml(uriOf(name), lines);
+      return { ...document, uri: { ...document.uri, fsPath: join(root, name) } };
+    };
+    const LINES = [
+      '@startuml',
+      '!include parts.iuml',
+      '!include missing.iuml',
+      '!include ../outside.iuml',
+      '!$dir = "."',
+      '!include $dir/parts.iuml',
+      '!procedure P()',
+      '!include parts.iuml',
+      '!endprocedure',
+      '!theme local from themes',
+      'Alice -> Bob : $dir',
+      '@enduml',
+    ];
+
+    beforeAll(async () => {
+      base = await realpath(await mkdtemp(join(tmpdir(), 'plantuml-local-hover-')));
+      root = join(base, 'ws');
+      await mkdir(join(root, 'themes'), { recursive: true });
+      await writeFile(join(root, 'parts.iuml'), 'Alice -> Bob : parts\n');
+      await writeFile(join(root, 'themes', 'puml-theme-local.puml'), 'skinparam monochrome true\n');
+      await writeFile(join(base, 'outside.iuml'), 'Alice -> Bob : outside\n');
+      // The stub's folder, /c, is on no disk: this one is, so that its includes are read.
+      folderOf = vscodeStub.workspace.getWorkspaceFolder;
+      const folder = { uri: { ...vscodeStub.Uri.file(root), fsPath: root }, name: 'ws', index: 0 };
+      const under = `${vscodeStub.Uri.file(root).toString()}/`;
+      vscodeStub.workspace.getWorkspaceFolder = (uri) => (uri.toString().startsWith(under) ? folder : folderOf(uri));
+    });
+
+    afterAll(async () => {
+      vscodeStub.workspace.getWorkspaceFolder = folderOf;
+      await rm(base, { recursive: true, force: true });
+    });
+
+    it('says which file a path read as written reads, as a drawing finds it, or why it reads none', async () => {
+      const main = onDisk('main.puml', LINES);
+
+      expect(await hoverAt(main, 1, 12)).toEqual({ sections: [escapeMarkdown('Reads parts.iuml.')], range: '1:9-1:19' });
+      expect(await hoverAt(main, 2, 12)).toEqual({
+        sections: [
+          escapeMarkdown('missing.iuml is not read. File not found. Check the path relative to the file containing this directive.'),
+        ],
+        range: '2:9-2:21',
+      });
+      expect((await hoverAt(main, 3, 12))?.sections).toEqual([
+        escapeMarkdown(
+          "../outside.iuml is not read. The path is outside the document's workspace folder. Move the file into that folder or correct the path."
+        ),
+      ]);
+      // A theme read from a folder, from its name and from its folder.
+      for (const character of [9, 20]) {
+        expect((await hoverAt(main, 9, character))?.sections).toEqual([escapeMarkdown('Reads themes/puml-theme-local.puml.')]);
+      }
+    });
+
+    it('takes a path as written when only another diagram of the file defines a word of it', async () => {
+      const main = onDisk('diagrams.puml', ['@startuml', '!include parts.iuml', '@enduml', '@startuml', '!parts = "other"', '@enduml']);
+
+      expect(await hoverAt(main, 1, 12)).toEqual({ sections: [escapeMarkdown('Reads parts.iuml.')], range: '1:9-1:19' });
+    });
+
+    it('says why it does not look up a path the diagram puts together, or one in a procedure, and shows the variable in it', async () => {
+      const main = onDisk('main.puml', LINES);
+
+      expect(await hoverAt(main, 5, 16)).toEqual({
+        sections: [escapeMarkdown('$dir/parts.iuml is not looked up here. Its path is put together when the diagram is drawn.')],
+        range: '5:9-5:24',
+      });
+      expect((await hoverAt(main, 5, 10))?.sections).toEqual([
+        escapeMarkdown('this diagram · variable'),
+        [codeBlock('!$dir = "."', 'plantuml'), escapeMarkdown('this diagram, line 5')].join('\n\n'),
+      ]);
+      // After that include, which may set it again: shown, unlike Go to Definition, and marked so.
+      expect(await hoverAt(main, 10, 16)).toEqual({
+        sections: [
+          escapeMarkdown('this diagram · variable · unresolved'),
+          [codeBlock('!$dir = "."', 'plantuml'), escapeMarkdown('this diagram, line 5')].join('\n\n'),
+        ],
+        range: '10:15-10:19',
+      });
+      expect((await hoverAt(main, 7, 12))?.sections).toEqual([
+        escapeMarkdown(
+          'parts.iuml is not looked up here. It is read when the procedure or function it is written in runs.'
+        ),
+      ]);
+    });
+
+    it('reads no local file in Restricted Mode, and says so', async () => {
+      const main = onDisk('main.puml', LINES);
+      vscodeStub.workspace.isTrusted = false;
+      try {
+        expect((await hoverAt(main, 1, 12))?.sections).toEqual([
+          escapeMarkdown(
+            'parts.iuml is not read. Local includes are unavailable in Restricted Mode. Trust this workspace to include files.'
+          ),
+        ]);
+        // Built-in help needs nothing of the workspace.
+        expect((await hoverAt(main, 1, 2))?.sections).toEqual([help({ kind: 'directive', name: 'include', start: 0, end: 0 })]);
+      } finally {
+        vscodeStub.workspace.isTrusted = true;
+      }
     });
   });
 });

@@ -40,6 +40,8 @@ export interface IncludeDirective {
   path: string;
   /** Whether the engine asks for `path` as written. */
   literal: boolean;
+  /** Whether it is written in a procedure or a function, so that it is read when that runs. */
+  inBody: boolean;
 }
 
 /**
@@ -66,6 +68,29 @@ const DEFINITIONS: readonly RegExp[] = [
   /^\s*!(?:(?:unquoted|final)\s+)*(?:function|procedure)\s+([\p{L}_][\p{L}\p{N}_]*)/iu,
 ];
 const WORD = /[\p{L}\p{N}_]+/gu;
+
+/** The words `source`, a diagram's text, defines, in lower case. */
+export function definedWords(source: string): ReadonlySet<string> {
+  const defined = new Set<string>();
+  forEachCodeLine(source, (line) => {
+    for (const definition of DEFINITIONS) {
+      const name = definition.exec(line)?.[1];
+      if (name !== undefined) {
+        defined.add(name.toLowerCase());
+      }
+    }
+  });
+  return defined;
+}
+
+/**
+ * Whether the engine reads `written` as it is written in a text that
+ * defines `defined` ({@link definedWords}): with no `$` or `%`, nor a word
+ * the text defines, it puts no value in its place.
+ */
+export function asWritten(written: string, defined: ReadonlySet<string>): boolean {
+  return !/[$%]/.test(written) && !(written.match(WORD) ?? []).some((word) => defined.has(word.toLowerCase()));
+}
 
 /** A line without the block comment that ends it. */
 function withoutEndComment(line: string): string {
@@ -130,8 +155,8 @@ function themeFile(name: string, folder: string): string {
 
 /** The local includes of `source`, a diagram's text, in order. */
 export function includeDirectives(source: string): IncludeDirective[] {
-  const defined = new Set<string>();
-  const found: (Omit<IncludeDirective, 'literal'> & { written: string; inBody: boolean })[] = [];
+  const defined = definedWords(source);
+  const found: (Omit<IncludeDirective, 'literal'> & { written: string })[] = [];
   let inBody = false;
   forEachCodeLine(source, (line, index) => {
     if (PROCEDURE.close.test(line)) {
@@ -139,12 +164,6 @@ export function includeDirectives(source: string): IncludeDirective[] {
       return;
     }
     inBody ||= PROCEDURE.open.test(line);
-    for (const definition of DEFINITIONS) {
-      const name = definition.exec(line)?.[1];
-      if (name !== undefined) {
-        defined.add(name.toLowerCase());
-      }
-    }
     const include = includePathOf(line);
     // An !includesub with no `!` after its path names a section of the diagram itself.
     const ownSection = /^[ \t]*!includesub/.test(line) && include !== null && line.charAt(include.end) !== '!';
@@ -159,11 +178,8 @@ export function includeDirectives(source: string): IncludeDirective[] {
       found.push({ line: index, start: theme.start, end: theme.end, path, written, inBody });
     }
   });
-  return found.map(({ inBody: inside, written, ...include }) => ({
+  return found.map(({ written, ...include }) => ({
     ...include,
-    literal:
-      !inside &&
-      !/[$%]/.test(written) &&
-      !(written.match(WORD) ?? []).some((word) => defined.has(word.toLowerCase())),
+    literal: !include.inBody && asWritten(written, defined),
   }));
 }

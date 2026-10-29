@@ -263,6 +263,24 @@ export interface ReferenceRegistrationStub {
   };
 }
 
+/** A `vscode.Hover` as the extension builds it. */
+export interface HoverStub {
+  contents: MarkdownStringStub[];
+  range?: { start: PositionStub; end: PositionStub };
+}
+
+/** A hover provider as registered, with what it was registered for. */
+export interface HoverRegistrationStub {
+  selector: unknown;
+  provider: {
+    provideHover(
+      document: TextEditorStub['document'],
+      position: PositionStub,
+      token: { isCancellationRequested: boolean }
+    ): Promise<HoverStub | undefined>;
+  };
+}
+
 /** A text document content provider as registered, with the scheme it was registered for. */
 export interface ContentRegistrationStub {
   scheme: string;
@@ -278,6 +296,9 @@ export interface ContentRegistrationStub {
 export interface MarkdownStringStub {
   value: string;
   parts: { kind: 'text' | 'markdown' | 'code'; value: string; language?: string }[];
+  /** As the extension sets them; VS Code takes unset as false. */
+  isTrusted?: boolean | { readonly enabledCommands: readonly string[] };
+  supportHtml?: boolean;
   appendText(value: string): MarkdownStringStub;
   appendMarkdown(value: string): MarkdownStringStub;
   appendCodeblock(value: string, language?: string): MarkdownStringStub;
@@ -472,6 +493,7 @@ export interface VscodeStub {
       selector: unknown,
       provider: ReferenceRegistrationStub['provider']
     ) => { dispose(): void };
+    registerHoverProvider: (selector: unknown, provider: HoverRegistrationStub['provider']) => { dispose(): void };
     registerCodeLensProvider: (
       selector: unknown,
       provider: CodeLensRegistrationStub['provider']
@@ -532,6 +554,7 @@ export interface VscodeStub {
     endCharacter?: number
   ) => { start: PositionStub; end: PositionStub };
   Location: new (uri: UriStub, range: { start: PositionStub; end: PositionStub }) => LocationStub;
+  Hover: new (contents: MarkdownStringStub[], range?: { start: PositionStub; end: PositionStub }) => HoverStub;
   WorkspaceEdit: new () => WorkspaceEditStub;
   FileType: Record<'Unknown' | 'File' | 'Directory' | 'SymbolicLink', number>;
   FileSystemError: new (message: string, code: string) => Error & { code: string };
@@ -724,6 +747,8 @@ export interface VscodeStub {
     definitionProviders: DefinitionRegistrationStub[];
     /** Reference providers registered, in order. */
     referenceProviders: ReferenceRegistrationStub[];
+    /** Hover providers registered, in order. */
+    hoverProviders: HoverRegistrationStub[];
     /** Code lens providers registered, in order. */
     codeLensProviders: CodeLensRegistrationStub[];
     /** Colour providers registered, in order. */
@@ -1111,6 +1136,13 @@ export function createVscodeStub(): VscodeStub {
       public range: LocationStub['range']
     ) {}
   }
+  const hoverProviders: HoverRegistrationStub[] = [];
+  class Hover implements HoverStub {
+    constructor(
+      public contents: MarkdownStringStub[],
+      public range?: HoverStub['range']
+    ) {}
+  }
   class CodeLens implements CodeLensStub {
     constructor(
       public range: CodeLensStub['range'],
@@ -1303,6 +1335,10 @@ export function createVscodeStub(): VscodeStub {
         referenceProviders.push({ selector, provider });
         return track('languages.registerReferenceProvider');
       },
+      registerHoverProvider: (selector, provider) => {
+        hoverProviders.push({ selector, provider });
+        return track('languages.registerHoverProvider');
+      },
       registerCodeLensProvider: (selector, provider) => {
         codeLensProviders.push({ selector, provider });
         return track('languages.registerCodeLensProvider');
@@ -1321,6 +1357,7 @@ export function createVscodeStub(): VscodeStub {
     Position,
     Range,
     Location,
+    Hover,
     WorkspaceEdit: WorkspaceEditStub,
     FileType,
     FileSystemError,
@@ -1747,6 +1784,7 @@ export function createVscodeStub(): VscodeStub {
       actionProviders,
       definitionProviders,
       referenceProviders,
+      hoverProviders,
       codeLensProviders,
       colorProviders,
       signatureProviders,

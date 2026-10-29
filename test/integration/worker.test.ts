@@ -7,9 +7,12 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { NAMED_COLORS, findColors } from '../../src/core/colors';
 import { EMOJI_UNAVAILABLE } from '../../src/core/constants';
+import { englishMessages } from '../../src/core/messages';
 import type { RenderResponseMessage } from '../../src/core/types';
-import { expandSnippet, SNIPPETS, TEMPLATES } from '../../src/language/completion';
+import { SUPPORTED_DIAGRAMS } from '../../src/grammar/plantuml';
+import { DIRECTIVES, expandSnippet, SNIPPETS, TEMPLATES } from '../../src/language/completion';
 import { diagramKind, type DiagramKind } from '../../src/language/diagram-kind';
+import { helpFor, type Help } from '../../src/language/hover';
 import { protect } from '../../src/language/protected';
 import { recognizeEngineError } from '../../src/render/engine-error';
 import { drawnTitle } from '../../src/render/title';
@@ -1014,5 +1017,109 @@ describe('the title a screen reader is told (dist, re-check on every engine upda
     const error = await render(['@startuml', 'title Has an error', 'A -> B : x', 'foo bar baz qux', '@enduml'].join('\n'));
     expect(recognizeEngineError(error)).not.toBeNull();
     expect(drawnTitle(error)).toBeNull();
+  });
+});
+
+// The built-in help of the hovers (src/language/hover.ts) shows how each
+// directive and each kind of diagram is written, for the bundled engine. So
+// each example is drawn as the hover shows it, and re-checked on every
+// engine update: without an error, and drawing what it is there to show.
+describe('the examples of the built-in help (dist, re-check on every engine update)', () => {
+  /** The text of each `<text>` of an SVG, trimmed. */
+  const texts = (svg: string): string[] =>
+    [...svg.matchAll(/<text\b[^>]*>([^<]*)<\/text>/g)].map((match) => (match[1] ?? '').trim());
+  /** The help of directive `name`. */
+  const directive = (name: string): Help | null => helpFor({ kind: 'directive', name, start: 0, end: 0 }, englishMessages);
+  /** The text drawn by the example of directive `name`, in a diagram of its own. */
+  const drawnBy = async (name: string): Promise<string[]> => {
+    const example = directive(name)?.example;
+    expect(example, name).toBeDefined();
+    const svg = await render(['@startuml', example ?? '', '@enduml'].join('\n'));
+    expect(recognizeEngineError(svg), `${name}\n${svg.slice(0, 400)}`).toBeNull();
+    return texts(svg);
+  };
+
+  it.each(DIRECTIVES)('has help for !%s, and draws its example as shown', async (name) => {
+    const help = directive(name);
+    expect(help?.title).toBe(`!${name}`);
+    // An include needs a file to read: those are shown how they are written only.
+    if (/^include/.test(name)) {
+      expect(help?.example).toBeUndefined();
+      return;
+    }
+    await drawnBy(name);
+  });
+
+  it('draws what each example is there to show', async () => {
+    expect(await drawnBy('startsub')).toEqual(expect.arrayContaining(['User', 'System', 'request']));
+    expect(await drawnBy('define')).toContain('Orders');
+    expect(await drawnBy('definelong')).toContain('Orders');
+    expect(await drawnBy('undef')).toContain('no mode');
+    const branches = await drawnBy('if');
+    expect(branches).toContain('second');
+    expect(branches).not.toContain('first');
+    expect(branches).not.toContain('other');
+    expect(await drawnBy('ifdef')).toContain('run the tests');
+    expect(await drawnBy('ifndef')).toContain('no tests');
+    expect(await drawnBy('while')).toEqual(expect.arrayContaining(['step 1', 'step 2', 'step 3']));
+    expect(await drawnBy('foreach')).toEqual(expect.arrayContaining(['Alice', 'Bob', 'Carol']));
+    expect(await drawnBy('function')).toContain('42');
+    expect(await drawnBy('procedure')).toEqual(expect.arrayContaining(['Orders', 'Billing']));
+    expect(await drawnBy('unquoted')).toContain('Orders');
+    expect(await drawnBy('final')).toContain('Orders');
+    // The local variable in the procedure, then the global one after it.
+    const scopes = (await drawnBy('local')).filter((text) => text === 'local' || text === 'global');
+    expect(scopes).toEqual(['local', 'global']);
+    expect(await drawnBy('global')).toContain('1');
+    for (const name of ['assert', 'log', 'dump_memory', 'option', 'theme']) {
+      expect(await drawnBy(name), name).toContain('hello');
+    }
+  });
+
+  it('stops on an assertion that is false, as the help says', async () => {
+    const svg = await render(['@startuml', '!assert 1 == 2 : "not equal"', 'Alice -> Bob : hello', '@enduml'].join('\n'));
+    expect(recognizeEngineError(svg)?.message).toContain('Assertion error');
+  });
+
+  it('writes the text of !log, its variables replaced, and nothing for !dump_memory, as the help says', async () => {
+    // A worker of its own, whose standard error the test reads.
+    const logging = new Worker(workerPath, { stderr: true });
+    let written = '';
+    logging.stderr.setEncoding('utf8');
+    logging.stderr.on('data', (chunk: string) => {
+      written += chunk;
+    });
+    const draw = (id: number, source: string): Promise<void> =>
+      new Promise((resolve) => {
+        logging.on('message', (message: RenderResponseMessage) => {
+          if (message.id === id) {
+            resolve();
+          }
+        });
+        logging.postMessage({ id, source, dark: false });
+      });
+    try {
+      await draw(1, ['@startuml', '!$kept = "dumped-value"', '!dump_memory', 'Alice -> Bob : hello', '@enduml'].join('\n'));
+      await draw(2, ['@startuml', '!$who = "Alice"', '!log said by $who', 'Alice -> Bob : hello', '@enduml'].join('\n'));
+      // The stream keeps its order: once the text of !log is there, anything !dump_memory wrote before it is too.
+      await expect.poll(() => written, { timeout: 10_000 }).toContain('[Log] said by Alice');
+    } finally {
+      await logging.terminate();
+    }
+    expect(written).not.toContain('dumped-value');
+  });
+
+  it.each(SUPPORTED_DIAGRAMS.flatMap(({ names }) => names))('draws the diagram the help of @start%s shows', async (name) => {
+    const help = helpFor({ kind: 'diagram', name, start: 0, end: 0 }, englishMessages);
+    expect(help?.title).toBe(`@start${name}`);
+    const svg = await render(help?.syntax ?? '');
+    expect(recognizeEngineError(svg), `${name}\n${svg.slice(0, 400)}`).toBeNull();
+  });
+
+  it('draws each way the help of an icon writes it, in its colour', async () => {
+    const help = helpFor({ kind: 'icon', name: 'star', start: 0, end: 0 }, englishMessages);
+    const svg = await render(['@startuml', `Alice -> Bob : ${(help?.syntax ?? '').split('\n').join(' ')}`, '@enduml'].join('\n'));
+    expect(recognizeEngineError(svg)).toBeNull();
+    expect([...svg.matchAll(/<path\b[^>]*fill="([^"]*)"/g)].map((match) => match[1])).toEqual(['#000000', '#FF0000']);
   });
 });
