@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 
-import { findPlantUmlBlocks, type PlantUmlBlock } from '../export/blocks';
+import { findFileDiagrams, findPlantUmlBlocks, type PlantUmlBlock } from '../export/blocks';
 import { lineContext } from '../language/completion';
 import { includeDirectives, includePathOf, themeFolderOf } from './directives';
 import { accessFor, asOpened, type IncludeHost } from './host';
@@ -69,6 +69,19 @@ function diagramAt(
   return { text: lines.join('\n'), firstLine: block.openLine + 1, offsets };
 }
 
+/**
+ * The diagram of a PlantUML document line `line` lies in, as the preview
+ * draws it: alone, so that what another diagram of the file defines does
+ * not reach it, and none for a line outside the diagrams, which the engine
+ * does not read. A document with no start line is one diagram.
+ */
+function drawnDiagramAt(document: vscode.TextDocument, line: number): Diagram | null {
+  const drawn = findFileDiagrams(document.getText(), '').find(
+    (diagram) => line >= diagram.openLine && line <= diagram.closeLine
+  );
+  return drawn === undefined ? null : { text: drawn.source, firstLine: drawn.openLine, offsets: [] };
+}
+
 export function includeDefinitions(host: Pick<IncludeHost, 'includePaths'>): vscode.DefinitionProvider {
   const blocks = blocksOf();
   return {
@@ -76,7 +89,10 @@ export function includeDefinitions(host: Pick<IncludeHost, 'includePaths'>): vsc
       if (!/!include|!theme/.test(document.lineAt(position.line).text)) {
         return undefined;
       }
-      const diagram = diagramAt(document, position.line, blocks);
+      const diagram =
+        document.languageId === 'markdown'
+          ? diagramAt(document, position.line, blocks)
+          : drawnDiagramAt(document, position.line);
       if (diagram === null) {
         return undefined;
       }

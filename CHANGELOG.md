@@ -80,6 +80,15 @@ updates.
 - **Breaking:** `engines.vscode` raised from `^1.138.0` to `^1.144.0`, with
   `@types/vscode` at `~1.144.0` to match.
 
+### Fixed
+
+- **Go to Definition on the path of an include reads the diagram it is in.**
+  In a `.puml` file of several diagrams, a word that another diagram of the
+  file defines kept the path from leading to its file, though the preview,
+  which draws each diagram alone, reads that file; and a path outside the
+  diagrams, which the engine does not read, led to one. The path is now read
+  with the diagram its line is in, as the hovers read it.
+
 ## [0.17.1] - 2026-10-28
 
 ### Fixed

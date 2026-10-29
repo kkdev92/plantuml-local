@@ -166,6 +166,45 @@ describe('includeDefinitions', () => {
     await expect(goTo(documentOf('diagram.puml', DIAGRAM), 1, 12)).resolves.toBeUndefined();
   });
 
+  it('reads the diagram the path is in alone, as the preview draws each diagram of a file', async () => {
+    const document = documentOf(
+      'diagrams.puml',
+      [
+        '@startuml',
+        '!include common.puml',
+        '@enduml',
+        '!include common.puml',
+        '@startuml',
+        '!common = "other"',
+        '!include common.puml',
+        '@enduml',
+      ].join('\n')
+    );
+    // Another diagram of the file defines a word of the path: this one reads it as written.
+    await expect(goTo(document, 1, 12)).resolves.toEqual({ target: join(docs, 'common.puml'), from: [1, 9, 20] });
+    // The diagram that defines the word puts the path together itself.
+    await expect(goTo(document, 6, 12)).resolves.toBeUndefined();
+  });
+
+  it('goes nowhere from a path outside the diagrams, which the engine does not read', async () => {
+    const document = documentOf(
+      'outside.puml',
+      [
+        '!include common.puml',
+        '@startuml',
+        '@enduml',
+        '!include common.puml',
+        '@startuml',
+        '@enduml',
+        '!include common.puml',
+      ].join('\n')
+    );
+    // Before the first diagram, between two and after the last.
+    await expect(goTo(document, 0, 12)).resolves.toBeUndefined();
+    await expect(goTo(document, 3, 12)).resolves.toBeUndefined();
+    await expect(goTo(document, 6, 12)).resolves.toBeUndefined();
+  });
+
   it('goes to the file of an !includesub, and to a theme read from a folder, from its name or its folder', async () => {
     const document = documentOf(
       'diagram.puml',
