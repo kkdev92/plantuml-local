@@ -18,7 +18,7 @@
     "url": "https://github.com/kkdev92/plantuml-local/issues"
   },
   "engines": {
-    "vscode": "^1.138.0",
+    "vscode": "^1.144.0",
     "node": ">=24.0.0"
   },
   "categories": [
@@ -500,7 +500,7 @@
     "@eslint/js": "^10.0.0",
     "@types/markdown-it": "^14.2.0",
     "@types/node": "^24.13.6",
-    "@types/vscode": "~1.138.0",
+    "@types/vscode": "~1.144.0",
     "@vitest/coverage-v8": "^5.0.5",
     "@vscode/vsce": "^4.0.0",
     "esbuild": "^0.28.1",

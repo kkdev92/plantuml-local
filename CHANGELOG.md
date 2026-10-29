@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**Breaking: VS Code 1.144 or later is now required**, up from 1.138, in step
+with `@types/vscode` moving to `~1.144.0`. The two have to move together —
+`vsce` refuses to package an extension whose `@types/vscode` outruns its
+`engines.vscode`. The new floor on its own changes nothing the extension
+does. Installations on an older VS Code keep 0.17.x and stop receiving
+updates.
+
 ### Added
 
 - **Completion offers what a diagram defines, with parameter hints for the
@@ -52,6 +59,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the list stops at 5,000 places. The completion, the parameter hints, Go to
   Definition and Find All References read a PlantUML file with no start line,
   one that only other files include, whole, as its preview draws it.
+
+### Changed
+
+- **Breaking:** `engines.vscode` raised from `^1.138.0` to `^1.144.0`, with
+  `@types/vscode` at `~1.144.0` to match.
 
 ## [0.17.1] - 2026-10-28
 

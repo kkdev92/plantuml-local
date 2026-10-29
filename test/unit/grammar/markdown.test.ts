@@ -7,7 +7,7 @@ import { checkScopes, MARKDOWN_SCOPE, tokenize, type Expectation } from './harne
  * The injection gives the PlantUML grammar to exactly the fences the
  * preview renders: markdown-it fences whose info string starts with the
  * word `plantuml` (src/preview/plugin.ts), inside VS Code's Markdown
- * grammar (the 1.138.0 fixture).
+ * grammar (the 1.144.0 fixture).
  */
 
 const EMBEDDED = 'meta.embedded.block.plantuml';
