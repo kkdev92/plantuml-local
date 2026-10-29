@@ -25,10 +25,11 @@ import {
 import type MarkdownIt from 'markdown-it';
 import { randomBytes } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, join, relative, sep } from 'node:path';
 import * as vscode from 'vscode';
 
 import {
+  ANALYSIS_LIMITS,
   COMMANDS,
   CONFIG,
   CONTEXT_KEYS,
@@ -36,6 +37,7 @@ import {
   DIAGNOSTICS_DEBOUNCE_MS,
   EXTENSION_ID,
   EXTENSION_NAME,
+  INCLUDE_LIMITS,
   PACKAGE_ID,
   PNG_PANEL_TYPE,
   REFRESH_DEBOUNCE_MS,
@@ -86,6 +88,19 @@ import {
   type CompletionData,
   type Suggestions,
 } from './language/completion';
+import { callAt } from './language/calls';
+import {
+  diagramLinesAt,
+  libraryFile,
+  macroPlace,
+  macroSuggestions,
+  signaturesFor,
+  type MacroDefinition,
+  type MacroLabels,
+  type MacroPlace,
+} from './language/macro-help';
+import { LibraryDeclarations, macroSources } from './language/macro-sources';
+import { macrosAt, pastAnalysisLimits, readingOf, type DiagramLines, type MacroKind, type Macros, type Origin, type Shortfall } from './language/macros';
 import { templatePlace } from './language/templates';
 import { missingEndAt, namesDiagram, unnamedAt, withName } from './language/code-actions';
 import { diagramLenses, diagramTarget, targetBlock, type DiagramAction, type DiagramTarget } from './language/code-lens';
@@ -100,9 +115,11 @@ import {
   type ProblemLabels,
   type RenderOutcome,
 } from './diagnostics/problems';
-import type { IncludeLabels } from './includes/describe';
+import { describeIncludeFailure, type IncludeLabels } from './includes/describe';
 import { includeCompletions, includeDefinitions } from './includes/editor';
-import { drawInDocuments, type DrawDiagram } from './includes/host';
+import { drawInDocuments, openSession, type DrawDiagram } from './includes/host';
+import { INCLUDE_EXTENSIONS } from './includes/path-policy';
+import type { IncludeFailure } from './includes/session';
 import { changeTo } from './includes/tracking';
 import { IncludeWatcher } from './includes/watch';
 import { createPlantUmlPlugin, type PlantUmlPlugin, type UpdateMode } from './preview/plugin';
@@ -776,6 +793,67 @@ function includeLabels(l10n: L10n): IncludeLabels {
     tooMany: (most) => l10n.t('This diagram includes more than {0} files. Reduce the number of included files.', String(most)),
     tooLarge: (mebibytes) => l10n.t('The included files exceed the {0} MiB total size limit. Reduce their size or include fewer files.', String(mebibytes)),
   };
+}
+
+/** The words the completion and the parameter hints describe definitions in, a local file shown from `root`. */
+function macroLabels(l10n: L10n, root: string | undefined): MacroLabels {
+  return {
+    kinds: {
+      procedure: l10n.t('procedure'),
+      function: l10n.t('function'),
+      define: l10n.t('macro'),
+      definelong: l10n.t('multi-line macro'),
+      constant: l10n.t('constant'),
+      variable: l10n.t('variable'),
+      parameter: l10n.t('parameter'),
+    },
+    diagram: l10n.t('this diagram'),
+    file: (id) => (root === undefined ? basename(id) : relative(root, id).split(sep).join('/')),
+    conditional: l10n.t('conditional'),
+    ambiguous: l10n.t('ambiguous'),
+    unresolved: l10n.t('unresolved'),
+    definitions: (count) => l10n.t('{0} definitions', String(count)),
+    line: (place, line) => l10n.t('{0}, line {1}', place, String(line)),
+  };
+}
+
+/**
+ * Why what an include names was not read for the completion and the
+ * parameter hints, for the output: for a local file the include session
+ * could not deliver, its reason (`failures`), as the preview gives it.
+ */
+function shortfallReason(shortfall: Shortfall, failures: readonly IncludeFailure[], l10n: L10n): string {
+  switch (shortfall.reason) {
+    case 'dynamic':
+      return l10n.t('Its path is put together when the diagram is drawn.');
+    case 'pattern':
+      return l10n.t('It picks a diagram of the file by a pattern, which is not followed.');
+    case 'too-large':
+      return l10n.t(
+        'The file is larger than {0} MiB or longer than {1} lines, or the files read would hold more than {2} MiB.',
+        String(ANALYSIS_LIMITS.fileBytes / (1024 * 1024)),
+        String(ANALYSIS_LIMITS.fileLines),
+        String(ANALYSIS_LIMITS.totalBytes / (1024 * 1024))
+      );
+    case 'index':
+      return l10n.t('What the bundled library declares could not be read.');
+    case 'unreadable': {
+      const failure = failures.find(({ path }) => shortfall.path === path || shortfall.path.startsWith(`${path}!`));
+      return failure === undefined
+        ? l10n.t('A file of a bundled library cannot include a local file, and !includesub cannot read a bundled library.')
+        : describeIncludeFailure(failure.reason, includeLabels(l10n), INCLUDE_EXTENSIONS, INCLUDE_LIMITS);
+    }
+    case 'not-bundled':
+      return l10n.t('No bundled library has this file.');
+    case 'no-part':
+      return l10n.t('The file has no diagram or section of that number or name.');
+    case 'once':
+      return l10n.t('!include_once has read this file before.');
+    case 'in-body':
+      return l10n.t('It is read when the procedure or function it is written in runs.');
+    case 'depth':
+      return includeLabels(l10n).tooDeep(INCLUDE_LIMITS.depth);
+  }
 }
 
 /**
@@ -2862,8 +2940,8 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
 
   module.raw.register({
     id: 'plantuml.completion',
-    inject: { l10n: Localization },
-    bind: ({ registrations }, { l10n }): undefined => {
+    inject: { l10n: Localization, settings: Settings.token },
+    bind: ({ registrations, logger }, { l10n, settings }): undefined => {
       // Suggestions in the diagrams of Markdown documents and PlantUML files
       // (src/language/completion.ts). Markdown turns quick suggestions off,
       // so there they open on the characters a suggestion starts after, and
@@ -2963,41 +3041,253 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         return { source: lines.join('\n'), line: position.line - block.openLine - 1, offset, bare: true };
       };
 
+      // What the diagram and the files it includes define where the cursor is
+      // (src/language/macros.ts), which the completion and the parameter hints
+      // offer: read for each request from the documents as they are then, and
+      // never by running anything. What the bundled libraries declare is read
+      // once, when an include first names one.
+      const libraries = new LibraryDeclarations(join(__dirname, 'declarations'));
+      const kinds: Readonly<Record<MacroKind, vscode.CompletionItemKind>> = {
+        procedure: vscode.CompletionItemKind.Method,
+        function: vscode.CompletionItemKind.Function,
+        define: vscode.CompletionItemKind.Function,
+        definelong: vscode.CompletionItemKind.Function,
+        constant: vscode.CompletionItemKind.Constant,
+        variable: vscode.CompletionItemKind.Variable,
+        parameter: vscode.CompletionItemKind.Variable,
+      };
+
+      // What was read, in the Language Status of the document in the editor,
+      // and why something was not, in the output: once for each change, never
+      // in a notification.
+      const status = vscode.languages.createLanguageStatusItem('plantumlLocal.definitions', [
+        { language: 'markdown' },
+        { language: 'plantuml' },
+      ]);
+      registrations.own(status);
+      status.name = l10n.t('PlantUML Definitions');
+      /** What was last read for each document: nothing, as it is past the limits, or what was not read, as logged. */
+      const reads = new Map<string, { tooLarge: true } | { partial: boolean; logged: string; cut: boolean }>();
+      const showStatus = (document: vscode.TextDocument | undefined): void => {
+        const read = document === undefined ? undefined : reads.get(document.uri.toString());
+        if (read !== undefined && 'tooLarge' in read) {
+          status.text = l10n.t('Definitions: not read');
+          status.severity = vscode.LanguageStatusSeverity.Warning;
+          status.detail = l10n.t(
+            'The document is larger than {0} MiB or longer than {1} lines, so completion and parameter hints do not read its definitions.',
+            String(ANALYSIS_LIMITS.fileBytes / (1024 * 1024)),
+            String(ANALYSIS_LIMITS.fileLines)
+          );
+        } else if (read?.partial === true) {
+          status.text = l10n.t('Definitions: diagram and includes (partial)');
+          status.severity = vscode.LanguageStatusSeverity.Warning;
+          status.detail = l10n.t('Some definitions are not offered. See the Output panel for the reasons.');
+        } else {
+          status.text = l10n.t('Definitions: diagram and includes');
+          status.severity = vscode.LanguageStatusSeverity.Information;
+          status.detail = l10n.t('Completion and parameter hints offer what this diagram and the files it includes define.');
+        }
+      };
+      showStatus(vscode.window.activeTextEditor?.document);
+      registrations.own(
+        vscode.window.onDidChangeActiveTextEditor((editor) => {
+          showStatus(editor?.document);
+        })
+      );
+      registrations.own(
+        vscode.workspace.onDidCloseTextDocument((document) => {
+          reads.delete(document.uri.toString());
+        })
+      );
+
+      /** Keeps what was read for `document` and shows it; logs why something was not when that changes. */
+      const report = (
+        document: vscode.TextDocument,
+        read: { tooLarge: true } | { reasons: readonly string[]; cut: boolean }
+      ): void => {
+        const key = document.uri.toString();
+        const before = reads.get(key);
+        if ('tooLarge' in read) {
+          reads.set(key, read);
+        } else {
+          const logged = read.reasons.join('\n');
+          reads.set(key, { partial: read.reasons.length > 0 || read.cut, logged, cut: read.cut });
+          const known = before !== undefined && !('tooLarge' in before) && before.logged === logged;
+          if ((logged !== '' && !known) || (read.cut && (!known || !before.cut))) {
+            const cut = read.cut
+              ? [l10n.t('Only the first {0} definitions are offered.', String(ANALYSIS_LIMITS.results))]
+              : [];
+            logger.info(
+              [
+                l10n.t('Completion and parameter hints in {0} did not read:', vscode.workspace.asRelativePath(document.uri)),
+                ...read.reasons,
+                ...cut,
+              ].join('\n')
+            );
+          }
+        }
+        if (vscode.window.activeTextEditor?.document.uri.toString() === key) {
+          showStatus(document);
+        }
+      };
+
       /**
-       * The aliases, words and snippets of the diagram at `position`. They
-       * take the place of VS Code's word suggestions, which come from every
-       * open document, and follow its setting for them: no words with `off`.
-       * By default VS Code lists no words in a PlantUML file while inline
-       * suggestions are on there, which an extension cannot tell; so a list
-       * of words alone is left to VS Code in one. In a Markdown document it
-       * lists words by default, and the list opens only when asked for. In a
-       * Markdown block, VS Code reads the setting for PlantUML too.
+       * What is defined at line `cursor` of `document`, in the diagram
+       * `diagram`, read as the documents are now: undefined once the request
+       * is cancelled or the document changes, null for a document larger than
+       * what the background reads.
        */
-      const namesAt = (
+      const definitionsAt = async (
+        document: vscode.TextDocument,
+        diagram: DiagramLines,
+        cursor: number,
+        token: vscode.CancellationToken | undefined
+      ): Promise<{ macros: Macros; labels: MacroLabels; reasons: string[] } | null | undefined> => {
+        const version = document.version;
+        const stale = (): boolean => token?.isCancellationRequested === true || document.version !== version;
+        if (pastAnalysisLimits(document.getText())) {
+          report(document, { tooLarge: true });
+          return null;
+        }
+        const { session, root } = await openSession(document.uri, {
+          includePaths: (uri) => includePathsOf(settings, uri),
+        });
+        const macros = await macrosAt(diagram, cursor, macroSources(session, libraries, stale));
+        if (stale() || macros.status === 'cancelled') {
+          return undefined;
+        }
+        const labels = macroLabels(l10n, root);
+        const writtenIn = (at: Origin): string =>
+          labels.line(
+            at.source === 'document'
+              ? vscode.workspace.asRelativePath(document.uri)
+              : at.source === 'file'
+                ? labels.file(at.id)
+                : libraryFile(at.library, at.key),
+            at.line + 1
+          );
+        const reasons = macros.shortfalls.map((shortfall) =>
+          l10n.t(
+            '{0}: {1} was not read. {2}',
+            writtenIn(shortfall.at),
+            shortfall.path,
+            shortfallReason(shortfall, session.failures, l10n)
+          )
+        );
+        return { macros, labels, reasons };
+      };
+
+      /** How each definition is declared, where, and the comment above it. */
+      const documentationOf = (definitions: readonly MacroDefinition[]): vscode.MarkdownString => {
+        const markdown = new vscode.MarkdownString();
+        for (const definition of definitions) {
+          markdown.appendCodeblock(definition.declaration, 'plantuml');
+          markdown.appendText(definition.where);
+          if (definition.comment !== undefined) {
+            markdown.appendText(`\n\n${definition.comment}`);
+          }
+          markdown.appendMarkdown('\n\n');
+        }
+        return markdown;
+      };
+
+      /** The definitions the completion offers at `place`, replacing the name there; undefined once the request is stale. */
+      const definitionItems = async (
         document: vscode.TextDocument,
         position: vscode.Position,
-        text: string
-      ): vscode.CompletionItem[] | undefined => {
+        offset: number,
+        place: MacroPlace,
+        token: vscode.CancellationToken | undefined
+      ): Promise<vscode.CompletionItem[] | undefined> => {
+        const read = await definitionsAt(document, place.diagram, place.cursor, token);
+        if (read === null || read === undefined) {
+          return read === null ? [] : undefined;
+        }
+        const { items, cut } = macroSuggestions(read.macros, place, read.labels);
+        report(document, { reasons: read.reasons, cut });
+        const start = new vscode.Position(position.line, offset + place.start);
+        const range = {
+          inserting: new vscode.Range(start, position),
+          replacing: new vscode.Range(start, new vscode.Position(position.line, offset + place.end)),
+        };
+        return items.map((suggestion) => {
+          const item = new vscode.CompletionItem(
+            {
+              label: suggestion.name,
+              ...(suggestion.parameters === undefined ? {} : { detail: suggestion.parameters }),
+              description: suggestion.description,
+            },
+            kinds[suggestion.kind]
+          );
+          item.range = range;
+          item.sortText = suggestion.sortText;
+          item.insertText = new vscode.SnippetString(suggestion.snippet);
+          item.documentation = documentationOf(suggestion.definitions);
+          if (suggestion.call && !place.callOpen && suggestion.parameters !== '()') {
+            // The parameter hints, in the brackets just inserted.
+            item.command = { title: '', command: 'editor.action.triggerParameterHints' };
+          }
+          return item;
+        });
+      };
+
+      /**
+       * The aliases, words and snippets of the diagram at `position`, and what
+       * the diagram and its includes define there. They take the place of VS
+       * Code's word suggestions, which come from every open document, and
+       * follow its setting for them: no words with `off`. By default VS Code
+       * lists no words in a PlantUML file while inline suggestions are on
+       * there, which an extension cannot tell; so a list of words alone is
+       * left to VS Code in one. In a Markdown document it lists words by
+       * default, and the list opens only when asked for. In a Markdown block,
+       * VS Code reads the setting for PlantUML too. A name typed after `$`,
+       * and `$` typed, ask for the names that start with `$` only.
+       */
+      const namesAt = async (
+        document: vscode.TextDocument,
+        position: vscode.Position,
+        text: string,
+        token: vscode.CancellationToken | undefined
+      ): Promise<vscode.CompletionItem[] | undefined> => {
         const where = sourceAt(document, position, text);
         if (where === null) {
           return undefined;
+        }
+        const column = position.character - where.offset;
+        const place = macroPlace(where.source, where.line, column, {
+          bare: where.bare,
+          first: position.line - where.line,
+        });
+        const dollar = place !== null && text.charAt(where.offset + place.start) === '$';
+        const defined =
+          place === null
+            ? []
+            : await definitionItems(
+                document,
+                position,
+                where.offset,
+                { ...place, dollarOnly: place.dollarOnly || dollar },
+                token
+              );
+        if (defined === undefined || dollar) {
+          return defined === undefined || defined.length === 0 ? undefined : defined;
         }
         // The default of every VS Code the extension runs on.
         const setting =
           vscode.workspace
             .getConfiguration('editor', { uri: document.uri, languageId: 'plantuml' })
             .get<string>('wordBasedSuggestions') ?? 'offWithInlineSuggestions';
-        const found = suggestNames(where.source, where.line, position.character - where.offset, {
+        const found = suggestNames(where.source, where.line, column, {
           bare: where.bare,
           words:
             setting === 'off'
               ? 'never'
-              : setting === 'offWithInlineSuggestions' && document.languageId === 'plantuml'
+              : setting === 'offWithInlineSuggestions' && document.languageId === 'plantuml' && defined.length === 0
                 ? 'beside'
                 : 'always',
         });
         if (found === null) {
-          return undefined;
+          return defined.length === 0 ? undefined : defined;
         }
 
         const start = new vscode.Position(position.line, where.offset + found.start);
@@ -3017,7 +3307,9 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
           made.sortText = sortText;
           return made;
         };
-        // The aliases first, then the snippets, then the words.
+        // A word that names a definition is offered once, as the definition.
+        const definedNames = new Set(defined.map(({ label }) => (typeof label === 'string' ? label : label.label)));
+        // The aliases first, then the snippets, the definitions and the words.
         return [
           ...found.aliases.map(({ name, display }, index) => {
             const alias = item(
@@ -3038,29 +3330,34 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
             snippet.keepWhitespace = true;
             return snippet;
           }),
-          ...found.words.map((word) => {
-            const plain = item(word, vscode.CompletionItemKind.Text, `2${word}`);
-            plain.detail = l10n.t('Word in this diagram');
-            return plain;
-          }),
+          ...defined,
+          ...found.words
+            .filter((word) => !definedNames.has(word))
+            .map((word) => {
+              const plain = item(word, vscode.CompletionItemKind.Text, `3${word}`);
+              plain.detail = l10n.t('Word in this diagram');
+              return plain;
+            }),
         ];
       };
 
-      const provide = (
+      const provide = async (
         document: vscode.TextDocument,
         position: vscode.Position,
-        _token?: vscode.CancellationToken,
+        token?: vscode.CancellationToken,
         context?: vscode.CompletionContext
-      ): vscode.CompletionItem[] | undefined => {
+      ): Promise<vscode.CompletionItem[] | undefined> => {
         const text = document.lineAt(position.line).text;
         const { found, offset } = mightSuggest(text.slice(0, position.character))
           ? find(document, position, text)
           : { found: null, offset: 0 };
         if (found === null) {
-          // A trigger character asks for what follows it only.
-          return context?.triggerKind === vscode.CompletionTriggerKind.TriggerCharacter
-            ? undefined
-            : namesAt(document, position, text);
+          // A trigger character asks for what follows it only: `$` for a name that starts with it.
+          const trigger =
+            context?.triggerKind === vscode.CompletionTriggerKind.TriggerCharacter ? context.triggerCharacter : undefined;
+          return trigger === undefined || trigger === '$'
+            ? namesAt(document, position, text, token)
+            : undefined;
         }
 
         const start = new vscode.Position(position.line, offset + found.start);
@@ -3094,6 +3391,56 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         });
       };
 
+      /**
+       * The parameter hints for the call at `position`: each definition of the
+       * name it calls, as declared, and the parameter the cursor is in. The
+       * signature the user picked stays while it takes the arguments.
+       */
+      const hints = async (
+        document: vscode.TextDocument,
+        position: vscode.Position,
+        token: vscode.CancellationToken,
+        context: vscode.SignatureHelpContext
+      ): Promise<vscode.SignatureHelp | undefined> => {
+        const text = document.lineAt(position.line).text;
+        const where = sourceAt(document, position, text);
+        const found =
+          where === null
+            ? null
+            : diagramLinesAt(where.source, where.line, { bare: where.bare, first: position.line - where.line });
+        if (where === null || found === null) {
+          return undefined;
+        }
+        const read = await definitionsAt(document, found.diagram, found.cursor, token);
+        if (read === null || read === undefined) {
+          return undefined;
+        }
+        report(document, { reasons: read.reasons, cut: false });
+        const line = text.slice(where.offset);
+        const call = callAt(line, position.character - where.offset, (name) => readingOf(read.macros, name));
+        const chosen = context.isRetrigger ? context.activeSignatureHelp?.activeSignature : undefined;
+        const shown = call === null ? null : signaturesFor(read.macros, call, line, read.labels, chosen);
+        if (shown === null) {
+          return undefined;
+        }
+        const help = new vscode.SignatureHelp();
+        help.signatures = shown.signatures.map((signature) => {
+          const documentation = new vscode.MarkdownString().appendText(signature.description);
+          if (signature.comment !== undefined) {
+            documentation.appendText(`\n\n${signature.comment}`);
+          }
+          const information = new vscode.SignatureInformation(signature.label, documentation);
+          information.parameters = signature.parameters.map(
+            ([from, to]) => new vscode.ParameterInformation([from, to])
+          );
+          information.activeParameter = signature.activeParameter;
+          return information;
+        });
+        help.activeSignature = shown.active;
+        help.activeParameter = shown.signatures[shown.active]?.activeParameter ?? -1;
+        return help;
+      };
+
       registrations.own(
         vscode.languages.registerCompletionItemProvider(
           [{ language: 'markdown' }, { language: 'plantuml' }],
@@ -3101,7 +3448,15 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
           '@',
           '!',
           '&',
-          ' '
+          ' ',
+          '$'
+        )
+      );
+      registrations.own(
+        vscode.languages.registerSignatureHelpProvider(
+          [{ language: 'markdown' }, { language: 'plantuml' }],
+          { provideSignatureHelp: hints },
+          { triggerCharacters: ['(', ','], retriggerCharacters: [')'] }
         )
       );
       return undefined;

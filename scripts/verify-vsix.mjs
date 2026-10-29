@@ -12,8 +12,9 @@
  *    EPL licences of what we bundle require it.
  * 4. The bundles and the engine are no more than 5% over their recorded
  *    sizes (RECORDED_SIZES).
- * 5. The standard libraries are the ones generated from the pinned commit
- *    that assets/stdlib-sources.json records, which the notices name.
+ * 5. The standard libraries, and what their files declare, are the ones
+ *    generated from the pinned commit that assets/stdlib-sources.json
+ *    records, which the notices name.
  * 6. The packaged worker actually renders — a Japanese sequence diagram
  *    is rendered from the extracted VSIX, which proves the engine files
  *    and the worker bundle fit together without Java or network access;
@@ -56,6 +57,8 @@ const REQUIRED = [
   'extension/dist/syntaxes/plantuml-json.tmLanguage.json',
   'extension/dist/stdlib/azure.json',
   'extension/dist/stdlib/c4.json',
+  'extension/dist/declarations/azure.json',
+  'extension/dist/declarations/c4.json',
   'extension/media/plantuml.css',
   'extension/media/viewer/viewer.js',
   'extension/media/viewer/zoom.js',
@@ -76,7 +79,7 @@ const PACKAGING = ['extension.vsixmanifest', '[Content_Types].xml'];
  * the same pull request.
  */
 const RECORDED_SIZES = {
-  'extension/dist/extension.js': 363_509,
+  'extension/dist/extension.js': 408_648,
   'extension/dist/worker.js': 889_547,
   'extension/dist/engine/plantuml.js': 3_359_666,
   'extension/dist/engine/viz-global.cjs': 1_445_436,
@@ -187,28 +190,35 @@ function checkThirdPartyNotices() {
 
 /**
  * Each standard library in the VSIX is the asset generated from the pinned
- * commit: it has the hash assets/stdlib-sources.json records for it, and
- * every library recorded ships. The record stays in the repository; the
- * packaged notices name the commit.
+ * commit, and so is what its files declare: each has the hash
+ * assets/stdlib-sources.json records for it, and every library recorded
+ * ships. The record stays in the repository; the packaged notices name the
+ * commit.
  */
 function checkStdlibProvenance() {
   const record = JSON.parse(readFileSync(join(projectRoot, 'assets/stdlib-sources.json'), 'utf8'));
-  const shippedDir = join(extractDir, 'extension/dist/stdlib');
-  const recorded = Object.keys(record.libraries).map((name) => `${name}.json`);
-  const shipped = existsSync(shippedDir) ? readdirSync(shippedDir) : [];
-  for (const file of shipped.filter((name) => !recorded.includes(name))) {
-    fail(`dist/stdlib/${file} is not recorded in assets/stdlib-sources.json`);
-  }
-  for (const [name, library] of Object.entries(record.libraries)) {
-    const path = join(shippedDir, `${name}.json`);
-    if (!existsSync(path)) {
-      continue; // reported by checkFiles
+  for (const [folder, field] of [
+    ['stdlib', 'asset'],
+    ['declarations', 'declarations'],
+  ]) {
+    const shippedDir = join(extractDir, 'extension/dist', folder);
+    const recorded = Object.keys(record.libraries).map((name) => `${name}.json`);
+    const shipped = existsSync(shippedDir) ? readdirSync(shippedDir) : [];
+    for (const file of shipped.filter((name) => !recorded.includes(name))) {
+      fail(`dist/${folder}/${file} is not recorded in assets/stdlib-sources.json`);
     }
-    const hash = createHash('sha256').update(readFileSync(path)).digest('hex');
-    if (hash === library.asset.sha256) {
-      ok(`stdlib: ${name}.json is the one generated from ${record.commit}`);
-    } else {
-      fail(`dist/stdlib/${name}.json has sha256 ${hash}, not the ${library.asset.sha256} generated from ${record.commit}`);
+    for (const [name, library] of Object.entries(record.libraries)) {
+      const path = join(shippedDir, `${name}.json`);
+      if (!existsSync(path)) {
+        continue; // reported by checkFiles
+      }
+      const hash = createHash('sha256').update(readFileSync(path)).digest('hex');
+      const expected = library[field].sha256;
+      if (hash === expected) {
+        ok(`${folder}: ${name}.json is the one generated from ${record.commit}`);
+      } else {
+        fail(`dist/${folder}/${name}.json has sha256 ${hash}, not the ${expected} generated from ${record.commit}`);
+      }
     }
   }
   const notices = readFileSync(join(extractDir, 'extension/THIRD_PARTY_NOTICES.md'), 'utf8');

@@ -15,6 +15,8 @@ import {
   type DiagnosticStub,
   type DocumentSymbolStub,
   type FoldingRangeStub,
+  type MarkdownStringStub,
+  type SignatureHelpStub,
   type TextEditorStub,
   type VscodeStub,
   type WebviewPanelStub,
@@ -1949,7 +1951,7 @@ describe('completion (dist)', () => {
     document: TextEditorStub['document'],
     line: number,
     character: number
-  ): CompletionItemStub[] | undefined =>
+  ): Promise<CompletionItemStub[] | undefined> =>
     vscodeStub._test.completionProviders[0]?.provider.provideCompletionItems(
       document,
       new vscodeStub.Position(line, character)
@@ -1961,7 +1963,7 @@ describe('completion (dist)', () => {
       { language: 'markdown' },
       { language: 'plantuml' },
     ]);
-    expect(vscodeStub._test.completionProviders[0]?.triggers).toEqual(['@', '!', '&', ' ']);
+    expect(vscodeStub._test.completionProviders[0]?.triggers).toEqual(['@', '!', '&', ' ', '$']);
   });
 
   it('completes the path of a local include, and goes to its file, in files on disk', async () => {
@@ -1982,21 +1984,21 @@ describe('completion (dist)', () => {
     ).resolves.toBeUndefined();
   });
 
-  it('suggests in the diagram blocks of a Markdown document only', () => {
+  it('suggests in the diagram blocks of a Markdown document only', async () => {
     const document = makeEditor(
       'file:///c/complete/doc.md',
       ['# Title', '@', '```js', '@', '```', '```plantuml', '@', '```'].join('\n'),
       0
     ).document;
 
-    expect(complete(document, 1, 1)).toBeUndefined();
-    expect(complete(document, 3, 1)).toBeUndefined();
-    const items = complete(document, 6, 1);
+    expect(await complete(document, 1, 1)).toBeUndefined();
+    expect(await complete(document, 3, 1)).toBeUndefined();
+    const items = await complete(document, 6, 1);
     expect(items?.[0]).toMatchObject({ label: '@startuml', insertText: '@startuml' });
     expect(items?.[0]?.range?.replacing.start).toEqual({ line: 6, character: 0 });
   });
 
-  it('offers the themes and icons the engine ships, read from its files', () => {
+  it('offers the themes and icons the engine ships, read from its files', async () => {
     const document = makeEditor(
       'file:///c/complete/flows.puml',
       ['@startuml', '!theme ', 'A -> B : <&', '@enduml'].join('\n'),
@@ -2004,25 +2006,25 @@ describe('completion (dist)', () => {
       { languageId: 'plantuml' }
     ).document;
 
-    const themes = complete(document, 1, 7)?.map((item) => item.label);
+    const themes = (await complete(document, 1, 7))?.map((item) => item.label);
     expect(themes).toContain('cerulean');
     // Left out of the package for the licence its header declares.
     expect(themes).not.toContain('mars');
     expect(themes).toHaveLength(40);
 
-    const icons = complete(document, 2, 11);
+    const icons = await complete(document, 2, 11);
     expect(icons).toHaveLength(223);
     expect(icons?.find((item) => item.label === 'heart')?.insertText).toBe('heart>');
   });
 
-  it('leaves the quote markers of a block in a quote outside what it replaces', () => {
+  it('leaves the quote markers of a block in a quote outside what it replaces', async () => {
     const document = makeEditor(
       'file:///c/complete/quote.md',
       ['> ```plantuml', '> @startuml', '> @en', '> ```'].join('\n'),
       0
     ).document;
 
-    const items = complete(document, 2, 5);
+    const items = await complete(document, 2, 5);
     expect(items?.map((item) => item.label)).toEqual(['@enduml']);
     expect(items?.[0]?.range?.replacing).toEqual({
       start: { line: 2, character: 2 },
@@ -2032,7 +2034,7 @@ describe('completion (dist)', () => {
 
   describe('aliases, words and snippets', () => {
     /** As VS Code asks while a word is typed, or on Ctrl+Space. */
-    const invoke = (document: TextEditorStub['document'], line: number, character: number): CompletionItemStub[] | undefined =>
+    const invoke = (document: TextEditorStub['document'], line: number, character: number): Promise<CompletionItemStub[] | undefined> =>
       vscodeStub._test.completionProviders[0]?.provider.provideCompletionItems(
         document,
         new vscodeStub.Position(line, character),
@@ -2055,10 +2057,10 @@ describe('completion (dist)', () => {
       '@enduml',
     ].join('\n');
 
-    it('offers the aliases with what they stand for, then the snippets of the diagram type, then its words', () => {
+    it('offers the aliases with what they stand for, then the snippets of the diagram type, then its words', async () => {
       const document = makeEditor('file:///c/names/flows.puml', flows, 0, { languageId: 'plantuml' }).document;
 
-      const items = invoke(document, 4, 0) ?? [];
+      const items = (await invoke(document, 4, 0)) ?? [];
       expect(items.map(labelOf)).toEqual([
         'A',
         'alt',
@@ -2094,11 +2096,11 @@ describe('completion (dist)', () => {
       });
     });
 
-    it('replaces the whole word at the cursor, and leaves it out of the words', () => {
+    it('replaces the whole word at the cursor, and leaves it out of the words', async () => {
       const document = makeEditor('file:///c/names/typed.md', '```plantuml\n@startuml\nA -> Server\nSerXY\n@enduml\n```', 0)
         .document;
 
-      const items = invoke(document, 3, 3) ?? [];
+      const items = (await invoke(document, 3, 3)) ?? [];
       expect(items.map(labelOf)).toEqual(['A', 'Server']);
       expect(items[0]?.range).toEqual({
         inserting: { start: { line: 3, character: 0 }, end: { line: 3, character: 3 } },
@@ -2106,46 +2108,46 @@ describe('completion (dist)', () => {
       });
     });
 
-    it('leaves a list of words alone to VS Code in a PlantUML file, unless word suggestions are on there', () => {
+    it('leaves a list of words alone to VS Code in a PlantUML file, unless word suggestions are on there', async () => {
       const source = '@startuml\nA -> Server\nSe\n@enduml';
       const file = makeEditor('file:///c/names/alone.puml', source, 0, { languageId: 'plantuml' }).document;
       const markdown = makeEditor('file:///c/names/alone.md', ['```plantuml', source, '```'].join('\n'), 0).document;
 
       // By default VS Code lists no words while inline suggestions are on, which cannot be told.
-      expect(invoke(file, 2, 2)).toBeUndefined();
+      expect(await invoke(file, 2, 2)).toBeUndefined();
       // In Markdown it lists them, and the list opens only when asked for.
-      expect(invoke(markdown, 3, 2)?.map(labelOf)).toEqual(['A', 'Server']);
+      expect((await invoke(markdown, 3, 2))?.map(labelOf)).toEqual(['A', 'Server']);
       try {
         for (const value of ['currentDocument', 'matchingDocuments', 'allDocuments']) {
           vscodeStub._test.setLanguageConfiguration('plantuml', 'editor.wordBasedSuggestions', value);
-          expect(invoke(file, 2, 2)?.map(labelOf), value).toEqual(['A', 'Server']);
+          expect((await invoke(file, 2, 2))?.map(labelOf), value).toEqual(['A', 'Server']);
         }
       } finally {
         vscodeStub._test.setLanguageConfiguration('plantuml', 'editor.wordBasedSuggestions', undefined);
       }
     });
 
-    it('offers what follows a trigger character only, and nothing else on one', () => {
+    it('offers what follows a trigger character only, and nothing else on one', async () => {
       const document = makeEditor('file:///c/names/space.puml', flows, 0, { languageId: 'plantuml' }).document;
 
-      const typed = vscodeStub._test.completionProviders[0]?.provider.provideCompletionItems(
+      const typed = await vscodeStub._test.completionProviders[0]?.provider.provideCompletionItems(
         document,
         new vscodeStub.Position(3, 5),
         undefined,
         { triggerKind: vscodeStub.CompletionTriggerKind.TriggerCharacter, triggerCharacter: ' ' }
       );
       expect(typed).toBeUndefined();
-      expect(invoke(document, 3, 5)?.map(labelOf)).toContain('Server');
+      expect((await invoke(document, 3, 5))?.map(labelOf)).toContain('Server');
     });
 
-    it('takes the words of the Markdown block only, and carries its quote markers into a snippet', () => {
+    it('takes the words of the Markdown block only, and carries its quote markers into a snippet', async () => {
       const document = makeEditor(
         'file:///c/names/quote.md',
         ['# Prose words', '> ```plantuml', '> @startuml', '> participant A', '>   al', '> ```', 'tail'].join('\n'),
         0
       ).document;
 
-      const items = invoke(document, 4, 6) ?? [];
+      const items = (await invoke(document, 4, 6)) ?? [];
       expect(items.map(labelOf)).toEqual(['alt', 'opt', 'loop', 'par', 'ref', 'note', 'participant', 'A']);
       expect(inserted(items[0])).toBe('alt ${1:condition}\n>     $2\n>   else ${3:otherwise}\n>     $4\n>   end');
       expect(items[0]?.range?.replacing).toEqual({
@@ -2153,11 +2155,11 @@ describe('completion (dist)', () => {
         end: { line: 4, character: 6 },
       });
       // Outside the block: VS Code's own suggestions.
-      expect(invoke(document, 0, 7)).toBeUndefined();
-      expect(invoke(document, 6, 4)).toBeUndefined();
+      expect(await invoke(document, 0, 7)).toBeUndefined();
+      expect(await invoke(document, 6, 4)).toBeUndefined();
     });
 
-    it('offers nothing in a comment, in quoted text, or where nothing is found', () => {
+    it('offers nothing in a comment, in quoted text, or where nothing is found', async () => {
       const document = makeEditor(
         'file:///c/names/quiet.puml',
         ['@startuml', "' a comment", 'participant "Web" as W', '@enduml', '@startuml', '', '@enduml'].join('\n'),
@@ -2165,25 +2167,25 @@ describe('completion (dist)', () => {
         { languageId: 'plantuml' }
       ).document;
 
-      expect(invoke(document, 1, 5)).toBeUndefined();
-      expect(invoke(document, 2, 15)).toBeUndefined();
-      expect(invoke(document, 5, 0)).toBeUndefined();
+      expect(await invoke(document, 1, 5)).toBeUndefined();
+      expect(await invoke(document, 2, 15)).toBeUndefined();
+      expect(await invoke(document, 5, 0)).toBeUndefined();
     });
 
-    it('leaves out the words where word suggestions are turned off for PlantUML, in a Markdown block too', () => {
+    it('leaves out the words where word suggestions are turned off for PlantUML, in a Markdown block too', async () => {
       const file = makeEditor('file:///c/names/off.puml', flows, 0, { languageId: 'plantuml' }).document;
       const markdown = makeEditor('file:///c/names/off.md', ['```plantuml', flows, '```'].join('\n'), 0).document;
       try {
         vscodeStub._test.setLanguageConfiguration('markdown', 'editor.wordBasedSuggestions', 'off');
         // In a block, VS Code reads the settings of the language at the cursor.
-        expect(invoke(markdown, 5, 0)?.map(labelOf)).toContain('hello');
+        expect((await invoke(markdown, 5, 0))?.map(labelOf)).toContain('hello');
 
         vscodeStub._test.setLanguageConfiguration('plantuml', 'editor.wordBasedSuggestions', 'off');
         for (const [document, line] of [
           [file, 4],
           [markdown, 5],
         ] as const) {
-          expect(invoke(document, line, 0)?.map(labelOf)).toEqual(['A', 'alt', 'opt', 'loop', 'par', 'ref', 'note']);
+          expect((await invoke(document, line, 0))?.map(labelOf)).toEqual(['A', 'alt', 'opt', 'loop', 'par', 'ref', 'note']);
         }
       } finally {
         vscodeStub._test.setLanguageConfiguration('markdown', 'editor.wordBasedSuggestions', undefined);
@@ -2193,12 +2195,315 @@ describe('completion (dist)', () => {
   });
 });
 
+describe('definitions in completion and parameter hints (dist)', () => {
+  const provide = (
+    document: TextEditorStub['document'],
+    line: number,
+    character: number,
+    options: { trigger?: string; cancelled?: boolean } = {}
+  ): Promise<CompletionItemStub[] | undefined> => {
+    const registration = vscodeStub._test.completionProviders[0];
+    if (registration === undefined) {
+      throw new Error('no completion provider registered');
+    }
+    return registration.provider.provideCompletionItems(
+      document,
+      new vscodeStub.Position(line, character),
+      { isCancellationRequested: options.cancelled === true },
+      options.trigger === undefined
+        ? { triggerKind: vscodeStub.CompletionTriggerKind.Invoke }
+        : { triggerKind: vscodeStub.CompletionTriggerKind.TriggerCharacter, triggerCharacter: options.trigger }
+    );
+  };
+  const hints = (
+    document: TextEditorStub['document'],
+    line: number,
+    character: number,
+    options: { chosen?: SignatureHelpStub; cancelled?: boolean } = {}
+  ): Promise<SignatureHelpStub | undefined> => {
+    const registration = vscodeStub._test.signatureProviders[0];
+    if (registration === undefined) {
+      throw new Error('no signature help provider registered');
+    }
+    return registration.provider.provideSignatureHelp(
+      document,
+      new vscodeStub.Position(line, character),
+      { isCancellationRequested: options.cancelled === true },
+      options.chosen === undefined
+        ? {
+            triggerKind: vscodeStub.SignatureHelpTriggerKind.TriggerCharacter,
+            triggerCharacter: '(',
+            isRetrigger: false,
+            activeSignatureHelp: undefined,
+          }
+        : {
+            triggerKind: vscodeStub.SignatureHelpTriggerKind.ContentChange,
+            triggerCharacter: undefined,
+            isRetrigger: true,
+            activeSignatureHelp: options.chosen,
+          }
+    );
+  };
+  const labelOf = (item: CompletionItemStub): string => (typeof item.label === 'string' ? item.label : item.label.label);
+  const partsOf = (documentation: unknown): MarkdownStringStub['parts'] => (documentation as MarkdownStringStub).parts;
+  const status = (): (typeof vscodeStub._test.languageStatusItems)[number] | undefined =>
+    vscodeStub._test.languageStatusItems.find((item) => item.id === 'plantumlLocal.definitions');
+  const boxes = (call: string): string =>
+    [
+      '@startuml',
+      "' Draws a box",
+      '!procedure Box($a, $b = "x")',
+      '!endprocedure',
+      '!$size = 3',
+      '!function $twice($n) !return $n * 2',
+      call,
+      '@enduml',
+    ].join('\n');
+
+  it('offers what the diagram defines before the cursor, with where and how it is defined', async () => {
+    const document = makeEditor('file:///c/defs/boxes.puml', boxes('Bo'), 0, { languageId: 'plantuml' }).document;
+
+    const items = (await provide(document, 6, 2)) ?? [];
+    const box = items.find((item) => labelOf(item) === 'Box');
+    expect(box).toMatchObject({
+      label: { label: 'Box', detail: '($a, $b = "x")', description: 'this diagram · procedure' },
+      kind: vscodeStub.CompletionItemKind.Method,
+      insertText: { value: 'Box(${1:\\$a})' },
+      sortText: '21Box 002',
+      command: { title: '', command: 'editor.action.triggerParameterHints' },
+      range: {
+        inserting: { start: { line: 6, character: 0 }, end: { line: 6, character: 2 } },
+        replacing: { start: { line: 6, character: 0 }, end: { line: 6, character: 2 } },
+      },
+    });
+    expect(partsOf(box?.documentation)).toEqual([
+      { kind: 'code', value: '!procedure Box($a, $b = "x")', language: 'plantuml' },
+      { kind: 'text', value: 'this diagram, line 3' },
+      { kind: 'text', value: '\n\nDraws a box' },
+      { kind: 'markdown', value: '\n\n' },
+    ]);
+    expect(items.find((item) => labelOf(item) === '$twice')).toMatchObject({
+      label: { label: '$twice', detail: '($n)', description: 'this diagram · function' },
+      kind: vscodeStub.CompletionItemKind.Function,
+      insertText: { value: '\\$twice(${1:\\$n})' },
+    });
+    const size = items.find((item) => labelOf(item) === '$size');
+    expect(size).toMatchObject({
+      label: { label: '$size', description: 'this diagram · variable' },
+      kind: vscodeStub.CompletionItemKind.Variable,
+      insertText: { value: '\\$size' },
+    });
+    expect(size).not.toHaveProperty('command');
+    // The definitions come before the words, which VS Code would not list alone in a PlantUML file.
+    const sorted = [...items].sort((a, b) => String(a.sortText).localeCompare(String(b.sortText)));
+    expect(sorted.slice(0, 3).map(labelOf)).toEqual(['$size', '$twice', 'Box']);
+    expect(sorted.slice(3).every((item) => item.kind === vscodeStub.CompletionItemKind.Text)).toBe(true);
+    // A word that is a definition's name is offered once, as the definition.
+    expect(sorted.slice(3).map(labelOf)).toEqual(expect.arrayContaining(['procedure', 'size']));
+    expect(items.filter((item) => labelOf(item) === 'Box')).toHaveLength(1);
+  });
+
+  it('offers what a file of a bundled library declares, and the files it includes, from the package', async () => {
+    const document = makeEditor(
+      'file:///c/defs/context.puml',
+      ['@startuml', '!include <C4/C4_Context>', 'Per', '@enduml'].join('\n'),
+      0,
+      { languageId: 'plantuml' }
+    ).document;
+
+    const items = (await provide(document, 2, 3)) ?? [];
+    const person = items.find((item) => labelOf(item) === 'Person');
+    expect(person).toMatchObject({
+      label: {
+        label: 'Person',
+        detail: '($alias, $label, $descr = "", $sprite = "", $tags = "", $link = "", $type = "")',
+        description: '<C4/C4_Context> · procedure',
+      },
+      insertText: { value: 'Person(${1:\\$alias}, ${2:\\$label})' },
+    });
+    expect(partsOf(person?.documentation).slice(0, 2)).toEqual([
+      {
+        kind: 'code',
+        value: '!unquoted procedure Person($alias, $label, $descr = "", $sprite = "", $tags = "", $link = "", $type = "")',
+        language: 'plantuml',
+      },
+      { kind: 'text', value: '<C4/C4_Context>, line 366' },
+    ]);
+    // C4_Context includes C4, which declares the tags.
+    expect(items.find((item) => labelOf(item) === 'AddElementTag')).toMatchObject({
+      label: { description: '<C4/C4> · procedure' },
+    });
+  });
+
+  it('offers only the names that start with `$` on `$`, and none of the words', async () => {
+    const document = makeEditor('file:///c/defs/dollar.puml', boxes('!$y = $'), 0, { languageId: 'plantuml' }).document;
+
+    expect((await provide(document, 6, 7, { trigger: '$' }))?.map(labelOf)).toEqual(['$size', '$twice']);
+    expect((await provide(document, 6, 7))?.map(labelOf)).toEqual(['$size', '$twice']);
+    // On another trigger character, nothing.
+    expect(await provide(document, 6, 7, { trigger: ' ' })).toBeUndefined();
+    // Where nothing is defined, `$` leaves the list to VS Code.
+    const bare = makeEditor('file:///c/defs/none.puml', '@startuml\nA -> B : $\n@enduml', 0, { languageId: 'plantuml' })
+      .document;
+    expect(await provide(bare, 1, 10, { trigger: '$' })).toBeUndefined();
+  });
+
+  it('shows the parameter hints of a call, the parameter the cursor is in highlighted', async () => {
+    expect(vscodeStub._test.signatureProviders).toHaveLength(1);
+    expect(vscodeStub._test.signatureProviders[0]).toMatchObject({
+      selector: [{ language: 'markdown' }, { language: 'plantuml' }],
+      metadata: { triggerCharacters: ['(', ','], retriggerCharacters: [')'] },
+    });
+    const document = makeEditor('file:///c/defs/call.puml', boxes('Box(1, '), 0, { languageId: 'plantuml' }).document;
+
+    const help = await hints(document, 6, 7);
+    expect(help).toMatchObject({
+      activeSignature: 0,
+      activeParameter: 1,
+      signatures: [{ label: 'Box($a, $b = "x")', parameters: [{ label: [4, 6] }, { label: [8, 16] }], activeParameter: 1 }],
+    });
+    expect(partsOf(help?.signatures[0]?.documentation)).toEqual([
+      { kind: 'text', value: 'this diagram · procedure' },
+      { kind: 'text', value: '\n\nDraws a box' },
+    ]);
+    // Outside a call, and on a name nothing defines: none.
+    expect(await hints(document, 6, 0)).toBeUndefined();
+    const unknown = makeEditor('file:///c/defs/unknown.puml', boxes('Nope('), 0, { languageId: 'plantuml' }).document;
+    expect(await hints(unknown, 6, 5)).toBeUndefined();
+  });
+
+  it('reads a call in a Markdown block from its quote markers on, and keeps the definition picked while it takes the arguments', async () => {
+    const markdown = makeEditor(
+      'file:///c/defs/doc.md',
+      [
+        '> ```plantuml',
+        '> !procedure P($a)',
+        '> !endprocedure',
+        '> !procedure P($a, $b)',
+        '> !endprocedure',
+        '> P(',
+        "> ' P(",
+        '> ```',
+      ].join('\n'),
+      0
+    ).document;
+
+    // A comment, after the quote marker.
+    expect(await hints(markdown, 6, 6)).toBeUndefined();
+    const first = await hints(markdown, 5, 4);
+    expect(first).toMatchObject({
+      activeSignature: 0,
+      activeParameter: 0,
+      signatures: [{ label: 'P($a)' }, { label: 'P($a, $b)' }],
+    });
+    if (first === undefined) {
+      throw new Error('no hints');
+    }
+    expect(await hints(markdown, 5, 4, { chosen: { ...first, activeSignature: 1 } })).toMatchObject({ activeSignature: 1 });
+    // Picked, but past what it takes: the first that takes them.
+    const more = makeEditor(
+      'file:///c/defs/more.md',
+      ['```plantuml', '!procedure P($a)', '!endprocedure', '!procedure P($a, $b)', '!endprocedure', 'P(1, ', '```'].join('\n'),
+      0
+    ).document;
+    expect(await hints(more, 5, 5, { chosen: { ...first, activeSignature: 0 } })).toMatchObject({ activeSignature: 1 });
+  });
+
+  it('shows in the language status what was read, and says once in the output why something was not', async () => {
+    expect(status()).toMatchObject({
+      selector: [{ language: 'markdown' }, { language: 'plantuml' }],
+      name: 'PlantUML Definitions',
+    });
+    const partial = makeEditor(
+      'file:///c/defs/partial.puml',
+      ['@startuml', '!include <C4/C4_Nothing>', '!include <C4/C4_Context>', 'Per', '@enduml'].join('\n'),
+      0,
+      { languageId: 'plantuml' }
+    );
+    const other = makeEditor('file:///c/defs/other.puml', boxes('Bo'), 0, { languageId: 'plantuml' });
+    vscodeStub._test.setActiveEditor(partial);
+    const logged = vscodeStub._test.logs.length;
+
+    await provide(partial.document, 3, 3);
+    await provide(partial.document, 3, 2);
+    await hints(partial.document, 3, 3);
+    expect(status()).toMatchObject({
+      text: 'Definitions: diagram and includes (partial)',
+      severity: vscodeStub.LanguageStatusSeverity.Warning,
+      detail: 'Some definitions are not offered. See the Output panel for the reasons.',
+    });
+    expect(vscodeStub._test.logs.slice(logged)).toEqual([
+      expect.stringMatching(
+        /^info: Completion and parameter hints in defs\/partial\.puml did not read:\ndefs\/partial\.puml, line 2: <C4\/C4_Nothing> was not read\. No bundled library has this file\./
+      ),
+    ]);
+
+    // Another document in the editor: what was read for it.
+    vscodeStub._test.setActiveEditor(other);
+    await provide(other.document, 6, 2);
+    expect(status()).toMatchObject({
+      text: 'Definitions: diagram and includes',
+      severity: vscodeStub.LanguageStatusSeverity.Information,
+      detail: 'Completion and parameter hints offer what this diagram and the files it includes define.',
+    });
+    vscodeStub._test.setActiveEditor(partial);
+    expect(status()?.text).toBe('Definitions: diagram and includes (partial)');
+
+    // Once the include is fixed, all of it.
+    partial.document.setText(['@startuml', '!include <C4/C4_Container>', '!include <C4/C4_Context>', 'Per', '@enduml'].join('\n'));
+    await provide(partial.document, 3, 3);
+    expect(status()?.text).toBe('Definitions: diagram and includes');
+    expect(vscodeStub._test.logs.slice(logged)).toHaveLength(1);
+    vscodeStub._test.setActiveEditor(undefined);
+  });
+
+  it('reads no definitions of a document past the limits, and says so', async () => {
+    const big = makeEditor(
+      'file:///c/defs/big.puml',
+      ['@startuml', '!$size = 3', ...Array<string>(50_000).fill('A -> B'), '$', '@enduml'].join('\n'),
+      0,
+      { languageId: 'plantuml' }
+    );
+    vscodeStub._test.setActiveEditor(big);
+
+    expect(await provide(big.document, 50_002, 1, { trigger: '$' })).toBeUndefined();
+    expect(status()).toMatchObject({
+      text: 'Definitions: not read',
+      severity: vscodeStub.LanguageStatusSeverity.Warning,
+      detail:
+        'The document is larger than 2 MiB or longer than 50000 lines, so completion and parameter hints do not read its definitions.',
+    });
+    vscodeStub._test.setActiveEditor(undefined);
+  });
+
+  it('answers nothing once the request is cancelled or the document changes while it reads', async () => {
+    const document = makeEditor('file:///c/defs/stale.puml', boxes('Box(1, '), 0, { languageId: 'plantuml' }).document;
+    // A version for each time it is read: edited between any two reads.
+    let reads = 0;
+    const changing: TextEditorStub['document'] = {
+      ...document,
+      get version(): number {
+        reads += 1;
+        return reads;
+      },
+    };
+
+    expect(await provide(document, 6, 2, { cancelled: true })).toBeUndefined();
+    expect(await hints(document, 6, 7, { cancelled: true })).toBeUndefined();
+    expect(await provide(changing, 6, 2)).toBeUndefined();
+    expect(await hints(changing, 6, 7)).toBeUndefined();
+    expect(reads).toBeGreaterThan(0);
+    // As it is, it answers.
+    expect(await hints(document, 6, 7)).toMatchObject({ activeParameter: 1 });
+  });
+});
+
 describe('templates (dist)', () => {
   const complete = (
     document: TextEditorStub['document'],
     line: number,
     character: number
-  ): CompletionItemStub[] | undefined =>
+  ): Promise<CompletionItemStub[] | undefined> =>
     vscodeStub._test.completionProviders[0]?.provider.provideCompletionItems(
       document,
       new vscodeStub.Position(line, character)
@@ -2206,14 +2511,14 @@ describe('templates (dist)', () => {
   const inserted = (item: CompletionItemStub | undefined): string =>
     typeof item?.insertText === 'object' ? item.insertText.value : String(item?.insertText);
 
-  it('offers a whole block in the text of a Markdown document, the bare diagram in an empty block', () => {
+  it('offers a whole block in the text of a Markdown document, the bare diagram in an empty block', async () => {
     const document = makeEditor(
       'file:///c/templates/doc.md',
       ['# Title', '', 'pu', '', '```plantuml', 'pu', '```', '```plantuml', '@startuml', 'pu', '```'].join('\n'),
       0
     ).document;
 
-    const text = complete(document, 2, 2);
+    const text = await complete(document, 2, 2);
     expect(text?.[0]?.label).toEqual({ label: 'puml-sequence', description: 'Sequence diagram' });
     expect(inserted(text?.[0])).toMatch(/^```plantuml \$\{1:sequence-diagram\}\n@startuml\n[\s\S]*\n@enduml\n```$/);
     expect(text?.[0]?.keepWhitespace).toBe(true);
@@ -2233,18 +2538,18 @@ describe('templates (dist)', () => {
       '@startyaml',
     ]);
 
-    expect(inserted(complete(document, 5, 2)?.[0])).toMatch(/^@startuml\n[\s\S]*\n@enduml$/);
+    expect(inserted((await complete(document, 5, 2))?.[0])).toMatch(/^@startuml\n[\s\S]*\n@enduml$/);
     // Inside a diagram: no second start line.
-    expect(complete(document, 9, 2)).toBeUndefined();
+    expect(await complete(document, 9, 2)).toBeUndefined();
   });
 
-  it('offers nothing in another code block', () => {
+  it('offers nothing in another code block', async () => {
     const document = makeEditor('file:///c/templates/js.md', ['```js', 'pu', '```'].join('\n'), 0).document;
 
-    expect(complete(document, 1, 2)).toBeUndefined();
+    expect(await complete(document, 1, 2)).toBeUndefined();
   });
 
-  it('offers the bare diagram between the diagrams of a PlantUML file', () => {
+  it('offers the bare diagram between the diagrams of a PlantUML file', async () => {
     const document = makeEditor(
       'file:///c/templates/flows.puml',
       ['@startuml', 'A -> B', '@enduml', 'pu'].join('\n'),
@@ -2252,9 +2557,9 @@ describe('templates (dist)', () => {
       { languageId: 'plantuml' }
     ).document;
 
-    expect(inserted(complete(document, 3, 2)?.[0])).toMatch(/^@startuml\n/);
+    expect(inserted((await complete(document, 3, 2))?.[0])).toMatch(/^@startuml\n/);
     // Inside a diagram: no template, and its words alone are left to VS Code by default.
-    expect(complete(document, 1, 2)).toBeUndefined();
+    expect(await complete(document, 1, 2)).toBeUndefined();
   });
 });
 

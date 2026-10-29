@@ -23,11 +23,12 @@
 !third-party/*.txt
 
 # What runs: the two bundles (not their source maps), the engine, the
-# bundled library, the grammars, the language configuration, the
-# translations and the pages of the previews.
+# bundled library and what its files declare, the grammars, the language
+# configuration, the translations and the pages of the previews.
 !dist/*.js
 !dist/engine/**
 !dist/stdlib/**
+!dist/declarations/**
 !dist/syntaxes/**
 !language-configuration.json
 !l10n/**

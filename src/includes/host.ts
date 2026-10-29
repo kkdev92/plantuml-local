@@ -41,9 +41,7 @@ export function drawInDocuments(renderer: Renderer, host: IncludeHost): DrawDiag
     if (document === undefined || !hasLocalInclude(source)) {
       return { svg: await renderer.render(source, dark), failedIncludes: new Map(), dependencies: [] };
     }
-    const { access, folder } = await accessFor(vscode.Uri.parse(document), host);
-    const opened = (path: string): string => asOpened(access, folder, path);
-    const session = new IncludeSession(access, (path) => openText(opened(path)) ?? openText(path));
+    const { session, opened } = await openSession(vscode.Uri.parse(document), host);
     const svg = await renderer.render(source, dark, session.load);
     const dependencies = [...session.dependencies].map((path) => pathKey(opened(path)));
     host.remember?.(`${document}\n${source}`, dependencies);
@@ -54,6 +52,25 @@ export function drawInDocuments(renderer: Renderer, host: IncludeHost): DrawDiag
       dependencies,
       ...(styled ? { includedStyle: { themes: [...session.themes], whitePageLibrary: session.whitePageLibrary } } : {}),
     };
+  };
+}
+
+/**
+ * An include session for the diagrams of `document`, which reads an open
+ * document as it is edited, as a render of them does; `opened` gives a
+ * path it found as VS Code knows it ({@link asOpened}), and `root` the real
+ * path of the workspace folder it reads in, undefined when it reads none.
+ */
+export async function openSession(
+  document: vscode.Uri,
+  host: Pick<IncludeHost, 'includePaths'>
+): Promise<{ session: IncludeSession; opened: (path: string) => string; root: string | undefined }> {
+  const { access, folder } = await accessFor(document, host);
+  const opened = (path: string): string => asOpened(access, folder, path);
+  return {
+    session: new IncludeSession(access, (path) => openText(opened(path)) ?? openText(path)),
+    opened,
+    root: access.available ? access.scope.root : undefined,
   };
 }
 

@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Completion offers what a diagram defines, with parameter hints for the
+  calls.** The procedures, functions and macros a diagram defines before the
+  cursor (`!procedure`, `!function`, `!define`, `!definelong`) and its
+  variables are offered, with what the files it includes define there —
+  files of the workspace, read as the preview reads them, and the bundled C4
+  and Azure libraries. Each shows its parameters, where it is defined and
+  what defines it, and in its details how it is declared, its line and the
+  comment above it; picking one writes the call with a placeholder for each
+  parameter up to the last that has no default. The parameter hints, on `(`
+  and `,`, show each definition of the name called with its parameters as
+  declared, and the one the cursor is in, by place or by name. Nothing is run
+  to find them: a definition under `!if` is marked conditional, several of
+  one name and number of parameters ambiguous, and those an include that is
+  not read may change, unresolved. The Language Status says what is offered,
+  and the output which includes were not read and why. Since 0.17.0 the list
+  has held a diagram's own words, no longer those of open include files; the
+  names those files define are offered again, from the files the diagram
+  includes, open or not.
+
 ## [0.17.1] - 2026-10-28
 
 ### Fixed

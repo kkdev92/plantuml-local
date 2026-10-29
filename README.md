@@ -46,7 +46,7 @@ Your diagram source is processed locally and is not sent to a rendering service.
 - **C4 and Azure Libraries**: `!include <C4/C4_Container>` and the other C4 modules, and the Azure icons with `!include <azure/…>`, ship inside the extension and render offline
 - **Fault-Tolerant**: A syntax error shows up inline at the broken diagram; the rest of the page stays intact
 - **Problems Panel**: Errors, warnings and unsupported syntax in the diagrams of open Markdown and PlantUML files are listed with their line, preview or not
-- **Writing Help**: Completion for start lines, directives, themes and icons, the aliases and words of the diagram you are in, snippets of sequence and activity blocks, templates for sixteen kinds of diagram, and quick fixes that name a diagram for export and add a missing end line
+- **Writing Help**: Completion for start lines, directives, themes and icons, the aliases and words of the diagram you are in, the procedures, functions and variables it and the files it includes define — with parameter hints for their calls — snippets of sequence and activity blocks, templates for sixteen kinds of diagram, and quick fixes that name a diagram for export and add a missing end line
 - **Actions Above Each Diagram**: *Preview*, *Export SVG* and *Export PNG* sit above the first line of each diagram, in `.puml` files and Markdown alike, and act on that diagram
 - **Go to Diagram**: *Go to Diagram in Document…* lists the diagram blocks of a Markdown file — with the heading above each, its kind and its title or first line — and moves the cursor to the one picked
 - **Colours**: A swatch beside each colour a diagram sets — a `skinparam` value, an element's colour, a `<style>` property — opens VS Code's colour picker, which writes the pick back as `#RRGGBB`
@@ -310,7 +310,7 @@ diagram, it asks to add a new block after it; in a diagram, a comment or a block
 of another language, it says why it does not.
 
 Elsewhere in a diagram, the list offers what that diagram holds, and nothing
-from other diagrams or documents:
+from other diagrams or from documents it does not include:
 
 - the aliases it declares, each with the name it shows: `A` with `Order desk`
   for `participant "Order desk" as A`, `web` with `Web` for
@@ -321,6 +321,9 @@ from other diagrams or documents:
   taken for one or the other by lines that only that type reads, such as
   `participant` or `activate`, and `start` or `:action;`. Where its lines do
   not tell, no snippet is offered
+- the procedures, functions, macros and variables defined before the cursor,
+  in the diagram or in the files it includes (see
+  [Definitions and parameter hints](#definitions-and-parameter-hints))
 - its words, cut as VS Code cuts them, leaving out those of comments, quoted
   text and notes
 
@@ -329,14 +332,72 @@ every open document of the language, and follow their setting,
 `editor.wordBasedSuggestions`: with `off` there are none. By default
 (`offWithInlineSuggestions`) VS Code lists no words in a PlantUML file while
 inline suggestions are on there, which an extension cannot tell; so in a
-`.puml` file the diagram's words come only beside its aliases or snippets, and
-where they would come alone, the list is left to VS Code.
+`.puml` file the diagram's words come only beside its aliases, snippets or
+definitions, and where they would come alone, the list is left to VS Code.
 
 Markdown turns quick suggestions off, so in a Markdown file the list opens on
 those characters, or with *Trigger Suggest* (`Ctrl+Space`) — type `puml` and
 press it for the templates.
 
 ![Typing puml and Ctrl+Space in a Markdown file inserts a sequence diagram template; Tab moves through its names while the preview draws it](images/insert-template.gif)
+
+### Definitions and parameter hints
+
+The completion offers what a diagram defines before the cursor, and what the
+files it includes define there — files of the workspace and the bundled C4
+and Azure libraries alike:
+
+- procedures, functions and macros: `!procedure`, `!function`, `!define` and
+  `!definelong`
+- variables, set with `!$name = …`, `?=`, `!global` or `!local` or by a
+  `!foreach`, and the names a `!define NAME value` gives a value
+- in the body of a procedure or a function, its parameters
+
+Each shows its parameters, where it is defined — this diagram, a file of the
+workspace, or a file of a library such as `<C4/C4_Context>` — and what defines
+it; its details show how it is declared, its line and the comment lines above
+it. Picking a procedure, function or macro writes the call with a placeholder
+for each parameter up to the last that has no default, and opens the
+parameter hints. Typing `$`, or a name that starts with it, lists only the
+names that start with `$`, as does a place in the text of the diagram —
+quoted text, a note, a title — or in the path of an `!include`.
+
+The parameter hints open on `(` and `,` in a call of a name defined before
+it, or with *Trigger Parameter Hints* (`Ctrl+Shift+Space`). They show each
+definition of the name with its parameters as declared, their defaults as
+written, and the parameter the cursor is in: counted by place, commas in
+quoted text and in brackets aside, or matched by name for an argument written
+`$name = value`. In a C4 diagram, for instance, typing `Pers` offers `Person`
+from `<C4/C4_Context>`; picking it writes `Person($alias, $label)` with the
+two names to tab through, and in `Person(customer, ` the hints show
+`Person($alias, $label, $descr = "", $sprite = "", $tags = "", $link = "",
+$type = "")` with `$label` marked.
+
+As in the bundled engine, which reads a diagram from the top, a definition
+counts from its line on, and one in an included file from the line of the
+include. A name is offered once for each number of parameters, which the
+engine tells apart, and a later definition stands for an earlier one.
+Nothing is run to find them, so a definition the diagram may leave out —
+under `!if`, `!ifdef`, `!ifndef`, `!while` or `!foreach`, or in a file
+included under one — is marked *conditional*. Several that may hold are
+marked *ambiguous*, and none of them is shown as the one that does. An
+include that is not read here but may be when the diagram is drawn — one
+whose path is put together then, one that picks a diagram by a pattern, or a
+file past the size limits below — may define anything again, so what is
+defined before it is marked *unresolved*. An include of a file that cannot be
+read at all, such as a missing file or a file of the workspace in Restricted
+Mode, defines nothing and marks nothing before it. Comments, quoted text and
+the data of a sprite define nothing.
+
+Files of the workspace are read as for the preview (see
+[Including files](#including-files)): in a trusted workspace, from the
+document's workspace folder, with their unsaved changes. The Language Status
+of the document — `{}` beside the language in the status bar — says what is
+offered: *Definitions: diagram and includes*, marked *(partial)* when an
+include was not read, in which case the *PlantUML Local* output says which
+and why, once each time that changes. A document or an included file larger
+than 2 MiB or longer than 50,000 lines is not read for definitions, and at
+most 5,000 are offered.
 
 ### Colours
 

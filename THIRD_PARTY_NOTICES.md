@@ -4,9 +4,10 @@ PlantUML Local is distributed under the MIT License (see [LICENSE](LICENSE)).
 
 The published VSIX also contains third-party code, either taken from
 `@plantuml/core` into `dist/engine/`, generated from the PlantUML standard
-library into `dist/stdlib/`, or bundled into `dist/extension.js` /
-`dist/worker.js`. Their copyright notices and licences are reproduced below;
-the full licence texts are in [`third-party/`](third-party).
+library into `dist/stdlib/` and `dist/declarations/`, or bundled into
+`dist/extension.js` / `dist/worker.js`. Their copyright notices and licences
+are reproduced below; the full licence texts are in
+[`third-party/`](third-party).
 
 | Component | Version | Licence | Full text |
 | --- | --- | --- | --- |
@@ -81,6 +82,12 @@ commit `a31ac1a87cbdaa3339d1a551dc971c85f8359d5d`. The engine reads them in
 place of the network, so `!include <azure/…>` and `!include <C4/…>` resolve
 offline. The generator records the hash of every file it reads in
 `assets/stdlib-sources.json` in the repository.
+
+`dist/declarations/` holds what each file of those libraries declares — its
+procedures, functions, macros and variables with their parameters, defaults,
+values and the comment lines above them, and the files it includes — read
+from the same text in the same run, for the completion and the parameter
+hints; the generator records their hashes in the same file.
 
 ### Azure-PlantUML
 

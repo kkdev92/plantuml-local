@@ -22,6 +22,16 @@
  * written. The unit tests hold the committed assets to that record, and
  * scripts/verify-vsix.mjs the packaged copies.
  *
+ * What each library file declares (its procedures, functions, macros,
+ * variables and includes, for the completion and the parameter hints) is
+ * read in the same run from the text its asset holds, by the reader the
+ * extension runs (src/language/declarations.ts), and written to
+ * assets/declarations/<library>.json under the asset's keys, its lines
+ * counted from the first of that text. Its SHA-256 is recorded beside the
+ * asset's. `--declarations` writes them again from the committed assets
+ * without fetching anything, as a change to the reader needs: the unit
+ * tests read the assets again and fail until it is done.
+ *
  * The engine reads libraries from `window.PLANTUML_STDLIB[library][key]`
  * where `key` is the include path, lower-cased and without the `.puml`
  * extension (`<azure/Compute/AzureFunction>` -> `compute/azurefunction`),
@@ -32,7 +42,7 @@
  * or `@enduml`, and the JSON files parsed. See src/worker/stdlib.ts for the
  * runtime side.
  *
- * Usage: node scripts/generate-stdlib.mjs
+ * Usage: node scripts/generate-stdlib.mjs [--declarations]
  */
 
 import { execFileSync } from 'node:child_process';
@@ -40,9 +50,11 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, posix, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import * as esbuild from 'esbuild';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const outDir = join(root, 'assets', 'stdlib');
+const declarationsDir = join(root, 'assets', 'declarations');
 const sourcesFile = join(root, 'assets', 'stdlib-sources.json');
 const tempDir = join(root, '.stdlib-temp');
 
@@ -208,61 +220,131 @@ function collect(dir, base, blobs, entries, json, sources) {
   }
 }
 
-mkdirSync(outDir, { recursive: true });
-
-console.log(`Fetching ${LIBRARIES.map((l) => l.name).join(', ')} from plantuml-stdlib at ${COMMIT}...`);
-fetchLibraries(LIBRARIES.map((l) => l.directory));
-
-const record = { source: SOURCE, commit: COMMIT, libraries: {} };
-
-for (const library of LIBRARIES) {
-  /** @type {Record<string, string>} */
-  const entries = {};
-  /** @type {Record<string, unknown>} */
-  const json = {};
-  /** @type {Record<string, string>} */
-  const sources = {};
-  const base = join(tempDir, 'stdlib', library.directory);
-  const blobs = committedBlobs(library.directory);
-  if (library.files === undefined) {
-    collect(base, base, blobs, entries, json, sources);
-  } else {
-    for (const name of library.files) {
-      entries[name.toLowerCase()] = readPuml(join(base, `${name}.puml`), blobs, sources);
-    }
-  }
-
-  const count = Object.keys(entries).length;
-  if (count === 0) {
-    throw new Error(`No .puml files found for ${library.name}`);
-  }
-  const jsonCount = Object.keys(json).length;
-
-  const out = join(outDir, `${library.name}.json`);
-  const asset = JSON.stringify({
-    library: library.name,
-    upstream: library.upstream,
-    license: library.license,
-    entries,
-    // Only a library that has JSON files gets the field.
-    ...(jsonCount > 0 ? { json } : {}),
+/**
+ * src/language/declarations.ts and the library reading of
+ * src/includes/included-lines.ts, bundled and evaluated as the grammar
+ * build does (scripts/build.mjs).
+ */
+async function declarationReader() {
+  const result = await esbuild.build({
+    stdin: {
+      contents: [
+        "export { declarationsOf } from './src/language/declarations';",
+        "export { libraryLines } from './src/includes/included-lines';",
+      ].join('\n'),
+      resolveDir: root,
+      loader: 'ts',
+    },
+    bundle: true,
+    platform: 'neutral',
+    format: 'esm',
+    write: false,
+    logLevel: 'warning',
   });
-  writeFileSync(out, asset);
-  record.libraries[library.name] = {
-    upstream: library.upstream,
-    license: library.license,
-    asset: { path: relative(root, out).split(sep).join(posix.sep), sha256: sha256(Buffer.from(asset, 'utf8')) },
-    files: Object.fromEntries(Object.entries(sources).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))),
-  };
-  console.log(
-    `  ${library.name.padEnd(6)} ${String(count).padStart(4)} files` +
-      `${jsonCount > 0 ? ` + ${String(jsonCount)} JSON` : ''} -> ${relative(root, out)} ` +
-      `(${(statSync(out).size / 1024).toFixed(0)} KB)`
-  );
+  return import(`data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text).toString('base64')}`);
 }
 
-writeFileSync(sourcesFile, `${JSON.stringify(record, null, 2)}\n`);
-console.log(`  sources        -> ${relative(root, sourcesFile)}`);
+/**
+ * Writes what each file in `entries` declares, read as the engine reads a
+ * library's file, and returns where it went with its hash.
+ */
+function writeDeclarations(name, entries, reader) {
+  /** @type {Record<string, unknown[]>} */
+  const declarations = {};
+  for (const [key, text] of Object.entries(entries)) {
+    const read = reader.libraryLines(text);
+    declarations[key] = reader.declarationsOf(read.lines, read.numbers);
+  }
+  mkdirSync(declarationsDir, { recursive: true });
+  const out = join(declarationsDir, `${name}.json`);
+  const written = JSON.stringify({ library: name, declarations });
+  writeFileSync(out, written);
+  console.log(`  ${name.padEnd(6)} declarations -> ${relative(root, out)} (${(statSync(out).size / 1024).toFixed(0)} KB)`);
+  return { path: relative(root, out).split(sep).join(posix.sep), sha256: sha256(Buffer.from(written, 'utf8')) };
+}
 
-rmSync(tempDir, { recursive: true, force: true });
+/** Fetches the libraries at the pinned commit and writes their assets, their declarations and the record. */
+function fromUpstream(reader) {
+  mkdirSync(outDir, { recursive: true });
+
+  console.log(`Fetching ${LIBRARIES.map((l) => l.name).join(', ')} from plantuml-stdlib at ${COMMIT}...`);
+  fetchLibraries(LIBRARIES.map((l) => l.directory));
+
+  const record = { source: SOURCE, commit: COMMIT, libraries: {} };
+
+  for (const library of LIBRARIES) {
+    /** @type {Record<string, string>} */
+    const entries = {};
+    /** @type {Record<string, unknown>} */
+    const json = {};
+    /** @type {Record<string, string>} */
+    const sources = {};
+    const base = join(tempDir, 'stdlib', library.directory);
+    const blobs = committedBlobs(library.directory);
+    if (library.files === undefined) {
+      collect(base, base, blobs, entries, json, sources);
+    } else {
+      for (const name of library.files) {
+        entries[name.toLowerCase()] = readPuml(join(base, `${name}.puml`), blobs, sources);
+      }
+    }
+
+    const count = Object.keys(entries).length;
+    if (count === 0) {
+      throw new Error(`No .puml files found for ${library.name}`);
+    }
+    const jsonCount = Object.keys(json).length;
+
+    const out = join(outDir, `${library.name}.json`);
+    const asset = JSON.stringify({
+      library: library.name,
+      upstream: library.upstream,
+      license: library.license,
+      entries,
+      // Only a library that has JSON files gets the field.
+      ...(jsonCount > 0 ? { json } : {}),
+    });
+    writeFileSync(out, asset);
+    console.log(
+      `  ${library.name.padEnd(6)} ${String(count).padStart(4)} files` +
+        `${jsonCount > 0 ? ` + ${String(jsonCount)} JSON` : ''} -> ${relative(root, out)} ` +
+        `(${(statSync(out).size / 1024).toFixed(0)} KB)`
+    );
+    record.libraries[library.name] = {
+      upstream: library.upstream,
+      license: library.license,
+      asset: { path: relative(root, out).split(sep).join(posix.sep), sha256: sha256(Buffer.from(asset, 'utf8')) },
+      declarations: writeDeclarations(library.name, entries, reader),
+      files: Object.fromEntries(Object.entries(sources).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))),
+    };
+  }
+
+  writeFileSync(sourcesFile, `${JSON.stringify(record, null, 2)}\n`);
+  console.log(`  sources        -> ${relative(root, sourcesFile)}`);
+
+  rmSync(tempDir, { recursive: true, force: true });
+}
+
+/** Writes the declarations again from the committed assets, which the record vouches for: nothing is fetched. */
+function fromAssets(reader) {
+  const record = JSON.parse(readFileSync(sourcesFile, 'utf8'));
+  for (const library of LIBRARIES) {
+    const { upstream, license, asset, files } = record.libraries[library.name];
+    const bytes = readFileSync(join(root, asset.path));
+    if (sha256(bytes) !== asset.sha256) {
+      throw new Error(`${asset.path} is not the asset ${relative(root, sourcesFile)} records`);
+    }
+    const declarations = writeDeclarations(library.name, JSON.parse(bytes.toString('utf8')).entries, reader);
+    record.libraries[library.name] = { upstream, license, asset, declarations, files };
+  }
+  writeFileSync(sourcesFile, `${JSON.stringify(record, null, 2)}\n`);
+  console.log(`  sources        -> ${relative(root, sourcesFile)}`);
+}
+
+const reader = await declarationReader();
+if (process.argv.includes('--declarations')) {
+  fromAssets(reader);
+} else {
+  fromUpstream(reader);
+}
 console.log('Done. Commit the regenerated JSON.');
