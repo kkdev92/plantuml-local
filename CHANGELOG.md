@@ -74,6 +74,23 @@ updates.
   blocks, so that a link, an image or HTML in a comment shows as written. The
   keywords of each kind of diagram and the names of skinparam and style items
   have no help.
+- **A view lists what each diagram includes, as its last drawing found it.**
+  *Show Diagram Dependencies* opens *Diagram Dependencies* in the Explorer.
+  For each diagram of the Markdown or PlantUML file in the editor, it lists
+  what the last drawing asked the engine for, each under the file that asked:
+  a file read, with the places looked at before it, or one not found,
+  refused, outside the workspace folder or not read in Restricted Mode, with
+  why; then the include lines of the diagram that no request matches — a path
+  worked out when drawn, a line in a procedure, a line the drawing did not
+  ask for — and the files of the bundled C4 and Azure libraries read. A file
+  read is one handed to the engine, which may skip it or use only part of it;
+  a file asked for again, or by a file under it, is not opened up again. A
+  file read opens once it is found again where a drawing reads it; another
+  item goes to the line that asked, or says that the line is not known. With
+  a file in the editor, the view lists the diagrams of open documents whose
+  drawings read it. It follows the drawings, marks one out of date when a
+  file it read changes, and draws a diagram it has no drawing of while it is
+  shown.
 
 ### Changed
 

@@ -3,9 +3,11 @@ import { join, relative } from 'node:path';
 import * as vscode from 'vscode';
 
 import { INCLUDE_LIMITS } from '../core/constants';
-import type { DiagramRender, IncludeLoader } from '../core/types';
+import type { DiagramRender, DrawnRequest, DrawnRequestState, IncludeLoader, LibraryRead } from '../core/types';
+import { RenderFailure, type Drawing } from '../render/client';
 import { includeAccess } from './access';
 import { describeIncludeFailure, describeIncludeFailures, hasLocalInclude, type IncludeLabels } from './describe';
+import { DrawingFailure } from './drawings';
 import { INCLUDE_EXTENSIONS } from './path-policy';
 import { IncludeSession, type IncludeAccess, type IncludeFailureReason } from './session';
 import { pathKey } from './tracking';
@@ -29,21 +31,44 @@ export interface IncludeHost {
 
 /** The renderer, as far as drawing goes. */
 export interface Renderer {
-  render(source: string, dark: boolean, load?: IncludeLoader): Promise<string>;
+  draw(source: string, dark: boolean, load?: IncludeLoader): Promise<Drawing>;
 }
 
 export function drawInDocuments(renderer: Renderer, host: IncludeHost): DrawDiagram {
   const describe = (reason: IncludeFailureReason): string =>
     describeIncludeFailure(reason, host.labels, INCLUDE_EXTENSIONS, INCLUDE_LIMITS);
 
+  /**
+   * Draws with `load`; when the engine fails, the failure keeps the
+   * `requests` asked for until then and the `dependencies` looked at.
+   */
+  const draw = async (
+    source: string,
+    dark: boolean,
+    load: IncludeLoader | undefined,
+    requests: () => readonly DrawnRequest[],
+    dependencies: () => readonly string[]
+  ): Promise<Drawing> => {
+    try {
+      return await renderer.draw(source, dark, load);
+    } catch (error: unknown) {
+      const libraries: readonly LibraryRead[] = error instanceof RenderFailure ? error.libraries : [];
+      const message = error instanceof Error ? error.message : String(error);
+      throw new DrawingFailure(message, { requests: requests(), libraries }, dependencies());
+    }
+  };
+
   return async (source, dark, document) => {
     // Without a local include the engine never asks for a file.
     if (document === undefined || !hasLocalInclude(source)) {
-      return { svg: await renderer.render(source, dark), failedIncludes: new Map(), dependencies: [] };
+      const { svg, libraries } = await draw(source, dark, undefined, () => [], () => []);
+      return { svg, failedIncludes: new Map(), dependencies: [], log: { requests: [], libraries } };
     }
     const { session, opened } = await openSession(vscode.Uri.parse(document), host);
-    const svg = await renderer.render(source, dark, session.load);
-    const dependencies = [...session.dependencies].map((path) => pathKey(opened(path)));
+    const requests = (): DrawnRequest[] => drawnRequests(session, opened, describe);
+    const looked = (): string[] => [...session.dependencies].map((path) => pathKey(opened(path)));
+    const { svg, libraries } = await draw(source, dark, session.load, requests, looked);
+    const dependencies = looked();
     host.remember?.(`${document}\n${source}`, dependencies);
     const styled = session.themes.length > 0 || session.whitePageLibrary;
     return {
@@ -51,8 +76,32 @@ export function drawInDocuments(renderer: Renderer, host: IncludeHost): DrawDiag
       failedIncludes: describeIncludeFailures(session.failures, describe),
       dependencies,
       ...(styled ? { includedStyle: { themes: [...session.themes], whitePageLibrary: session.whitePageLibrary } } : {}),
+      log: { requests: requests(), libraries },
     };
   };
+}
+
+/** How a request that failed for `reason` ended. */
+function stateOf(reason: IncludeFailureReason): DrawnRequestState {
+  return reason.kind === 'read' ? 'refused' : reason.kind;
+}
+
+/**
+ * The requests of `session`, each with the file read or why not, the paths
+ * as `opened` gives them, and a failure in the words of `describe`.
+ */
+function drawnRequests(
+  session: IncludeSession,
+  opened: (path: string) => string,
+  describe: (reason: IncludeFailureReason) => string
+): DrawnRequest[] {
+  return session.requests.map(({ path, from, kind, answer }): DrawnRequest => {
+    const asked = { path, from, ...(kind === undefined ? {} : { kind }) };
+    if ('delivered' in answer) {
+      return { ...asked, state: 'read', id: answer.delivered, file: opened(answer.delivered), looked: answer.missing.map(opened) };
+    }
+    return { ...asked, state: stateOf(answer.failed), looked: answer.looked.map(opened), reason: describe(answer.failed) };
+  });
 }
 
 /**

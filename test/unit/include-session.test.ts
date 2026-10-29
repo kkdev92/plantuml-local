@@ -149,6 +149,68 @@ describe('IncludeSession', () => {
     await expect(session.load('common.puml', null)).rejects.toThrow();
     expect(session.failures).toEqual([{ path: 'common.puml', reason: { kind: 'unavailable', why: 'untrusted' } }]);
     expect(session.dependencies.size).toBe(0);
+    expect(session.requests).toEqual([
+      { path: 'common.puml', from: null, answer: { failed: { kind: 'unavailable', why: 'untrusted' }, looked: [] } },
+    ]);
+  });
+
+  it('keeps each request with its answer: the file delivered and the places found empty before it, or why it failed and where it looked', async () => {
+    const session = new IncludeSession(access, closed);
+    const outer = await session.load('nested.puml', null, 'include');
+    await session.load('common.puml', outer.id, 'include');
+    await session.load('skin.iuml', null);
+    await expect(session.load('none.puml', null, 'includesub')).rejects.toThrow();
+    await expect(session.load('../../outside.puml', outer.id, 'include')).rejects.toThrow();
+    expect(session.requests).toEqual([
+      {
+        path: 'nested.puml',
+        from: null,
+        kind: 'include',
+        answer: { delivered: join(root, 'docs', 'nested.puml'), missing: [] },
+      },
+      {
+        path: 'common.puml',
+        from: join(root, 'docs', 'nested.puml'),
+        kind: 'include',
+        answer: { delivered: join(root, 'docs', 'common.puml'), missing: [] },
+      },
+      {
+        path: 'skin.iuml',
+        from: null,
+        answer: { delivered: join(root, 'styles', 'skin.iuml'), missing: [join(root, 'docs', 'skin.iuml')] },
+      },
+      {
+        path: 'none.puml',
+        from: null,
+        kind: 'includesub',
+        answer: {
+          failed: { kind: 'missing', searched: true },
+          looked: [join(root, 'docs', 'none.puml'), join(root, 'styles', 'none.puml')],
+        },
+      },
+      {
+        path: '../../outside.puml',
+        from: join(root, 'docs', 'nested.puml'),
+        kind: 'include',
+        answer: { failed: { kind: 'outside' }, looked: [] },
+      },
+    ]);
+  });
+
+  it('keeps a refused file as the last place looked', async () => {
+    await writeFile(join(root, 'styles', 'bad.puml'), 'A\u0000B\n');
+    const session = new IncludeSession(access, closed);
+    await expect(session.load('bad.puml', null)).rejects.toThrow();
+    expect(session.requests).toEqual([
+      {
+        path: 'bad.puml',
+        from: null,
+        answer: {
+          failed: { kind: 'read', refusal: 'nul' },
+          looked: [join(root, 'docs', 'bad.puml'), join(root, 'styles', 'bad.puml')],
+        },
+      },
+    ]);
   });
 
   it('stops at the depth, the number of files and the bytes allowed', async () => {

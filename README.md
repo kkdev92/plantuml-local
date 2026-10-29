@@ -52,6 +52,7 @@ Your diagram source is processed locally and is not sent to a rendering service.
 - **Hovers**: A directive, the kind of diagram after `@start`, a bundled theme and an OpenIconic icon show what they do and how they are written, in English or Japanese, with nothing fetched; a call or a variable shows each definition it may stand for, with the comment above it as written; the path of an include shows the file it reads, or why it reads none
 - **Actions Above Each Diagram**: *Preview*, *Export SVG* and *Export PNG* sit above the first line of each diagram, in `.puml` files and Markdown alike, and act on that diagram
 - **Go to Diagram**: *Go to Diagram in Document…* lists the diagram blocks of a Markdown file — with the heading above each, its kind and its title or first line — and moves the cursor to the one picked
+- **Diagram Dependencies**: *Show Diagram Dependencies* lists in the Explorer what each diagram of the editor asked for when last drawn — the files read, not found or refused, each under the file that asked — its include lines that no request matches, and the files of the bundled libraries read; with a file in the editor, the diagrams of open documents that read it
 - **Colours**: A swatch beside each colour a diagram sets — a `skinparam` value, an element's colour, a `<style>` property — opens VS Code's colour picker, which writes the pick back as `#RRGGBB`
 - **Export**: Diagrams can be written to SVG files — one, a whole document or a whole folder — or to PNG files, one or a whole folder, and referenced from the Markdown, for hosts such as GitHub that do not draw PlantUML
 - **Multi-Diagram Pages**: Any number of diagrams per page; renders are serialised so results never mix
@@ -642,6 +643,50 @@ files of the kinds read, each from the first place that has it; a name from a
 search folder shows the folder. After the `from ` of a `!theme`, the folders
 complete. In Restricted Mode, and in a document outside the workspace folders,
 neither is offered.
+
+### Seeing what a diagram includes
+
+*PlantUML Local: Show Diagram Dependencies* opens the *Diagram Dependencies*
+view in the Explorer and puts the keyboard on the diagram at the cursor,
+selected, or else on the first item. For each diagram of the Markdown or
+PlantUML file in the editor, it lists what the last drawing of the diagram
+asked the engine for, in the order asked, each under the file that asked for
+it:
+
+- a file read; its tooltip lists the places looked at before it, where there
+  was none
+- a file not found, refused, outside the workspace folder or not read in
+  Restricted Mode; its tooltip says why
+- under *Other include lines*, the include lines of the diagram that no
+  request matches: a path worked out when the diagram is drawn, a line in a
+  procedure or a function, and a line the drawing did not ask for, such as one
+  on a branch not taken or after a file that could not be included
+- under *Bundled libraries*, the files of the C4 and Azure libraries read
+
+A file read was handed to the engine, which may skip it — as it does a file
+included a second time — or use only part of it, as with a selector or
+`!includesub`: the view does not say what the drawing used. A file asked for
+again, or asked for by a file under it, is listed without what it asks for. An
+item shows the line that asked for it when that is a line of the diagram
+written as the request was made; a file that a theme's file asks for, or whose
+path is worked out, shows none.
+
+Clicking a file read opens it, once it is found again where a drawing reads
+it; a file of a bundled library opens read-only. Clicking a file not read, or
+the *Go to Include Line* button beside a file, goes to the line that asked for
+it — in the diagram, or in the file that asked — picking among several, or
+says that the line is not known. Clicking a diagram or an include line goes to
+it, while the document is as it was when the view listed it; after an edit,
+the view lists it again. A file not found that an earlier drawing read is
+marked *read before*. A diagram whose drawing is out of date, as a file it
+read or looked for, or a setting that decides where it looks, has changed, is
+marked so; the view draws such a diagram, and one not drawn yet, while it is
+shown, as the Problems panel would.
+
+With a file of the workspace in the editor, the view lists under *Diagrams that
+read this file* the diagrams of open documents whose last drawing read it.
+Documents that are not open are not looked at. In Restricted Mode, no file is
+read for a diagram, and no file of the workspace opens from the view.
 
 ### Icons and sprites
 

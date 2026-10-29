@@ -105,8 +105,8 @@ describe('includeDirectives', () => {
       '@enduml',
     ].join('\n');
     expect(includeDirectives(source)).toEqual([
-      { line: 1, start: 9, end: 15, path: 'a.puml', literal: true, inBody: false },
-      { line: 6, start: 16, end: 24, path: 'b/c.iuml', literal: true, inBody: false },
+      { line: 1, start: 9, end: 15, path: 'a.puml', kind: 'include', literal: true, inBody: false },
+      { line: 6, start: 16, end: 24, path: 'b/c.iuml', kind: 'include', literal: true, inBody: false },
     ]);
   });
 
@@ -116,15 +116,15 @@ describe('includeDirectives', () => {
 
   it('finds the file of an !includesub, and none for a section of the diagram itself', () => {
     expect(includeDirectives('!includesub parts.puml!PART\n!includesub PART')).toEqual([
-      { line: 0, start: 12, end: 22, path: 'parts.puml', literal: true, inBody: false },
+      { line: 0, start: 12, end: 22, path: 'parts.puml', kind: 'includesub', literal: true, inBody: false },
     ]);
   });
 
   it('finds the file of a theme read from a folder, from its name and from its folder', () => {
     const path = 'themes/puml-theme-local.puml';
     expect(includeDirectives('!theme local from themes\n!theme plain\n!theme local from ')).toEqual([
-      { line: 0, start: 7, end: 12, path, literal: true, inBody: false },
-      { line: 0, start: 18, end: 24, path, literal: true, inBody: false },
+      { line: 0, start: 7, end: 12, path, kind: 'theme', literal: true, inBody: false },
+      { line: 0, start: 18, end: 24, path, kind: 'theme', literal: true, inBody: false },
     ]);
     expect(paths('!theme $name from themes\n!theme local from %dirpath()\n!folder = "x"\n!theme local from folder')).toEqual([
       [0, 'themes/puml-theme-$name.puml', false],

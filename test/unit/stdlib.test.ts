@@ -6,7 +6,7 @@ import { Window } from 'happy-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { BUNDLED_LIBRARIES, bundledLibrary } from '../../src/core/libraries';
-import { installStdlib, rejectScriptLoad } from '../../src/worker/stdlib';
+import { installStdlib, rejectScriptLoad, watchLibraryReads } from '../../src/worker/stdlib';
 
 const globals = globalThis as Record<string, unknown>;
 
@@ -85,6 +85,29 @@ describe('installStdlib', () => {
     const azure = (globals.PLANTUML_STDLIB as Record<string, Record<string, string[] | null>>).azure;
 
     expect(azure['compute/nosuchthing']).toBeNull();
+  });
+
+  it('tells whoever watches of each file looked up, whether the library has it, until told to stop', () => {
+    installStdlib(fixtureDir());
+    const azure = (globals.PLANTUML_STDLIB as Record<string, Record<string, string[] | null>>).azure;
+    const reads: [string, string, boolean][] = [];
+    watchLibraryReads((library, key, found) => {
+      reads.push([library, key, found]);
+    });
+    try {
+      void azure['azurecommon'];
+      void azure['compute/nosuchthing'];
+      void azure['azurecommon'];
+    } finally {
+      watchLibraryReads(null);
+    }
+    void azure['compute/azurefunction'];
+
+    expect(reads).toEqual([
+      ['azure', 'azurecommon', true],
+      ['azure', 'compute/nosuchthing', false],
+      ['azure', 'azurecommon', true],
+    ]);
   });
 
   it('serves a library’s JSON files parsed, by the key %load_json looks them up by', () => {

@@ -2,11 +2,12 @@ import { join } from 'node:path';
 import { parentPort } from 'node:worker_threads';
 
 import { splitLines } from '../core/lines';
-import type { IncludeResponseMessage, RenderRequestMessage, RenderResponseMessage } from '../core/types';
+import type { IncludeResponseMessage, LibraryRead, RenderRequestMessage, RenderResponseMessage } from '../core/types';
 import { loadEngine } from './engine';
 import { installFileLoader } from './file-loader';
 import { disableNetworkAccess } from './network-guard';
 import { createSerialQueue } from './queue';
+import { watchLibraryReads } from './stdlib';
 
 /**
  * Render worker entry point.
@@ -56,10 +57,22 @@ const files = installFileLoader((message) => {
  */
 const RESET_SOURCE = ['@startcreole', 'x', '@endcreole'];
 
-function renderOnce(request: RenderRequestMessage): Promise<string> {
-  const result = queue.enqueue(async () => {
+/** What a render answers, but its id: the SVG or the error, with the library files read. */
+type Drawn = Omit<RenderResponseMessage, 'id'>;
+
+function renderOnce(request: RenderRequestMessage): Promise<Drawn> {
+  const result = queue.enqueue(async (): Promise<Drawn> => {
     const { engine, sanitize } = await loadEngine(engineDir, stdlibDir);
     files.begin(request.id, request.includes);
+    // Each file once, in the order first read: the engine reads them again
+    // each time it starts the diagram over.
+    const libraries = new Map<string, LibraryRead>();
+    watchLibraryReads((library, key, found) => {
+      const name = `${library}/${key}`;
+      if (!libraries.has(name)) {
+        libraries.set(name, { library, key, found });
+      }
+    });
     try {
       const svg = await new Promise<string>((resolve, reject) => {
         engine.renderToString(
@@ -73,8 +86,11 @@ function renderOnce(request: RenderRequestMessage): Promise<string> {
           { dark: request.dark }
         );
       });
-      return sanitize(svg);
+      return { svg: sanitize(svg), libraries: [...libraries.values()] };
+    } catch (error: unknown) {
+      return { error: error instanceof Error ? error.message : String(error), libraries: [...libraries.values()] };
     } finally {
+      watchLibraryReads(null);
       files.end();
     }
   });
@@ -97,8 +113,8 @@ parentPort?.on('message', (request: RenderRequestMessage | IncludeResponseMessag
     return;
   }
   renderOnce(request).then(
-    (svg) => {
-      const response: RenderResponseMessage = { id: request.id, svg };
+    (drawn) => {
+      const response: RenderResponseMessage = { id: request.id, ...drawn };
       parentPort?.postMessage(response);
     },
     (error: unknown) => {

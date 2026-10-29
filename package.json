@@ -201,6 +201,22 @@
         "category": "PlantUML Local"
       },
       {
+        "command": "plantumlLocal.showDependencies",
+        "title": "%command.showDependencies.title%",
+        "category": "PlantUML Local"
+      },
+      {
+        "command": "plantumlLocal.openDependency",
+        "title": "%command.openDependency.title%",
+        "category": "PlantUML Local"
+      },
+      {
+        "command": "plantumlLocal.goToIncludeLine",
+        "title": "%command.goToIncludeLine.title%",
+        "category": "PlantUML Local",
+        "icon": "$(go-to-file)"
+      },
+      {
         "command": "plantumlLocal.openPreview",
         "title": "%command.openPreview.title%",
         "category": "PlantUML Local"
@@ -322,6 +338,18 @@
           "group": "2_scroll@5"
         }
       ],
+      "view/item/context": [
+        {
+          "command": "plantumlLocal.goToIncludeLine",
+          "when": "view == plantumlLocal.dependencies && viewItem == request",
+          "group": "inline"
+        },
+        {
+          "command": "plantumlLocal.goToIncludeLine",
+          "when": "view == plantumlLocal.dependencies && viewItem == request",
+          "group": "navigation"
+        }
+      ],
       "commandPalette": [
         {
           "command": "plantumlLocal.openPreview",
@@ -352,6 +380,14 @@
           "when": "editorLangId == markdown && !notebookEditorFocused"
         },
         {
+          "command": "plantumlLocal.openDependency",
+          "when": "false"
+        },
+        {
+          "command": "plantumlLocal.goToIncludeLine",
+          "when": "false"
+        },
+        {
           "command": "plantumlLocal.zoomToArea",
           "when": "false"
         },
@@ -377,6 +413,22 @@
         }
       ]
     },
+    "views": {
+      "explorer": [
+        {
+          "id": "plantumlLocal.dependencies",
+          "name": "%view.dependencies.name%",
+          "icon": "$(type-hierarchy)",
+          "visibility": "hidden"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "plantumlLocal.dependencies",
+        "contents": "%view.dependencies.welcome%"
+      }
+    ],
     "configuration": {
       "title": "PlantUML Local",
       "properties": {

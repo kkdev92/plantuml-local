@@ -33,7 +33,9 @@ import { BUNDLED_LIBRARIES } from '../core/libraries';
  *   engine asks for: it failed to load (see {@link refuseScript}).
  *
  * Libraries are read from disk lazily, on the first include that needs
- * one, so a diagram without sprites pays nothing.
+ * one, so a diagram without sprites pays nothing. Which files the engine
+ * reads is told to whoever asks ({@link watchLibraryReads}): the extension
+ * never sees these includes otherwise.
  */
 
 interface StdlibFile {
@@ -51,6 +53,17 @@ interface ScriptState {
   err: ((message: string) => void)[];
 }
 
+/** Told of each file of a bundled library the engine reads, while someone asks. */
+let noteRead: ((library: string, key: string, found: boolean) => void) | null = null;
+
+/**
+ * Tells `note` of each file of a bundled library the engine reads from now
+ * on: the library, the key and whether the library has it; null stops.
+ */
+export function watchLibraryReads(note: ((library: string, key: string, found: boolean) => void) | null): void {
+  noteRead = note;
+}
+
 /** Reads a library's asset the first time it is called, and returns that from then on. */
 function lazyAsset(stdlibDir: string, library: string): () => StdlibFile {
   let file: StdlibFile | null = null;
@@ -61,7 +74,7 @@ function lazyAsset(stdlibDir: string, library: string): () => StdlibFile {
  * Lazily reads assets and hands the engine arrays of lines. Missing keys
  * return null, which is what the engine expects for "not in this library".
  */
-function createLibraryProxy(asset: () => StdlibFile): Record<string, string[] | null> {
+function createLibraryProxy(library: string, asset: () => StdlibFile): Record<string, string[] | null> {
   const lines = new Map<string, string[]>();
 
   return new Proxy(
@@ -72,6 +85,7 @@ function createLibraryProxy(asset: () => StdlibFile): Record<string, string[] | 
           return null;
         }
         const { entries } = asset();
+        noteRead?.(library, property, Object.hasOwn(entries, property));
 
         const cached = lines.get(property);
         if (cached !== undefined) {
@@ -128,7 +142,7 @@ export function installStdlib(stdlibDir: string): void {
   // writes it in.
   for (const { name: library } of BUNDLED_LIBRARIES) {
     const asset = lazyAsset(stdlibDir, library);
-    stdlib[library] = createLibraryProxy(asset);
+    stdlib[library] = createLibraryProxy(library, asset);
     json[library] = createJsonProxy(asset);
     info[library] = { version: 'bundled' };
     // Pretend the library's script is already loaded: the engine then

@@ -8,6 +8,7 @@ import type {
   IncludeLoader,
   IncludeRequestMessage,
   IncludeResponseMessage,
+  LibraryRead,
   RenderLog,
   RenderRequestMessage,
   RenderResponseMessage,
@@ -33,6 +34,22 @@ import type {
  * by it: the worker passes each file the engine asks for here, and the
  * answer goes back to the worker that asked.
  */
+
+/** A diagram drawn, with the files of the bundled libraries the engine read. */
+export interface Drawing {
+  svg: string;
+  libraries: readonly LibraryRead[];
+}
+
+/** A render the engine failed, with the files of the bundled libraries it read first. */
+export class RenderFailure extends Error {
+  constructor(
+    message: string,
+    readonly libraries: readonly LibraryRead[]
+  ) {
+    super(message);
+  }
+}
 export class RendererClient {
   private worker: Worker | null = null;
   private nextId = 1;
@@ -40,7 +57,7 @@ export class RendererClient {
   private readonly pending = new Map<
     number,
     {
-      resolve: (svg: string) => void;
+      resolve: (drawing: Drawing) => void;
       reject: (error: Error) => void;
       request: RenderRequestMessage;
       timer: NodeJS.Timeout;
@@ -58,7 +75,12 @@ export class RendererClient {
 
   /** Renders `source`; `load` answers its local includes, which fail without one. */
   render(source: string, dark: boolean, load?: IncludeLoader): Promise<string> {
-    return new Promise<string>((resolve, reject) => {
+    return this.draw(source, dark, load).then(({ svg }) => svg);
+  }
+
+  /** Renders `source` as {@link render} does, and tells which files of the bundled libraries it read. */
+  draw(source: string, dark: boolean, load?: IncludeLoader): Promise<Drawing> {
+    return new Promise<Drawing>((resolve, reject) => {
       const id = this.nextId++;
       const request: RenderRequestMessage = { id, source, dark, includes: load !== undefined };
       this.pending.set(id, { resolve, reject, request, timer: this.startTimer(id), load });
@@ -111,7 +133,7 @@ export class RendererClient {
     this.idleTimer.unref();
   }
 
-  private settle(id: number): { resolve: (svg: string) => void; reject: (error: Error) => void } | undefined {
+  private settle(id: number): { resolve: (drawing: Drawing) => void; reject: (error: Error) => void } | undefined {
     const entry = this.pending.get(id);
     if (entry === undefined) {
       return undefined;
@@ -179,12 +201,13 @@ export class RendererClient {
       if (entry === undefined) {
         return;
       }
+      const libraries = message.libraries ?? [];
       if (message.error !== undefined) {
-        entry.reject(new Error(message.error));
+        entry.reject(new RenderFailure(message.error, libraries));
         return;
       }
       const svg = message.svg ?? '';
-      entry.resolve(svg);
+      entry.resolve({ svg, libraries });
       if (recognizeGraphvizCrash(svg)) {
         // The diagram keeps the engine's report; the renders queued behind
         // it would get the same one, so they go to a fresh Graphviz.

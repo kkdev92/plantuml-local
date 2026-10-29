@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from 'node:fs';
-import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import Module from 'node:module';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
@@ -21,6 +21,8 @@ import {
   type MarkdownStringStub,
   type SignatureHelpStub,
   type TextEditorStub,
+  type TreeItemStub,
+  type TreeViewHandle,
   type VscodeStub,
   type WebviewPanelStub,
 } from './helpers/vscode-stub';
@@ -3965,6 +3967,370 @@ describe('going to a diagram (dist)', () => {
     expect(vscodeStub._test.notifications.warn.slice(warnings)).toEqual(['Open a Markdown file to go to one of its diagrams.']);
     expect(vscodeStub._test.quickPicksShown).toHaveLength(shown + 1);
     expect(vscodeStub._test.shownDocuments).toHaveLength(moved);
+  });
+});
+
+describe('diagram dependencies (dist)', () => {
+  const DOCUMENT = [
+    '# Dependencies',
+    '',
+    '```plantuml deps',
+    '@startuml',
+    '!include common.puml',
+    '!theme mine from themes',
+    '!$name = "dyn"',
+    '!include $name.iuml',
+    '!include gone.puml',
+    '!include after.puml',
+    'Alice -> Bob',
+    '@enduml',
+    '```',
+    '',
+    '```plantuml link',
+    '@startuml',
+    '!include linked/secret.puml',
+    '@enduml',
+    '```',
+    '',
+    '```plantuml outside',
+    '@startuml',
+    '!include ../../outside/secret.puml',
+    '@enduml',
+    '```',
+    '',
+    '```plantuml library',
+    '@startuml',
+    '!include <C4/C4_Context>',
+    'Person(a, "A")',
+    '@enduml',
+    '```',
+  ];
+  const SHARED = ['!include parts/inner.puml', 'Alice -> Bob : fromShared'];
+  let base = '';
+  let root = '';
+  let folderOf: VscodeStub['workspace']['getWorkspaceFolder'] = () => undefined;
+  let parse: VscodeStub['Uri']['parse'] = (value) => vscodeStub.Uri.file(value);
+  const pathOf = (name: string): string => join(root, ...name.split('/'));
+  const uriOf = (name: string): string => vscodeStub.Uri.file(pathOf(name)).toString();
+  /** An editor of a document in the workspace folder on disk, its path as the platform writes it. */
+  const onDisk = (name: string, lines: readonly string[], line = 0, languageId = 'markdown'): TextEditorStub => {
+    const editor = makeEditor(uriOf(name), lines.join('\n'), line, { languageId });
+    return { ...editor, document: { ...editor.document, uri: { ...editor.document.uri, fsPath: pathOf(name) } } };
+  };
+  const view = (): TreeViewHandle => {
+    const handle = vscodeStub._test.treeViews.get('plantumlLocal.dependencies');
+    if (handle === undefined) {
+      throw new Error('the view was not created');
+    }
+    return handle;
+  };
+  /** The items under `element` as the view shows them: label and description, with the items under each. */
+  async function shown(element?: unknown): Promise<unknown[]> {
+    const { provider } = view();
+    return Promise.all(
+      (await provider.getChildren(element)).map(async (child) => {
+        const { label, description } = await provider.getTreeItem(child);
+        const said = description === undefined || description === '' ? label : `${label} — ${description}`;
+        const under = await shown(child);
+        return under.length === 0 ? said : [said, under];
+      })
+    );
+  }
+  /** The view, once each diagram of the active editor has a drawing of it as it is. */
+  async function drawn(): Promise<unknown[]> {
+    let tree: unknown[] = [];
+    for (let waited = 0; waited < 30_000; waited += 100) {
+      tree = await shown();
+      if (!/drawing…|changed since drawn/.test(JSON.stringify(tree))) {
+        return tree;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    throw new Error(`not drawn: ${JSON.stringify(tree)}`);
+  }
+  /** The item reached from the top through the items labelled `labels`. */
+  async function itemAt(...labels: string[]): Promise<{ element: unknown; item: TreeItemStub }> {
+    const { provider } = view();
+    let found: { element: unknown; item: TreeItemStub } | undefined;
+    for (const label of labels) {
+      const children = await provider.getChildren(found?.element);
+      const items = await Promise.all(children.map(async (element) => ({ element, item: await provider.getTreeItem(element) })));
+      found = items.find((entry) => entry.item.label === label);
+      if (found === undefined) {
+        throw new Error(`no ${label} among ${items.map((entry) => entry.item.label).join(', ')}`);
+      }
+    }
+    if (found === undefined) {
+      throw new Error('no item named');
+    }
+    return found;
+  }
+  const run = (id: string, ...args: unknown[]): Promise<unknown> =>
+    Promise.resolve(vscodeStub._test.registeredCommands.get(id)?.(...args));
+  /** Makes `editor` the active one, and waits for the view to say that it changed, as the editor does before it asks again. */
+  async function activate(editor: TextEditorStub): Promise<void> {
+    const changed = new Promise<void>((resolve) => {
+      const listening = view().provider.onDidChangeTreeData?.(() => {
+        listening?.dispose();
+        resolve();
+      });
+    });
+    vscodeStub._test.setActiveEditor(editor);
+    await changed;
+  }
+  /** Runs `body` with `editors` open, the first one active, and the view shown; then puts all back. */
+  async function withView(editors: readonly TextEditorStub[], body: () => Promise<void>): Promise<void> {
+    for (const editor of editors) {
+      vscodeStub._test.openDocument(editor.document);
+    }
+    vscodeStub._test.setActiveEditor(editors[0]);
+    view().setVisible(true);
+    try {
+      await body();
+    } finally {
+      view().setVisible(false);
+      vscodeStub._test.setActiveEditor(undefined);
+      for (const editor of editors) {
+        vscodeStub._test.closeDocument(editor.document);
+      }
+    }
+  }
+
+  beforeAll(async () => {
+    base = await realpath(await mkdtemp(join(tmpdir(), 'plantuml-local-dependencies-')));
+    root = join(base, 'ws');
+    await mkdir(pathOf('docs'), { recursive: true });
+    await mkdir(pathOf('shared/parts'), { recursive: true });
+    await mkdir(pathOf('shared/themes'), { recursive: true });
+    await mkdir(join(base, 'outside'), { recursive: true });
+    // The same name at the top of the folder, where the diagram does not look.
+    await writeFile(pathOf('common.puml'), 'Alice -> Bob : fromTop\n');
+    await writeFile(pathOf('shared/common.puml'), `${SHARED.join('\n')}\n`);
+    await writeFile(pathOf('shared/parts/inner.puml'), '!include ../common.puml\nCarol -> Dave : fromInner\n');
+    await writeFile(pathOf('shared/themes/puml-theme-mine.puml'), '!include skin.iuml\n');
+    await writeFile(pathOf('shared/skin.iuml'), 'skinparam shadowing false\n');
+    await writeFile(pathOf('docs/dyn.iuml'), 'Eve -> Frank : fromDyn\n');
+    await writeFile(join(base, 'outside', 'secret.puml'), 'Mallory -> Bob : secret\n');
+    await symlink(join(base, 'outside'), pathOf('docs/linked'), 'junction');
+    // The stub's folder, /c, is on no disk: this one is, so that its includes are read.
+    folderOf = vscodeStub.workspace.getWorkspaceFolder;
+    const folder = { uri: { ...vscodeStub.Uri.file(root), fsPath: root }, name: 'ws', index: 0 };
+    const under = `${vscodeStub.Uri.file(root).toString()}/`;
+    vscodeStub.workspace.getWorkspaceFolder = (uri) => (uri.toString().startsWith(under) ? folder : folderOf(uri));
+    // A drawing takes the path of its document from the document's URI, as the platform writes it.
+    parse = vscodeStub.Uri.parse;
+    vscodeStub.Uri.parse = (value) =>
+      value.startsWith(under) ? { ...parse(value), fsPath: pathOf(value.slice(under.length)) } : parse(value);
+    vscodeStub._test.setConfiguration('includePaths', ['shared']);
+  });
+
+  afterAll(async () => {
+    vscodeStub._test.setConfiguration('includePaths', undefined);
+    vscodeStub.Uri.parse = parse;
+    vscodeStub.workspace.getWorkspaceFolder = folderOf;
+    await rm(base, { recursive: true, force: true });
+  });
+
+  it('lists what each diagram asked for under the file that asked, apart from its include lines no request matches', async () => {
+    await withView([onDisk('docs/doc.md', DOCUMENT)], async () => {
+      expect(await drawn()).toEqual([
+        [
+          'deps',
+          [
+            [
+              'common.puml — !include · read · line 5',
+              [['parts/inner.puml — !include · read', ['../common.puml — !include · read · in a cycle']]],
+            ],
+            'themes/puml-theme-mine.puml — !theme · read · line 6',
+            // Written in the theme: asked for as the diagram asks, by none of its lines.
+            'skin.iuml — !include · read',
+            'dyn.iuml — !include · read',
+            'gone.puml — !include · not found · line 9',
+            [
+              'Other include lines — 2',
+              [
+                '$name.iuml — !include · path worked out when drawn · line 8',
+                // After the file not found, where the drawing stopped.
+                'after.puml — !include · not asked for when drawn · line 10',
+              ],
+            ],
+          ],
+        ],
+        ['link', ['linked/secret.puml — !include · refused · line 17']],
+        ['outside', ['../../outside/secret.puml — !include · outside the folder · line 23']],
+        ['library', [['Bundled libraries — 2', ['C4/C4_Context.puml', 'C4/C4.puml']]]],
+      ]);
+
+      const tooltip = async (...labels: string[]): Promise<unknown> => (await itemAt(...labels)).item.tooltip;
+      // Read from the folder of the setting once not found next to the document, not from the top of the folder.
+      expect(await tooltip('deps', 'common.puml')).toBe(
+        [
+          'common.puml',
+          '!include · read · line 5',
+          'Asked for by the diagram.',
+          `Read ${pathOf('shared/common.puml')}.`,
+          `Looked at: ${pathOf('docs/common.puml')}`,
+        ].join('\n')
+      );
+      expect(await tooltip('deps', 'common.puml', 'parts/inner.puml')).toBe(
+        [
+          'parts/inner.puml',
+          '!include · read',
+          `Asked for by ${pathOf('shared/common.puml')}.`,
+          `Read ${pathOf('shared/parts/inner.puml')}.`,
+        ].join('\n')
+      );
+      expect(await tooltip('deps', 'skin.iuml')).toBe(
+        [
+          'skin.iuml',
+          '!include · read',
+          'Asked for by the diagram.',
+          `Read ${pathOf('shared/skin.iuml')}.`,
+          `Looked at: ${pathOf('docs/skin.iuml')}`,
+          'No line of the diagram asks for it as written, so the line that asked is not known.',
+        ].join('\n')
+      );
+      expect(await tooltip('deps', 'gone.puml')).toBe(
+        [
+          'gone.puml',
+          '!include · not found · line 9',
+          'Asked for by the diagram.',
+          'not found: File not found relative to the file containing this directive or in the plantumlLocal.includePaths folders.',
+          `Looked at: ${pathOf('docs/gone.puml')}`,
+          `Looked at: ${pathOf('shared/gone.puml')}`,
+        ].join('\n')
+      );
+      expect(await tooltip('link', 'linked/secret.puml')).toBe(
+        [
+          'linked/secret.puml',
+          '!include · refused · line 17',
+          'Asked for by the diagram.',
+          'refused: Files accessed through symbolic links or junctions cannot be included. Use a path within the workspace folder that does not pass through either.',
+          `Looked at: ${pathOf('docs/linked/secret.puml')}`,
+        ].join('\n')
+      );
+      expect(await tooltip('outside', '../../outside/secret.puml')).toBe(
+        [
+          '../../outside/secret.puml',
+          '!include · outside the folder · line 23',
+          'Asked for by the diagram.',
+          "outside the folder: The path is outside the document's workspace folder. Move the file into that folder or correct the path.",
+        ].join('\n')
+      );
+      // What was read was given to the engine; it is not said to be used.
+      expect(await tooltip('deps')).toBe(
+        [
+          'deps',
+          'What its last drawing asked for, and its include lines that no request matches. A file read was given to the engine, which may skip it or use only part of it.',
+        ].join('\n')
+      );
+    });
+  });
+
+  it('opens a file read once found again where a drawing reads it, and goes to the line that asked', async () => {
+    await withView([onDisk('docs/doc.md', DOCUMENT), onDisk('shared/common.puml', SHARED, 0, 'plantuml')], async () => {
+      await drawn();
+      const calls = vscodeStub._test.commandCalls.length;
+      await run('plantumlLocal.openDependency', (await itemAt('deps', 'common.puml')).element);
+      expect(
+        vscodeStub._test.commandCalls
+          .slice(calls)
+          .filter(({ id }) => id === 'vscode.open')
+          .map(({ args }) => String(args[0]))
+      ).toEqual([uriOf('shared/common.puml')]);
+
+      // Asked for by a file: the line of that file written as it asked.
+      await run('plantumlLocal.goToIncludeLine', (await itemAt('deps', 'common.puml', 'parts/inner.puml')).element);
+      expect(vscodeStub._test.shownDocuments.at(-1)).toEqual({ uri: uriOf('shared/common.puml'), line: 0 });
+
+      // Asked for from the theme: to the diagram, saying that the line is not known.
+      const infos = vscodeStub._test.notifications.info.length;
+      await run('plantumlLocal.goToIncludeLine', (await itemAt('deps', 'skin.iuml')).element);
+      expect(vscodeStub._test.shownDocuments.at(-1)).toEqual({ uri: uriOf('docs/doc.md'), line: 3 });
+
+      // Gone since it was read: not opened.
+      const dyn = await itemAt('deps', 'dyn.iuml');
+      await rm(pathOf('docs/dyn.iuml'));
+      try {
+        await run('plantumlLocal.openDependency', dyn.element);
+      } finally {
+        await writeFile(pathOf('docs/dyn.iuml'), 'Eve -> Frank : fromDyn\n');
+      }
+      expect(vscodeStub._test.notifications.info.slice(infos)).toEqual([
+        'The line that asked for skin.iuml is not known.',
+        'dyn.iuml was not opened: it is no longer there.',
+      ]);
+      expect(
+        vscodeStub._test.commandCalls
+          .slice(calls)
+          .filter(({ id }) => id === 'vscode.open')
+          .map(({ args }) => String(args[0]))
+      ).toEqual([uriOf('shared/common.puml')]);
+
+      // Only an item the view made acts.
+      const shownBefore = vscodeStub._test.shownDocuments.length;
+      await run('plantumlLocal.goToIncludeLine', { type: 'request', node: { request: { from: null }, lines: [0] } });
+      expect(vscodeStub._test.shownDocuments).toHaveLength(shownBefore);
+    });
+  });
+
+  it('reads no file in Restricted Mode, and opens none a drawing read before', async () => {
+    await withView([onDisk('docs/doc.md', DOCUMENT)], async () => {
+      await drawn();
+      const common = await itemAt('deps', 'common.puml');
+      const restricted = onDisk('docs/restricted.md', ['```plantuml r', '@startuml', '!include common.puml', '@enduml', '```']);
+      vscodeStub.workspace.isTrusted = false;
+      try {
+        const infos = vscodeStub._test.notifications.info.length;
+        const calls = vscodeStub._test.commandCalls.length;
+        await run('plantumlLocal.openDependency', common.element);
+        expect(vscodeStub._test.notifications.info.slice(infos)).toEqual([
+          'common.puml was not opened: files are not read for this document now.',
+        ]);
+        expect(vscodeStub._test.commandCalls.slice(calls).filter(({ id }) => id === 'vscode.open')).toEqual([]);
+
+        vscodeStub._test.openDocument(restricted.document);
+        await activate(restricted);
+        expect(await drawn()).toEqual([['r', ['common.puml — !include · not read · line 3']]]);
+        expect((await itemAt('r', 'common.puml')).item.tooltip).toBe(
+          [
+            'common.puml',
+            '!include · not read · line 3',
+            'Asked for by the diagram.',
+            'not read: Local includes are unavailable in Restricted Mode. Trust this workspace to include files.',
+          ].join('\n')
+        );
+      } finally {
+        vscodeStub.workspace.isTrusted = true;
+        vscodeStub._test.closeDocument(restricted.document);
+      }
+    });
+  });
+
+  it('lists the diagrams of open documents whose drawings read the active file, and goes to them', async () => {
+    const shared = onDisk('shared/common.puml', SHARED, 0, 'plantuml');
+    await withView([onDisk('docs/doc.md', DOCUMENT), shared], async () => {
+      await drawn();
+      await activate(shared);
+      expect(await drawn()).toEqual([['Diagrams that read this file — in open documents', [`deps — ${uriOf('docs/doc.md')}`]]]);
+      await run('plantumlLocal.openDependency', (await itemAt('Diagrams that read this file', 'deps')).element);
+      expect(vscodeStub._test.shownDocuments.at(-1)).toEqual({ uri: uriOf('docs/doc.md'), line: 3 });
+    });
+  });
+
+  it('shows the view with the diagram at the cursor selected', async () => {
+    const editor = onDisk('docs/doc.md', DOCUMENT, 16);
+    vscodeStub._test.openDocument(editor.document);
+    vscodeStub._test.setActiveEditor(editor);
+    try {
+      const calls = vscodeStub._test.commandCalls.length;
+      await run('plantumlLocal.showDependencies');
+      expect(vscodeStub._test.commandCalls.slice(calls).map(({ id }) => id)).toContain('plantumlLocal.dependencies.focus');
+      expect((await view().provider.getTreeItem(view().revealed.at(-1))).label).toBe('link');
+    } finally {
+      vscodeStub._test.setActiveEditor(undefined);
+      vscodeStub._test.closeDocument(editor.document);
+    }
   });
 });
 
