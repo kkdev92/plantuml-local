@@ -59,6 +59,21 @@ updates.
   the list stops at 5,000 places. The completion, the parameter hints, Go to
   Definition and Find All References read a PlantUML file with no start line,
   one that only other files include, whole, as its preview draws it.
+- **Hovers explain directives and show what a name stands for.** Hovering a
+  preprocessor directive, the kind of diagram after `@start`, a theme bundled
+  with the extension or an OpenIconic icon shows what it does and how it is
+  written, and for a kind of diagram and most directives, a small diagram or
+  an example that the bundled engine draws — in English or Japanese, with
+  nothing fetched. On a call, a variable or a parameter, the hover shows each
+  definition the name may stand for, found as Go to Definition finds them: as
+  declared, where, and the comment above it as written, with how sure that
+  is; one marked unresolved, which Go to Definition does not lead to, is
+  shown too. On the path of an include, it says which file the diagram reads
+  there, or why it reads none. Hovers are untrusted Markdown with HTML turned
+  off, and the text of the documents in them is escaped or put in code
+  blocks, so that a link, an image or HTML in a comment shows as written. The
+  keywords of each kind of diagram and the names of skinparam and style items
+  have no help.
 
 ### Changed
 

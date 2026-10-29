@@ -49,6 +49,7 @@ Your diagram source is processed locally and is not sent to a rendering service.
 - **Writing Help**: Completion for start lines, directives, themes and icons, the aliases and words of the diagram you are in, the procedures, functions and variables it and the files it includes define — with parameter hints for their calls — snippets of sequence and activity blocks, templates for sixteen kinds of diagram, and quick fixes that name a diagram for export and add a missing end line
 - **Go to Definition**: `F12`, Ctrl+Click and Peek on a call, a variable or a participant lead to where the diagram, a file it includes or a bundled library defines or declares it — never to another diagram — and a file of the C4 and Azure libraries opens read-only
 - **Find All References**: `Shift+Alt+F12`, `Shift+F12` and Peek list each call and use of a procedure, function or variable, and each line naming a participant, that leads to the same definition — in the diagram and the files it includes, never in another diagram
+- **Hovers**: A directive, the kind of diagram after `@start`, a bundled theme and an OpenIconic icon show what they do and how they are written, in English or Japanese, with nothing fetched; a call or a variable shows each definition it may stand for, with the comment above it as written; the path of an include shows the file it reads, or why it reads none
 - **Actions Above Each Diagram**: *Preview*, *Export SVG* and *Export PNG* sit above the first line of each diagram, in `.puml` files and Markdown alike, and act on that diagram
 - **Go to Diagram**: *Go to Diagram in Document…* lists the diagram blocks of a Markdown file — with the heading above each, its kind and its title or first line — and moves the cursor to the one picked
 - **Colours**: A swatch beside each colour a diagram sets — a `skinparam` value, an element's colour, a `<style>` property — opens VS Code's colour picker, which writes the pick back as `#RRGGBB`
@@ -471,6 +472,65 @@ again — are not listed; the Language Status then says *(partial)* and the
 output which includes were not read. At most 5,000 places are listed, and
 when the list stops there, the Language Status and the output say so.
 
+### Hovers
+
+Hovering in a diagram — a ` ```plantuml ` block or a `.puml` file — shows
+help that ships with the extension on what the engine reads alike in every
+diagram:
+
+- a preprocessor directive the completion offers after `!` — `!include`,
+  `!if`, `!procedure` and the rest — with `unquoted` and `final` before
+  `procedure` or `function`, and the `return` after the parameters of a
+  function written on one line
+- the kind of diagram after `@start`, as in `@startuml`, `@startgantt` or
+  `@startmindmap`
+- a theme bundled with the extension, after `!theme`
+- an OpenIconic icon, as in `<&heart>`
+
+Each says what it does and shows how it is written — for a kind of diagram,
+as a small diagram of that kind — and most directives come with an example.
+The bundled engine draws the small diagrams and the examples as they are.
+The help is in English, or in Japanese when that is VS Code's display
+language, and nothing is fetched to show it. As the engine reads them, a
+directive counts in lower case only, and a theme or an icon by its own name,
+in its own case: `!Include`, `!theme Plain` and `<&Heart>` get no help. Nor
+does a theme or an icon whose name holds a word the diagram defines, as the
+engine may put a value in its place; where that word is a variable, the
+hover shows its definition instead. The keywords of each kind of diagram and
+the names of `skinparam` and style items have no help.
+
+On a call of a procedure, a function or a macro, on a variable, and on a
+parameter in the body of its procedure or function, the hover shows the
+definitions the name may stand for, found as Go to Definition finds them:
+each as declared, where — this diagram, a file of the workspace or a file of
+a library such as `<C4/C4_Context>`, with its line — and the comment lines
+above it as written, up to 20 lines and 2,000 characters. It shows ten at
+most, and says how many more there are. Above them, a line says where they
+are, what defines them and how sure that is, as the completion does:
+*conditional*, *ambiguous* or *unresolved* (see
+[Definitions and parameter hints](#definitions-and-parameter-hints)). Unlike
+Go to Definition, the hover also shows a definition marked *unresolved*. An
+element's name, such as a participant's, has no hover.
+
+On the path of an `!include`, `!include_once`, `!include_many` or
+`!includesub`, and on the name and the folder of `!theme … from`, the hover
+says which file the diagram reads there, found as the preview finds it, or
+why it reads none — a missing file, a path outside the workspace folder,
+Restricted Mode — in the words of the preview. On the path of a bundled
+library, such as `<C4/C4_Context>`, it says whether the extension bundles
+that file, and on a URL, that URLs are not supported. A path the engine works
+out — from a variable, a function, or a name the diagram defines — and one
+written in a procedure or a function, which is read when that runs, are not
+looked up: the hover says so, and on a variable in the path shows its
+definition.
+
+Hovers are written as untrusted Markdown with HTML turned off, and the text
+of the documents in them — declarations, comments, paths — is escaped or put
+in code blocks, so that a link, an image or HTML in a comment is shown as
+written rather than followed, loaded or run. Included files of the workspace
+are read as for the completion, with their unsaved changes, and the Language
+Status and the output say which includes were not read.
+
 ### Colours
 
 A swatch sits beside each colour a diagram sets where the extension can edit
@@ -837,6 +897,9 @@ and would show the referenced image as a second copy.
   instead, since the engine would draw only the first diagram or page
 - Functions that read the machine return nothing: `%getenv()`, `%filename()`
   and `%dirpath()` are empty and `%file_exists()` is `0`
+- `!dump_memory` writes nothing with the bundled engine, and the text `!log`
+  writes shows as an error under *Window* in the Output panel, not in the
+  *PlantUML Local* output
 - Hyperlinks (`[[https://…]]`) are drawn as text, not as links
 - A diagram wider or taller than 8192 pixels is not drawn; an error is shown
   instead

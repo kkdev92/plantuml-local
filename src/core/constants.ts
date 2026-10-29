@@ -222,8 +222,8 @@ export function isDiagramFence(info: string): boolean {
  * `!import` take it as their argument, `!theme` after `from`. Like the
  * engine, only an argument that starts with the scheme counts.
  */
-const URL_DIRECTIVE = /^\s*!(?:include(?:url|_once|_many|sub)?|import)\s*https?:\/\//i;
-const URL_THEME = /^\s*!theme\s+\S.*?\sfrom\s+https?:\/\//i;
+const URL_DIRECTIVE = /^\s*!(?:include(?:url|_once|_many|sub)?|import)\s*(https?:\/\/)/i;
+const URL_THEME = /^\s*!theme\s+\S.*?\sfrom\s+(https?:\/\/)/i;
 
 /**
  * Whether the source has a PlantUML preprocessor directive that references
@@ -256,6 +256,19 @@ export function remoteReferenceLine(source: string): number | null {
     }
   }
   return null;
+}
+
+/**
+ * Where the URL such a directive line reads is: the columns from its scheme
+ * to the end of the line, without the white space that ends it; null for
+ * any other line.
+ */
+export function remoteReferenceIn(line: string): { start: number; end: number } | null {
+  const found = URL_DIRECTIVE.exec(line) ?? URL_THEME.exec(line);
+  if (found === null) {
+    return null;
+  }
+  return { start: found[0].length - (found[1] ?? '').length, end: line.trimEnd().length };
 }
 
 /**

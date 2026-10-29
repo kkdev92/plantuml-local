@@ -5,6 +5,8 @@ import { callAt, type Call } from '../../src/language/calls';
 import { declarationsOf } from '../../src/language/declarations';
 import {
   declarationOf,
+  definitionsOf,
+  describeEntry,
   diagramLinesAt,
   libraryFile,
   macroPlace,
@@ -246,6 +248,25 @@ describe('declarationOf', () => {
 
     expect(macros.variables.get('$a')?.candidates.map(({ macro }) => declarationOf(macro))).toEqual(['$a']);
     expect(macros.variables.get('$b')?.candidates.map(({ macro }) => declarationOf(macro))).toEqual(['$b = "x"']);
+  });
+});
+
+describe('describeEntry and definitionsOf', () => {
+  it('say where an entry is defined, by what, and each definition with the comment above it', async () => {
+    const macros = await definedAt(['!include <C4/C4_Context>', '!procedure Box()', '!endprocedure'], {
+      libraries: { c4: { c4_context: ["' Someone who uses the system", '!procedure Person($alias, $label = "")', '!endprocedure'] } },
+    });
+    const person = entries(macros).get('Person/2');
+    const box = entries(macros).get('Box/0');
+    expect(person && describeEntry(person, labels)).toBe('<C4/C4_Context> · procedure');
+    expect(person && definitionsOf(person, labels)).toEqual([
+      {
+        declaration: '!procedure Person($alias, $label = "")',
+        where: '<C4/C4_Context>, line 2',
+        comment: 'Someone who uses the system',
+      },
+    ]);
+    expect(box && definitionsOf(box, labels)).toEqual([{ declaration: '!procedure Box()', where: 'this diagram, line 3' }]);
   });
 });
 
