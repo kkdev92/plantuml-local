@@ -52,6 +52,40 @@ export function codeBlock(text: string, language: string): string {
   return `${fence}${language}\n${text}\n${fence}`;
 }
 
+/** `text`, one line, in a code span that no run of backticks in it can close. */
+export function inlineCode(text: string): string {
+  let longest = 0;
+  for (const run of text.matchAll(/`+/g)) {
+    longest = Math.max(longest, run[0].length);
+  }
+  const ticks = '`'.repeat(longest + 1);
+  // A space on each side, which the span drops again, keeps an end that is
+  // a backtick from joining the run around it, and an end that is a space
+  // from being dropped (a span that starts and ends with a space loses one
+  // at each end, unless it is all spaces).
+  const pad = /^[` ]|[` ]$/.test(text) && /[^ ]/.test(text) ? ' ' : '';
+  return `${ticks}${pad}${text}${pad}${ticks}`;
+}
+
+/**
+ * `text` shown as written where it may wrap: each line escaped as
+ * {@link escapeMarkdown} escapes it, a line break at each of its own, and
+ * each run of spaces or tabs written as that many spaces, all no-break but
+ * the first of a run inside the line, where the line can still wrap.
+ * Markdown drops the spaces a line starts with, so a run there is all
+ * no-break.
+ */
+export function escapeLines(text: string): string {
+  return text
+    .split('\n')
+    .map((line) =>
+      escapeMarkdown(line).replace(/[ \t]+/g, (run: string, at: number) =>
+        at === 0 ? '&nbsp;'.repeat(run.length) : ` ${'&nbsp;'.repeat(run.length - 1)}`
+      )
+    )
+    .join('\\\n');
+}
+
 /** What a hover gives built-in help for, and its columns in its line. */
 export interface BuiltinTarget {
   kind: 'directive' | 'diagram' | 'theme' | 'icon';

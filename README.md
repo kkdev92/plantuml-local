@@ -359,9 +359,9 @@ and Azure libraries alike:
 Each shows its parameters, where it is defined — this diagram, a file of the
 workspace, or a file of a library such as `<C4/C4_Context>` — and what defines
 it; its details show how it is declared, its line and the comment lines above
-it. Picking a procedure, function or macro writes the call with a placeholder
-for each parameter up to the last that has no default, and opens the
-parameter hints. Typing `$`, or a name that starts with it, lists only the
+it as written. Picking a procedure, function or macro writes the call with a
+placeholder for each parameter up to the last that has no default, and opens
+the parameter hints. Typing `$`, or a name that starts with it, lists only the
 names that start with `$`, as does a place in the text of the diagram —
 quoted text, a note, a title — or in the path of an `!include`.
 

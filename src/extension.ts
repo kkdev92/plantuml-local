@@ -131,7 +131,16 @@ import {
   parameterAt,
   type Occurrence,
 } from './language/definitions';
-import { builtinAt, definitionSections, escapeMarkdown, helpFor, helpMarkdown } from './language/hover';
+import {
+  builtinAt,
+  codeBlock,
+  definitionSections,
+  escapeLines,
+  escapeMarkdown,
+  helpFor,
+  helpMarkdown,
+  inlineCode,
+} from './language/hover';
 import { LIBRARY_SCHEME, libraryOfPath, libraryPath, libraryText } from './language/library-view';
 import { templatePlace } from './language/templates';
 import { missingEndAt, namesDiagram, unnamedAt, withName } from './language/code-actions';
@@ -3297,19 +3306,37 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         };
       };
 
-      /** How each definition is declared, where, and the comment above it. */
-      const documentationOf = (definitions: readonly MacroDefinition[]): vscode.MarkdownString => {
-        const markdown = new vscode.MarkdownString();
-        for (const definition of definitions) {
-          markdown.appendCodeblock(definition.declaration, 'plantuml');
-          markdown.appendText(definition.where);
-          if (definition.comment !== undefined) {
-            markdown.appendText(`\n\n${definition.comment}`);
-          }
-          markdown.appendMarkdown('\n\n');
-        }
+      /**
+       * Markdown for a hover, the details of a completion item or the
+       * parameter hints: untrusted and without HTML, so that nothing in it
+       * runs a command or loads anything.
+       */
+      const untrusted = (value: string): vscode.MarkdownString => {
+        const markdown = new vscode.MarkdownString(value);
+        markdown.isTrusted = false;
+        markdown.supportHtml = false;
         return markdown;
       };
+
+      /**
+       * How each definition is declared, where, and the comment above it, as
+       * written and wrapped to the details: VS Code 1.144.0 cuts a line of a
+       * code block there that does not fit, and through appendText shows the
+       * URLs in a comment as links and named character references such as
+       * `&lt;` as the characters they stand for.
+       */
+      const documentationOf = (definitions: readonly MacroDefinition[]): vscode.MarkdownString =>
+        untrusted(
+          definitions
+            .map((definition) =>
+              [
+                inlineCode(definition.declaration),
+                escapeMarkdown(definition.where),
+                ...(definition.comment === undefined ? [] : [escapeLines(definition.comment)]),
+              ].join('\n\n')
+            )
+            .join('\n\n')
+        );
 
       /** The definitions the completion offers at `place`, replacing the name there; undefined once the request is stale. */
       const definitionItems = async (
@@ -3545,10 +3572,13 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         }
         const help = new vscode.SignatureHelp();
         help.signatures = shown.signatures.map((signature) => {
-          const documentation = new vscode.MarkdownString().appendText(signature.description);
-          if (signature.comment !== undefined) {
-            documentation.appendText(`\n\n${signature.comment}`);
-          }
+          // Written as a hover writes them, so that the comment shows as written.
+          const documentation = untrusted(
+            [
+              escapeMarkdown(signature.description),
+              ...(signature.comment === undefined ? [] : [codeBlock(signature.comment, 'text')]),
+            ].join('\n\n')
+          );
           const information = new vscode.SignatureInformation(signature.label, documentation);
           information.parameters = signature.parameters.map(
             ([from, to]) => new vscode.ParameterInformation([from, to])
@@ -3914,14 +3944,6 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         }
         report(document, { reasons: reading.reasonsOf(whole.macros), cut: cut ? 'references' : false });
         return locations.size === 0 ? undefined : [...locations.values()];
-      };
-
-      /** Markdown for a hover: untrusted and without HTML, so that nothing in it runs a command or loads anything. */
-      const untrusted = (value: string): vscode.MarkdownString => {
-        const markdown = new vscode.MarkdownString(value);
-        markdown.isTrusted = false;
-        markdown.supportHtml = false;
-        return markdown;
       };
 
       /**

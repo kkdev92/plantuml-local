@@ -4,6 +4,7 @@ import Module from 'node:module';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import MarkdownIt from 'markdown-it';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { createContextStub, type ContextStub } from './helpers/context-stub';
@@ -24,7 +25,15 @@ import {
   type WebviewPanelStub,
 } from './helpers/vscode-stub';
 import { englishMessages } from '../../src/core/messages';
-import { codeBlock, escapeMarkdown, helpFor, helpMarkdown, type BuiltinTarget } from '../../src/language/hover';
+import {
+  codeBlock,
+  escapeLines,
+  escapeMarkdown,
+  helpFor,
+  helpMarkdown,
+  inlineCode,
+  type BuiltinTarget,
+} from '../../src/language/hover';
 
 /**
  * Loads the built dist/extension.js with a stubbed `vscode` module and
@@ -2256,7 +2265,13 @@ describe('definitions in completion and parameter hints (dist)', () => {
     );
   };
   const labelOf = (item: CompletionItemStub): string => (typeof item.label === 'string' ? item.label : item.label.label);
-  const partsOf = (documentation: unknown): MarkdownStringStub['parts'] => (documentation as MarkdownStringStub).parts;
+  /** The Markdown of the details or the parameter hints, which, as a hover, may run no command and let no HTML through. */
+  const markdownOf = (documentation: unknown): string => {
+    const markdown = documentation as MarkdownStringStub;
+    expect(markdown.isTrusted).toBe(false);
+    expect(markdown.supportHtml).toBe(false);
+    return markdown.value;
+  };
   const status = (): (typeof vscodeStub._test.languageStatusItems)[number] | undefined =>
     vscodeStub._test.languageStatusItems.find((item) => item.id === 'plantumlLocal.definitions');
   const boxes = (call: string): string =>
@@ -2287,12 +2302,13 @@ describe('definitions in completion and parameter hints (dist)', () => {
         replacing: { start: { line: 6, character: 0 }, end: { line: 6, character: 2 } },
       },
     });
-    expect(partsOf(box?.documentation)).toEqual([
-      { kind: 'code', value: '!procedure Box($a, $b = "x")', language: 'plantuml' },
-      { kind: 'text', value: 'this diagram, line 3' },
-      { kind: 'text', value: '\n\nDraws a box' },
-      { kind: 'markdown', value: '\n\n' },
-    ]);
+    expect(markdownOf(box?.documentation)).toBe(
+      [
+        inlineCode('!procedure Box($a, $b = "x")'),
+        escapeMarkdown('this diagram, line 3'),
+        escapeLines('Draws a box'),
+      ].join('\n\n')
+    );
     expect(items.find((item) => labelOf(item) === '$twice')).toMatchObject({
       label: { label: '$twice', detail: '($n)', description: 'this diagram · function' },
       kind: vscodeStub.CompletionItemKind.Function,
@@ -2332,14 +2348,11 @@ describe('definitions in completion and parameter hints (dist)', () => {
       },
       insertText: { value: 'Person(${1:\\$alias}, ${2:\\$label})' },
     });
-    expect(partsOf(person?.documentation).slice(0, 2)).toEqual([
-      {
-        kind: 'code',
-        value: '!unquoted procedure Person($alias, $label, $descr = "", $sprite = "", $tags = "", $link = "", $type = "")',
-        language: 'plantuml',
-      },
-      { kind: 'text', value: '<C4/C4_Context>, line 366' },
-    ]);
+    const declared = [
+      inlineCode('!unquoted procedure Person($alias, $label, $descr = "", $sprite = "", $tags = "", $link = "", $type = "")'),
+      escapeMarkdown('<C4/C4_Context>, line 366'),
+    ].join('\n\n');
+    expect(markdownOf(person?.documentation).slice(0, declared.length)).toBe(declared);
     // C4_Context includes C4, which declares the tags.
     expect(items.find((item) => labelOf(item) === 'AddElementTag')).toMatchObject({
       label: { description: '<C4/C4> · procedure' },
@@ -2373,14 +2386,43 @@ describe('definitions in completion and parameter hints (dist)', () => {
       activeParameter: 1,
       signatures: [{ label: 'Box($a, $b = "x")', parameters: [{ label: [4, 6] }, { label: [8, 16] }], activeParameter: 1 }],
     });
-    expect(partsOf(help?.signatures[0]?.documentation)).toEqual([
-      { kind: 'text', value: 'this diagram · procedure' },
-      { kind: 'text', value: '\n\nDraws a box' },
-    ]);
+    expect(markdownOf(help?.signatures[0]?.documentation)).toBe(
+      [escapeMarkdown('this diagram · procedure'), codeBlock('Draws a box', 'text')].join('\n\n')
+    );
     // Outside a call, and on a name nothing defines: none.
     expect(await hints(document, 6, 0)).toBeUndefined();
     const unknown = makeEditor('file:///c/defs/unknown.puml', boxes('Nope('), 0, { languageId: 'plantuml' }).document;
     expect(await hints(unknown, 6, 5)).toBeUndefined();
+  });
+
+  it('shows the comment above a definition as written in the details and the parameter hints, as the hovers do', async () => {
+    const comment = [
+      "<img src='https://example.com/x.png'> <b>bold</b> <script>alert(1)</script>",
+      '[run](command:workbench.action.quit) ![image](https://example.com/y.png) **not bold**',
+      '&lt;i&gt; &amp; https://example.com www.example.com',
+      '```',
+    ];
+    const hostile = (call: string): string =>
+      ['@startuml', ...comment.map((line) => `' ${line}`), '!procedure Box($a)', '!endprocedure', call, '@enduml'].join('\n');
+    const typed = makeEditor('file:///c/defs/hostile.puml', hostile('Bo'), 0, { languageId: 'plantuml' }).document;
+    const box = ((await provide(typed, 7, 2)) ?? []).find((item) => labelOf(item) === 'Box');
+    const called = makeEditor('file:///c/defs/hostile-call.puml', hostile('Box('), 0, { languageId: 'plantuml' }).document;
+    const help = await hints(called, 7, 4);
+    expect(box?.documentation).toBeDefined();
+    expect(help?.signatures[0]?.documentation).toBeDefined();
+
+    // Read back the way most permissive: HTML let through and bare links turned into links.
+    const md = new MarkdownIt({ html: true, linkify: true });
+    const details = md.render(markdownOf(box?.documentation));
+    const shown = md.render(markdownOf(help?.signatures[0]?.documentation));
+    const lines = comment.map((line) => md.utils.escapeHtml(line));
+    for (const html of [details, shown]) {
+      expect(html).not.toMatch(/<(?:a|img|b|script)\b/);
+    }
+    // The details break the lines where the comment does, as text that wraps; the hints keep them in a code block.
+    expect(details).toContain(lines.join('<br>\n'));
+    expect(details).not.toMatch(/<pre\b/);
+    expect(shown).toContain(lines.join('\n'));
   });
 
   it('reads a call in a Markdown block from its quote markers on, and keeps the definition picked while it takes the arguments', async () => {
