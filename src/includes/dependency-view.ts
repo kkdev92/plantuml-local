@@ -62,6 +62,14 @@ export interface DependencyViewHost extends Pick<IncludeHost, 'includePaths'> {
   diagrams(document: vscode.TextDocument): ViewDiagram[];
   /** Draws `source` for `document` as the Problems panel does, so that its drawing is kept in `records`. */
   draw(source: string, document: vscode.Uri): Promise<unknown>;
+  /**
+   * The path upstream gives file `key` of the bundled library `library`
+   * (`Networking/AzureApplicationGateway`), once `readLibrary` has read it;
+   * undefined before, and for a file it does not have.
+   */
+  libraryFile(library: string, key: string): string | undefined;
+  /** Reads the paths upstream gives the files of the bundled library `library`. */
+  readLibrary(library: string): Promise<unknown>;
   l10n: MessageLocalizer;
 }
 
@@ -129,6 +137,8 @@ export class DependencyView implements vscode.TreeDataProvider<Item>, vscode.Dis
   private listed = new Map<string, ListedRow>();
   /** The rows made so far, which numbers the id of the next. */
   private made = 0;
+  /** The bundled libraries the paths of whose files the view has read, or is reading. */
+  private readonly asked = new Set<string>();
 
   constructor(private readonly host: DependencyViewHost) {
     this.view = vscode.window.createTreeView(DEPENDENCIES_VIEW, { treeDataProvider: this, showCollapseAll: true });
@@ -207,7 +217,7 @@ export class DependencyView implements vscode.TreeDataProvider<Item>, vscode.Dis
         }
         await vscode.commands.executeCommand(
           'vscode.open',
-          vscode.Uri.from({ scheme: LIBRARY_SCHEME, path: libraryPath(item.read.library, item.read.key) })
+          vscode.Uri.from({ scheme: LIBRARY_SCHEME, path: this.libraryPathOf(item.read) })
         );
         return undefined;
       case 'reader': {
@@ -355,7 +365,7 @@ export class DependencyView implements vscode.TreeDataProvider<Item>, vscode.Dis
           l10n.t('The files of the bundled libraries the drawing read, in the order first read. Which file read which is not shown.')
         );
       case 'library': {
-        const path = libraryPath(item.read.library, item.read.key);
+        const path = this.libraryPathOf(item.read);
         const tree = new vscode.TreeItem(path.slice(1), vscode.TreeItemCollapsibleState.None);
         if (item.read.found) {
           tree.resourceUri = vscode.Uri.from({ scheme: LIBRARY_SCHEME, path });
@@ -505,11 +515,44 @@ export class DependencyView implements vscode.TreeDataProvider<Item>, vscode.Dis
       case 'libraries': {
         const item = this.issue<GroupItem>({ type: 'libraries', parent, children: [] });
         item.children = node.libraries.map((read) => this.issue({ type: 'library', parent: item, read }));
+        this.readPaths(node.libraries);
         return item;
       }
       case 'more':
         return this.issue({ type: 'more', parent, count: node.count });
     }
+  }
+
+  /**
+   * Reads the paths upstream gives the files of the libraries `reads` found
+   * files in, once for each library, and lays the view out again when they
+   * are read. A library that could not be read is read again the next time
+   * the view lists one of its files.
+   */
+  private readPaths(reads: readonly LibraryRead[]): void {
+    for (const { library, key, found } of reads) {
+      if (!found || this.asked.has(library) || this.host.libraryFile(library, key) !== undefined) {
+        continue;
+      }
+      this.asked.add(library);
+      this.host.readLibrary(library).then(
+        () => {
+          this.refresh();
+        },
+        () => {
+          this.asked.delete(library);
+        }
+      );
+    }
+  }
+
+  /**
+   * The path of `read` in the view of the bundled libraries: its file named
+   * as upstream writes it once its library has been read, as Go to
+   * Definition opens it, else by its key.
+   */
+  private libraryPathOf(read: LibraryRead): string {
+    return libraryPath(read.library, read.key, this.host.libraryFile(read.library, read.key));
   }
 
   /** The diagrams of open documents whose kept drawings read `document`, a file. */

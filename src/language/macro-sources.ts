@@ -43,28 +43,44 @@ export class LibraryDeclarations {
     if (bundled === undefined) {
       return undefined;
     }
-    let file = this.read.get(bundled.name);
+    const { declarations } = await this.library(bundled.name);
+    // A key such as `constructor` names no file, whatever an object has.
+    return Object.hasOwn(declarations, key) ? (declarations[key] ?? null) : null;
+  }
+
+  /**
+   * Reads `library` as `declared` does, so that `fileName` names its files;
+   * nothing for a library that is not bundled.
+   */
+  async readNames(library: string): Promise<void> {
+    const bundled = bundledLibrary(library);
+    if (bundled !== undefined) {
+      await this.library(bundled.name);
+    }
+  }
+
+  /** The bundled library `name`, read once, and again when next asked for after it could not be. */
+  private library(name: string): Promise<Library> {
+    let file = this.read.get(name);
     if (file === undefined) {
-      file = readFile(join(this.folder, `${bundled.name}.json`), 'utf8').then((text) => {
+      file = readFile(join(this.folder, `${name}.json`), 'utf8').then((text) => {
         const { declarations, files } = JSON.parse(text) as { declarations?: unknown; files?: unknown };
         if (typeof declarations !== 'object' || declarations === null) {
-          throw new Error(`${bundled.name}.json holds no declarations`);
+          throw new Error(`${name}.json holds no declarations`);
         }
         const read = {
           declarations: declarations as Declared,
           files: typeof files === 'object' && files !== null ? (files as Library['files']) : {},
         };
-        this.known.set(bundled.name, read);
+        this.known.set(name, read);
         return read;
       });
-      this.read.set(bundled.name, file);
+      this.read.set(name, file);
       file.catch(() => {
-        this.read.delete(bundled.name);
+        this.read.delete(name);
       });
     }
-    const { declarations } = await file;
-    // A key such as `constructor` names no file, whatever an object has.
-    return Object.hasOwn(declarations, key) ? (declarations[key] ?? null) : null;
+    return file;
   }
 
   /**

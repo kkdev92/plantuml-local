@@ -188,6 +188,9 @@ const read = (path: string, from: string | null, file: string): DrawnRequest => 
 let records: DrawingRecords;
 let diagrams: Map<string, ViewDiagram[]>;
 let draw: ReturnType<typeof vi.fn<(source: string, document: vscode.Uri) => Promise<unknown>>>;
+/** The paths upstream gives the files of the bundled libraries read so far, by `<library>/<key>`. */
+let names: Map<string, string>;
+let readLibrary: ReturnType<typeof vi.fn<(library: string) => Promise<unknown>>>;
 let view: DependencyView;
 
 /** Keeps `log` as the drawing of `source` for `document`, as the shared renders would. */
@@ -237,11 +240,15 @@ beforeEach(() => {
   records = new DrawingRecords();
   diagrams = new Map();
   draw = vi.fn(async () => undefined);
+  names = new Map();
+  readLibrary = vi.fn(async () => undefined);
   view = new DependencyView({
     records,
     includePaths: () => [],
     diagrams: (document) => diagrams.get(document.uri.toString()) ?? [],
     draw,
+    libraryFile: (library, key) => names.get(`${library}/${key}`),
+    readLibrary,
     l10n: english,
   });
 });
@@ -610,6 +617,94 @@ describe('DependencyView', () => {
     expect(fake.calls.executed).toEqual([
       { id: 'vscode.open', args: [expect.objectContaining({ scheme: 'plantuml-local-library', path: '/C4/C4_Container.puml' })] },
     ]);
+  });
+
+  describe('with a file of a bundled library read', () => {
+    const text = '!include <azure/Networking/AzureApplicationGateway>';
+    const byKey = [
+      ['Diagram at line 1', [['Bundled libraries · 2', ['azure/networking/azureapplicationgateway.puml', 'azure/nope.puml · not in the library']]]],
+    ];
+    let document: FakeDocument;
+    let fired: ReturnType<typeof vi.fn>;
+
+    beforeEach(async () => {
+      vi.useFakeTimers();
+      fake.state.visible = true;
+      document = documentAt('doc.puml', text);
+      diagrams.set(document.uri.toString(), [diagramOf(text)]);
+      activate(document);
+      await drawn(document, text, {
+        requests: [],
+        libraries: [
+          { library: 'azure', key: 'networking/azureapplicationgateway', found: true },
+          { library: 'azure', key: 'nope', found: false },
+        ],
+      });
+      // Laid out again for the drawing kept, before what follows.
+      await vi.advanceTimersByTimeAsync(100);
+      fired = vi.fn();
+      view.onDidChangeTreeData(fired);
+    });
+
+    /** Lays the view out again, as an edit of its document does. */
+    const edited = async (): Promise<void> => {
+      fake.edits.fire({ document, contentChanges: [{}] });
+      await vi.advanceTimersByTimeAsync(100);
+    };
+
+    it('names the file as upstream writes it once its library is read, and opens it so', async () => {
+      let read = (): void => undefined;
+      readLibrary.mockImplementation(
+        (library) =>
+          new Promise<void>((resolve) => {
+            read = (): void => {
+              names.set(`${library}/networking/azureapplicationgateway`, 'Networking/AzureApplicationGateway');
+              resolve();
+            };
+          })
+      );
+
+      // Until then, a file goes by its key, as the engine looks it up.
+      expect(laidOut()).toEqual(byKey);
+      expect(readLibrary.mock.calls).toEqual([['azure']]);
+      // Laid out again meanwhile, the view does not read the library again.
+      await edited();
+      expect(laidOut()).toEqual(byKey);
+      expect(readLibrary).toHaveBeenCalledTimes(1);
+
+      fired.mockClear();
+      read();
+      await vi.advanceTimersByTimeAsync(100);
+      expect(fired).toHaveBeenCalledTimes(1);
+      expect(laidOut()).toEqual([
+        ['Diagram at line 1', [['Bundled libraries · 2', ['azure/Networking/AzureApplicationGateway.puml', 'azure/nope.puml · not in the library']]]],
+      ]);
+      // As Go to Definition opens it, so that both show one view of the file.
+      const [diagram] = view.getChildren();
+      const [libraries] = view.getChildren(diagram);
+      const [file] = view.getChildren(libraries);
+      await expect(view.open(file)).resolves.toBeUndefined();
+      expect(fake.calls.executed).toEqual([
+        {
+          id: 'vscode.open',
+          args: [expect.objectContaining({ scheme: 'plantuml-local-library', path: '/azure/Networking/AzureApplicationGateway.puml' })],
+        },
+      ]);
+      expect(readLibrary).toHaveBeenCalledTimes(1);
+    });
+
+    it('names the file by its key while its library cannot be read, and reads it again when next laid out', async () => {
+      readLibrary.mockRejectedValueOnce(new Error('unreadable'));
+
+      expect(laidOut()).toEqual(byKey);
+      await vi.advanceTimersByTimeAsync(100);
+      expect(fired).not.toHaveBeenCalled();
+      expect(laidOut()).toEqual(byKey);
+
+      await edited();
+      expect(laidOut()).toEqual(byKey);
+      expect(readLibrary.mock.calls).toEqual([['azure'], ['azure']]);
+    });
   });
 
   it('shows itself with the keyboard on the diagram at the cursor, selected, else on its first item', async () => {

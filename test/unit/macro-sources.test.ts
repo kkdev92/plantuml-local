@@ -23,6 +23,16 @@ describe('LibraryDeclarations', () => {
     await expect(libraries.declared('other', 'x')).resolves.toBeUndefined();
   });
 
+  it('names the files of a library as upstream writes them, once it is read', async () => {
+    const libraries = new LibraryDeclarations(assets);
+
+    expect(libraries.fileName('azure', 'compute/azurefunction')).toBeUndefined();
+    await libraries.readNames('Azure');
+    expect(libraries.fileName('azure', 'compute/azurefunction')).toBe('Compute/AzureFunction');
+    expect(libraries.fileName('azure', 'compute/nothing')).toBeUndefined();
+    await expect(libraries.readNames('other')).resolves.toBeUndefined();
+  });
+
   describe('with its files in a folder of their own', () => {
     let folder: string;
 
