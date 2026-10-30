@@ -276,7 +276,7 @@ rectangle "<$box>\n==inline sprite" as a
 
 ## Including a file of the workspace
 
-In a trusted workspace, `!include` reads a file next to this one: [sample-styles.iuml](sample-styles.iuml) colours the arrows and the participants. Ctrl+Click on the path opens it, and the diagram is drawn again when the file changes.
+In a trusted workspace, `!include` reads a file next to this one: [sample-styles.iuml](sample-styles.iuml) colours the arrows and the participants. Ctrl+Click on the path opens it, hovering it says which file the diagram reads, and the diagram is drawn again when the file changes. *PlantUML Local: Show Diagram Dependencies* lists, in the Explorer, what each diagram of this document read: the file for the block below, the library files for the Azure and C4 blocks.
 
 ```plantuml
 @startuml
@@ -317,9 +317,9 @@ stop
 
 ## Writing a diagram
 
-In a block, suggestions open on `@` or `!` at the start of a line, on `!theme ` and on `<&`. Outside a block, type `puml` and press `Ctrl+Space` for a whole block from one of sixteen templates, or run *PlantUML Local: Insert Diagram Template*.
+In a block, suggestions open on `@` or `!` at the start of a line, on `$`, on `!theme ` and on `<&`. Outside a block, type `puml` and press `Ctrl+Space` for a whole block from one of sixteen templates, or run *PlantUML Local: Insert Diagram Template*.
 
-Elsewhere in a block, `Ctrl+Space` lists what that diagram holds: its aliases with the names they show — `Shop` with `Web shop` in the block below — and its words. On a line of its own, a sequence diagram such as this one also offers snippets of `alt`, `opt`, `loop`, `par`, `ref` and `note`, and an activity diagram of `if`, `while`, `repeat` and `fork`, with their parts to tab through.
+Elsewhere in a block, `Ctrl+Space` lists what that diagram holds: its aliases with the names they show — `Shop` with `Web shop` in the block below — its words, and what it defines, as the next section shows. On a line of its own, a sequence diagram such as this one also offers snippets of `alt`, `opt`, `loop`, `par`, `ref` and `note`, and an activity diagram of `if`, `while`, `repeat` and `fork`, with their parts to tab through.
 
 A swatch sits beside each colour a diagram sets, such as the two below; clicking it opens VS Code's colour picker, and the pick is written back as `#RRGGBB`.
 
@@ -328,6 +328,29 @@ A swatch sits beside each colour a diagram sets, such as the two below; clicking
 skinparam sequenceArrowColor #2E7D32
 participant "Web shop" as Shop #LightBlue
 Customer -> Shop : Place order
+@enduml
+```
+
+## Definitions, references and hovers
+
+The block below defines a procedure, `$ask`, and a variable, `$parcel`. On a line of its own before `@enduml`, typing `$` offers both, each with its parameters and where it is defined. Picking `$ask` writes `$ask($request)` with `$request` selected — `$answer` has a default — and opens the parameter hints, which also open on `(` and `,` and show the parameter the cursor is in.
+
+`F12` on a call of `$ask` goes to its `!procedure` line, and `Shift+F12` lists it with its three calls; on `Shop` in the body of `$ask`, `F12` goes to the `participant` line that declares it. Hovering `$ask` shows how it is declared and the comment above it, and hovering `!procedure` explains the directive, with how it is written and an example. In the C4 block above, `F12` on `Person` opens the bundled C4 file that defines it, read-only. A `.puml` file works the same.
+
+```plantuml
+@startuml
+' The customer asks the web shop, which answers.
+!procedure $ask($request, $answer = "OK")
+  Customer -> Shop : $request
+  Shop --> Customer : $answer
+!endprocedure
+
+!$parcel = "Parcel on its way"
+actor Customer
+participant "Web shop" as Shop
+$ask("Place order", "Order number")
+$ask("Track order", $parcel)
+$ask("Cancel order")
 @enduml
 ```
 
