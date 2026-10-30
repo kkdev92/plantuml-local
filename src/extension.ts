@@ -429,6 +429,12 @@ const Drawings: ServiceToken<DrawingRecords> = serviceToken<DrawingRecords>('pla
 const Dependencies: ServiceToken<DependencyView> = serviceToken<DependencyView>('plantuml.dependencies');
 
 /**
+ * What the files of the bundled libraries declare, and the paths upstream
+ * gives them, shared by the completion and the Diagram Dependencies view.
+ */
+const Declarations: ServiceToken<LibraryDeclarations> = serviceToken<LibraryDeclarations>('plantuml.declarations');
+
+/**
  * Watches the files that diagrams with local includes depend on. An object
  * with `dispose`, so the container stops the watchers.
  */
@@ -1716,6 +1722,9 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
   module.services.singleton(IncludeWatch, () => new IncludeWatcher());
 
   module.services.singleton(Drawings, () => new DrawingRecords());
+
+  // Read from the package, each library when it is first asked for.
+  module.services.singleton(Declarations, () => new LibraryDeclarations(join(__dirname, 'declarations')));
 
   module.services.singleton(Renders, {
     inject: { renderer: Renderer, settings: Settings.token, l10n: Localization, watch: IncludeWatch, drawings: Drawings },
@@ -3056,8 +3065,8 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
 
   module.raw.register({
     id: 'plantuml.completion',
-    inject: { l10n: Localization, settings: Settings.token },
-    bind: ({ registrations, logger }, { l10n, settings }): undefined => {
+    inject: { l10n: Localization, settings: Settings.token, libraries: Declarations },
+    bind: ({ registrations, logger }, { l10n, settings, libraries }): undefined => {
       // Suggestions in the diagrams of Markdown documents and PlantUML files
       // (src/language/completion.ts). Markdown turns quick suggestions off,
       // so there they open on the characters a suggestion starts after, and
@@ -3165,7 +3174,6 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
       // documents as they are then, and never by running anything. What the
       // bundled libraries declare is read once, when an include first names
       // one; the text of their files, each time one is opened.
-      const libraries = new LibraryDeclarations(join(__dirname, 'declarations'));
       const stdlib = join(__dirname, 'stdlib');
       const kinds: Readonly<Record<MacroKind, vscode.CompletionItemKind>> = {
         procedure: vscode.CompletionItemKind.Method,
@@ -4352,8 +4360,9 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
       settings: Settings.token,
       l10n: Localization,
       viewers: Viewers,
+      libraries: Declarations,
     },
-    create: ({ drawings, renders, palettes, settings, l10n, viewers }) => {
+    create: ({ drawings, renders, palettes, settings, l10n, viewers, libraries }) => {
       const labels = problemLabels(l10n);
       return new DependencyView({
         records: drawings,
@@ -4362,6 +4371,9 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         // As the Problems panel draws it, so that the drawing can be shared.
         draw: async (source: string, document: vscode.Uri): Promise<unknown> =>
           renders(source, await palettes.resolve(source, isDark(settings.read().values[CONFIG.THEME])), document.toString()),
+        // Named as Go to Definition names the files it opens.
+        libraryFile: (library: string, key: string): string | undefined => libraries.fileName(library, key),
+        readLibrary: (library: string): Promise<unknown> => libraries.readNames(library),
         l10n,
       });
     },
