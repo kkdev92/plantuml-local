@@ -3695,9 +3695,19 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
               (typeof label === 'string' ? label : label.label).toLowerCase();
             const taken = new Set(offered.map(labelOf));
             const names = (await namesAt(document, position, text, token)) ?? [];
+            // VS Code sorts the list by sortText: what is offered here first,
+            // then the diagram's names, each in its own order.
+            for (const item of offered) {
+              item.sortText = `0${item.sortText ?? ''}`;
+            }
             return [
               ...offered,
-              ...names.filter((item) => item.kind !== vscode.CompletionItemKind.Text || !taken.has(labelOf(item))),
+              ...names
+                .filter((item) => item.kind !== vscode.CompletionItemKind.Text || !taken.has(labelOf(item)))
+                .map((item) => {
+                  item.sortText = `1${item.sortText ?? labelOf(item)}`;
+                  return item;
+                }),
             ];
           }
           return trigger === undefined || trigger === '$'
