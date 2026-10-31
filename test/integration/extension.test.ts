@@ -10,6 +10,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createContextStub, type ContextStub } from './helpers/context-stub';
 import {
   createVscodeStub,
+  type CancellationTokenStub,
   type CodeActionStub,
   type CodeLensStub,
   type ColorInformationStub,
@@ -17,14 +18,18 @@ import {
   type CompletionItemStub,
   type DiagnosticStub,
   type DocumentSymbolStub,
+  type FileWatcherStub,
   type FoldingRangeStub,
   type MarkdownStringStub,
   type SignatureHelpStub,
+  type SymbolInformationStub,
   type TextEditorStub,
   type TreeItemStub,
   type TreeViewHandle,
+  type UriStub,
   type VscodeStub,
   type WebviewPanelStub,
+  type WorkspaceSymbolRegistrationStub,
 } from './helpers/vscode-stub';
 import { englishMessages } from '../../src/core/messages';
 import { expandSnippet, SNIPPETS } from '../../src/language/completion';
@@ -189,6 +194,35 @@ describe('extension (dist)', () => {
       vscodeStub._test.executedCommands.includes('markdown.preview.refresh')
     );
     expect(fired).toBe(true);
+  });
+
+  it("asks no refresh of the Markdown previews while VS Code's Markdown extension has not started", async () => {
+    const refreshes = (): number =>
+      vscodeStub._test.executedCommands.filter((command) => command === 'markdown.preview.refresh').length;
+    const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 400));
+    try {
+      // Not started: it shows no preview, and its command would start it.
+      vscodeStub._test.setMarkdownExtension('inactive');
+      await settle();
+      const before = refreshes();
+      vscodeStub._test.setThemeKind(vscodeStub.ColorThemeKind.Dark);
+      await settle();
+      expect(refreshes()).toBe(before);
+
+      // Started, or in another extension host, where it is not known here: asked.
+      for (const [state, kind] of [
+        ['active', vscodeStub.ColorThemeKind.Light],
+        ['absent', vscodeStub.ColorThemeKind.Dark],
+      ] as const) {
+        vscodeStub._test.setMarkdownExtension(state);
+        const from = refreshes();
+        vscodeStub._test.setThemeKind(kind);
+        expect(await waitFor(() => refreshes() > from, 5_000)).toBe(true);
+      }
+    } finally {
+      vscodeStub._test.setMarkdownExtension('active');
+      vscodeStub._test.setThemeKind(vscodeStub.ColorThemeKind.Light);
+    }
   });
 
   it('applies a new plantumlLocal.logLevel to the next entry, without a reload', async () => {
@@ -3977,6 +4011,371 @@ describe('symbols (dist)', () => {
 
   it('lists nothing for a file that declares nothing', () => {
     expect(symbols('A -> B\nB -> C')).toEqual([]);
+  });
+});
+
+describe('Go to Symbol in Workspace (dist)', () => {
+  type FolderStub = { uri: UriStub; name: string; index: number };
+  const ORDERS = [
+    '@startuml(id=orders)',
+    'participant OrderService',
+    '!if %true()',
+    'class Billing',
+    '!endif',
+    '!procedure $notify()',
+    '!endprocedure',
+    '@enduml',
+  ];
+  const PARTIAL = 'PlantUML Local: not every Markdown and PlantUML file was searched. See the Output panel for why.';
+  let base = '';
+  let ws = '';
+  let folderOf: VscodeStub['workspace']['getWorkspaceFolder'] = () => undefined;
+  let relativeOf: VscodeStub['workspace']['asRelativePath'] = () => '';
+
+  /** A workspace folder on disk: its URI as VS Code writes it, its path as the platform does. */
+  const folderAt = (path: string, name: string, index: number): FolderStub => ({
+    uri: { ...vscodeStub.Uri.file(path), fsPath: path },
+    name,
+    index,
+  });
+  const folders = (): FolderStub[] => (vscodeStub.workspace.workspaceFolders ?? []) as FolderStub[];
+  /** A file of the folder `ws`, by the URI the search gives it. */
+  const uriOf = (path: string): UriStub => vscodeStub.Uri.file(join(ws, path));
+  const write = (path: string, lines: readonly string[]): Promise<void> => writeFile(join(ws, path), lines.join('\n'));
+  const provider = (): WorkspaceSymbolRegistrationStub => {
+    const registration = vscodeStub._test.workspaceSymbolProviders[0];
+    if (registration === undefined) {
+      throw new Error('no workspace symbol provider registered');
+    }
+    return registration;
+  };
+  const token = (cancelled: boolean): CancellationTokenStub => ({
+    isCancellationRequested: cancelled,
+    onCancellationRequested: () => ({ dispose: () => undefined }),
+  });
+  const search = (query: string, cancelled = false): Promise<SymbolInformationStub[]> =>
+    provider().provideWorkspaceSymbols(query, token(cancelled));
+  const resolve = (symbol: SymbolInformationStub, cancelled = false): Promise<SymbolInformationStub> =>
+    provider().resolveWorkspaceSymbol(symbol, token(cancelled));
+  const only = (symbols: readonly SymbolInformationStub[]): SymbolInformationStub => {
+    expect(symbols).toHaveLength(1);
+    return symbols[0] as SymbolInformationStub;
+  };
+  /** What VS Code shows of each symbol: its name, what it is in, and the path of its file. */
+  const rows = (symbols: readonly SymbolInformationStub[]): string[] =>
+    symbols.map(
+      ({ name, containerName, location }) => `${name} | ${containerName} | ${vscodeStub.workspace.asRelativePath(location.uri)}`
+    );
+  /** Where a symbol takes the editor, `line:character-line:character`. */
+  const placeOf = ({ location: { range } }: SymbolInformationStub): string =>
+    range === undefined
+      ? 'nowhere'
+      : `${String(range.start.line)}:${String(range.start.character)}-${String(range.end.line)}:${String(range.end.character)}`;
+  const watcher = (): FileWatcherStub => {
+    const found = vscodeStub._test.fileWatchers.find(({ pattern }) => (pattern as unknown) === '**/*');
+    if (found === undefined) {
+      throw new Error('the workspace is not watched');
+    }
+    return found;
+  };
+  const status = (): string | undefined => vscodeStub._test.statusBarMessages.at(-1);
+  const warnings = (): string[] => vscodeStub._test.notifications.warn;
+  /** What was written to the output after the first `from` lines, without the fields the logger adds to each. */
+  const writtenSince = (from: number): string[] =>
+    vscodeStub._test.logs.slice(from).map((line) => line.replace(/ \{"application":.*\}$/, ''));
+
+  beforeAll(async () => {
+    base = await realpath(await mkdtemp(join(tmpdir(), 'plantuml-local-workspace-symbols-')));
+    ws = join(base, 'ws');
+    await mkdir(join(ws, 'docs'), { recursive: true });
+    await mkdir(join(ws, 'node_modules', 'pkg'), { recursive: true });
+    await mkdir(join(base, 'other'));
+    await write('orders.puml', ORDERS);
+    await write('docs/guide.md', ['# Guide', '', '```plantuml shop', 'participant OrderService', '```']);
+    await write('node_modules/pkg/skipped.puml', ['participant OrderService']);
+    await write('notes.txt', ['participant OrderService']);
+    await writeFile(join(base, 'other', 'other.puml'), 'participant OtherService');
+    // The stub's folder, /c, is on no disk: these are. As VS Code finds the
+    // innermost folder of a URI, and writes a path from it, after the folder's
+    // name when there are several.
+    folderOf = vscodeStub.workspace.getWorkspaceFolder;
+    relativeOf = vscodeStub.workspace.asRelativePath;
+    const within = (uri: { toString(): string }): FolderStub | undefined =>
+      folders()
+        .filter((folder) => uri.toString() === folder.uri.toString() || uri.toString().startsWith(`${folder.uri.toString()}/`))
+        .sort((a, b) => b.uri.toString().length - a.uri.toString().length)[0];
+    vscodeStub.workspace.getWorkspaceFolder = (uri) => within(uri) ?? folderOf(uri);
+    vscodeStub.workspace.asRelativePath = (uri) => {
+      const folder = within(uri);
+      if (folder === undefined) {
+        return relativeOf(uri);
+      }
+      const path = uri.toString().slice(folder.uri.toString().length + 1);
+      return folders().length > 1 ? `${folder.name}/${path}` : path;
+    };
+    vscodeStub._test.changeWorkspaceFolders([folderAt(ws, 'ws', 0)]);
+  });
+
+  afterAll(async () => {
+    vscodeStub._test.changeWorkspaceFolders(undefined);
+    vscodeStub.workspace.getWorkspaceFolder = folderOf;
+    vscodeStub.workspace.asRelativePath = relativeOf;
+    await rm(base, { recursive: true, force: true });
+  });
+
+  it('reads nothing until a query is typed', async () => {
+    expect(vscodeStub._test.workspaceSymbolProviders).toHaveLength(1);
+    const watchers = vscodeStub._test.fileWatchers.length;
+    expect(await search('')).toEqual([]);
+    expect(status()).toBe('Type to search the diagrams and declarations of the Markdown and PlantUML files.');
+    expect(vscodeStub._test.fileWatchers).toHaveLength(watchers);
+  });
+
+  it('lists the diagrams and declarations of the Markdown and PlantUML files, by path and line', async () => {
+    const said = vscodeStub._test.statusBarMessages.length;
+    const found = await search('OrdSvc');
+    expect(rows(found)).toEqual([
+      'OrderService | shop · participant · line 4 | docs/guide.md',
+      'OrderService | orders · participant · line 2 | orders.puml',
+    ]);
+    // Without a place in the file, until one is picked.
+    expect(found.map(({ kind, location }) => [kind, location.range])).toEqual([
+      [vscodeStub.SymbolKind.Object, undefined],
+      [vscodeStub.SymbolKind.Object, undefined],
+    ]);
+
+    // Once searched, an empty query gets all that was found: nothing from a folder skipped or a file of another kind.
+    const all = await search('');
+    expect(rows(all)).toEqual([
+      'shop | ```plantuml · line 3 | docs/guide.md',
+      'OrderService | shop · participant · line 4 | docs/guide.md',
+      'orders | @startuml · line 1 | orders.puml',
+      'OrderService | orders · participant · line 2 | orders.puml',
+      'Billing | orders · class · line 4 · conditional | orders.puml',
+      '$notify | orders · !procedure · line 6 | orders.puml',
+    ]);
+    const { Module, Object: Element, Class, Method } = vscodeStub.SymbolKind;
+    expect(all.map(({ kind }) => kind)).toEqual([Module, Element, Module, Element, Class, Method]);
+    // Nothing was left out, so nothing is said.
+    expect(vscodeStub._test.statusBarMessages).toHaveLength(said);
+  });
+
+  it('goes to a symbol where it is when it is picked, and not to one changed or gone since', async () => {
+    const billing = only(await search('Billing'));
+    const picked = await resolve(billing);
+    expect(picked).toMatchObject({ name: 'Billing', kind: vscodeStub.SymbolKind.Class, containerName: billing.containerName });
+    expect(picked.location.uri.toString()).toBe(uriOf('orders.puml').toString());
+    expect(placeOf(picked)).toBe('3:6-3:13');
+
+    const warned = warnings().length;
+    const gone = 'Billing in orders.puml has changed or is gone since the search. Search for it again.';
+    try {
+      // A line added above it since: the one Billing of its diagram, where it is now.
+      await write('orders.puml', [...ORDERS.slice(0, 1), 'participant Added', ...ORDERS.slice(1)]);
+      expect(placeOf(await resolve(billing))).toBe('4:6-4:13');
+      // Declared twice, or not at all: nothing to go to, and a warning.
+      await write('orders.puml', [...ORDERS.slice(0, 4), 'class Billing', ...ORDERS.slice(4)]);
+      await expect(resolve(billing)).rejects.toMatchObject({ name: 'Canceled' });
+      await write('orders.puml', ORDERS.filter((line) => line !== 'class Billing'));
+      await expect(resolve(billing)).rejects.toMatchObject({ name: 'Canceled' });
+      expect(await waitFor(() => warnings().length >= warned + 2, 5_000)).toBe(true);
+      expect(warnings().slice(warned)).toEqual([gone, gone]);
+      // Cancelled: no answer, and nothing said.
+      await expect(resolve(billing, true)).rejects.toMatchObject({ name: 'Canceled' });
+      expect(warnings()).toHaveLength(warned + 2);
+    } finally {
+      await write('orders.puml', ORDERS);
+    }
+  });
+
+  it('searches an open document as the editor has it', async () => {
+    const editor = makeEditor(
+      uriOf('orders.puml').toString(),
+      [...ORDERS.slice(0, 2), 'participant Unsaved', ...ORDERS.slice(2)].join('\n'),
+      0,
+      { languageId: 'plantuml' }
+    );
+    vscodeStub._test.openDocument(editor.document);
+    try {
+      const unsaved = only(await search('Unsaved'));
+      expect(rows([unsaved])).toEqual(['Unsaved | orders · participant · line 3 | orders.puml']);
+      expect(placeOf(await resolve(unsaved))).toBe('2:12-2:19');
+      expect(rows(await search('Billing'))).toEqual(['Billing | orders · class · line 5 · conditional | orders.puml']);
+    } finally {
+      vscodeStub._test.closeDocument(editor.document);
+    }
+    // Closed without being saved: as on disk.
+    expect(await search('Unsaved')).toEqual([]);
+  });
+
+  it('searches again when a file or a folder is created or deleted, and reads a file again when it changes', async () => {
+    await search('OrdSvc');
+    const events = watcher();
+    try {
+      await write('later.puml', ['participant Later']);
+      // Not told of it yet.
+      expect(await search('Later')).toEqual([]);
+      // A change of a file it does not read, something created in a folder it skips: nothing to do.
+      events.fire('change', uriOf('notes.txt'));
+      events.fire('create', uriOf('node_modules/pkg/later.puml'));
+      expect(await search('Later')).toEqual([]);
+      events.fire('create', uriOf('later.puml'));
+      expect(rows(await search('Later'))).toEqual(['Later | participant · line 1 | later.puml']);
+
+      // Changed: that file read again, and nothing else.
+      await write('later.puml', ['participant Later', 'participant Sooner']);
+      await write('unseen.puml', ['participant Unseen']);
+      events.fire('change', uriOf('later.puml'));
+      expect(rows(await search('Sooner'))).toEqual(['Sooner | participant · line 2 | later.puml']);
+      expect(await search('Unseen')).toEqual([]);
+
+      await rm(join(ws, 'unseen.puml'));
+      await rm(join(ws, 'later.puml'));
+      events.fire('delete', uriOf('later.puml'));
+      expect(await search('Later')).toEqual([]);
+    } finally {
+      await rm(join(ws, 'unseen.puml'), { force: true });
+      await rm(join(ws, 'later.puml'), { force: true });
+    }
+  });
+
+  it('says in the status bar and in the output what a search left out', async () => {
+    await writeFile(join(ws, 'latin1.puml'), Buffer.from('participant Caf\xe9\n', 'latin1'));
+    const logged = vscodeStub._test.logs.length;
+    try {
+      vscodeStub._test.changeWorkspaceFolders([
+        folderAt(ws, 'ws', 0),
+        { uri: vscodeStub.Uri.parse('vscode-vfs://github/owner/repo'), name: 'remote', index: 1 },
+        folderAt(join(base, 'missing'), 'missing', 2),
+      ]);
+      expect(rows(await search('OrdSvc'))).toEqual([
+        'OrderService | shop · participant · line 4 | ws/docs/guide.md',
+        'OrderService | orders · participant · line 2 | ws/orders.puml',
+      ]);
+      expect(status()).toBe(PARTIAL);
+      expect(writtenSince(logged)).toEqual([
+        [
+          'info: Go to Symbol in Workspace did not search every Markdown and PlantUML file:',
+          'remote: the folder is not on disk, and is not searched.',
+          'missing: the folder cannot be read.',
+          'ws/latin1.puml: not UTF-8 text, and not read.',
+        ].join('\n'),
+      ]);
+      // Said with each answer, written once for the search.
+      const said = vscodeStub._test.statusBarMessages.length;
+      await search('Billing');
+      expect(vscodeStub._test.statusBarMessages.slice(said)).toEqual([PARTIAL]);
+      expect(writtenSince(logged)).toHaveLength(1);
+    } finally {
+      await rm(join(ws, 'latin1.puml'));
+      vscodeStub._test.changeWorkspaceFolders([folderAt(ws, 'ws', 0)]);
+    }
+  });
+
+  it('searches each file once, for the innermost folder, when a folder is inside another or opened twice', async () => {
+    const said = vscodeStub._test.statusBarMessages.length;
+    try {
+      vscodeStub._test.changeWorkspaceFolders([folderAt(ws, 'ws', 0), folderAt(join(ws, 'docs'), 'docs', 1), folderAt(ws, 'again', 2)]);
+      expect(rows(await search('OrdSvc'))).toEqual([
+        'OrderService | orders · participant · line 2 | ws/orders.puml',
+        'OrderService | shop · participant · line 4 | docs/guide.md',
+      ]);
+      expect(vscodeStub._test.statusBarMessages).toHaveLength(said);
+    } finally {
+      vscodeStub._test.changeWorkspaceFolders([folderAt(ws, 'ws', 0)]);
+    }
+  });
+
+  it('leaves out what the settings of a folder leave out, and does not search a folder with an exclude it cannot read', async () => {
+    const folder = folderAt(ws, 'ws', 0);
+    const other = folderAt(join(base, 'other'), 'other', 1);
+    const warned = warnings().length;
+    try {
+      vscodeStub._test.changeWorkspaceFolders([folder, other]);
+      vscodeStub._test.setConfiguration('workspaceSymbols.exclude', ['docs/**'], folder.uri.toString());
+      expect(rows(await search('Service'))).toEqual([
+        'OrderService | orders · participant · line 2 | ws/orders.puml',
+        'OtherService | participant · line 1 | other/other.puml',
+      ]);
+
+      // Turned off for one folder, the other is searched; for every folder, nothing is, and nothing is said.
+      vscodeStub._test.setConfiguration('workspaceSymbols.enabled', false, folder.uri.toString());
+      expect(rows(await search('Service'))).toEqual(['OtherService | participant · line 1 | other/other.puml']);
+      vscodeStub._test.setConfiguration('workspaceSymbols.enabled', false, other.uri.toString());
+      const said = vscodeStub._test.statusBarMessages.length;
+      expect(await search('Service')).toEqual([]);
+      expect(vscodeStub._test.statusBarMessages).toHaveLength(said);
+      vscodeStub._test.setConfiguration('workspaceSymbols.enabled', undefined, folder.uri.toString());
+      vscodeStub._test.setConfiguration('workspaceSymbols.enabled', undefined, other.uri.toString());
+
+      // A pattern it cannot read: the folder is not searched, rather than searched more widely.
+      vscodeStub._test.notificationReply = 'Open Settings';
+      vscodeStub._test.setConfiguration('workspaceSymbols.exclude', ['docs/'], folder.uri.toString());
+      const logged = vscodeStub._test.logs.length;
+      expect(rows(await search('Service'))).toEqual(['OtherService | participant · line 1 | other/other.puml']);
+      expect(status()).toBe(PARTIAL);
+      const problem = 'Pattern 1, "docs/", ends with /. For a folder and what it holds, write folder/**.';
+      const opened = (): { id: string; args: unknown[] }[] =>
+        vscodeStub._test.commandCalls.filter(({ id }) => id === 'workbench.action.openSettings');
+      expect(await waitFor(() => opened().length > 0, 5_000)).toBe(true);
+      expect(warnings().slice(warned)).toEqual([
+        `Go to Symbol in Workspace does not search the folder ws until plantumlLocal.workspaceSymbols.exclude is fixed. ${problem}`,
+      ]);
+      expect(opened().at(-1)?.args).toEqual(['@id:plantumlLocal.workspaceSymbols.exclude']);
+      expect(writtenSince(logged)).toEqual([
+        `info: Go to Symbol in Workspace did not search every Markdown and PlantUML file:\nws: plantumlLocal.workspaceSymbols.exclude is not valid, and the folder is not searched. ${problem}`,
+      ]);
+      // Searched again with the same setting: not warned again.
+      vscodeStub._test.setConfiguration('workspaceSymbols.exclude', ['docs/'], folder.uri.toString());
+      await search('Service');
+      expect(warnings()).toHaveLength(warned + 1);
+    } finally {
+      vscodeStub._test.notificationReply = null;
+      vscodeStub._test.setConfiguration('workspaceSymbols.exclude', undefined, folder.uri.toString());
+      vscodeStub._test.setConfiguration('workspaceSymbols.enabled', undefined, folder.uri.toString());
+      vscodeStub._test.setConfiguration('workspaceSymbols.enabled', undefined, other.uri.toString());
+      vscodeStub._test.changeWorkspaceFolders([folderAt(ws, 'ws', 0)]);
+    }
+  });
+
+  it('answers nothing in Restricted Mode, and searches again once the workspace is trusted', async () => {
+    await search('OrdSvc');
+    await write('trusted.puml', ['participant Trusted']);
+    try {
+      vscodeStub.workspace.isTrusted = false;
+      try {
+        expect(await search('Trusted')).toEqual([]);
+        expect(status()).toBe('PlantUML Local does not search the Markdown and PlantUML files of the workspace in Restricted Mode.');
+      } finally {
+        vscodeStub._test.grantTrust();
+      }
+      expect(rows(await search('Trusted'))).toEqual(['Trusted | participant · line 1 | trusted.puml']);
+    } finally {
+      await rm(join(ws, 'trusted.puml'));
+      watcher().fire('delete', uriOf('trusted.puml'));
+    }
+  });
+
+  it('does not search for a long text, and lists the first 5000 of what it finds', async () => {
+    await search('OrdSvc');
+    expect(await search('x'.repeat(257))).toEqual([]);
+    expect(status()).toBe('PlantUML Local does not search for text longer than 256 characters.');
+
+    await write('many.puml', Array.from({ length: 5_001 }, (_, index) => `participant P${String(index)}`));
+    try {
+      watcher().fire('create', uriOf('many.puml'));
+      expect(await search('P')).toHaveLength(5_000);
+      expect(status()).toBe('PlantUML Local: only the first 5000 diagrams and declarations are listed.');
+    } finally {
+      await rm(join(ws, 'many.puml'));
+      watcher().fire('delete', uriOf('many.puml'));
+    }
+  });
+
+  it('answers nothing to a request cancelled, and goes on searching for the next', async () => {
+    vscodeStub._test.changeWorkspaceFolders([folderAt(ws, 'ws', 0)]);
+    expect(await search('OrdSvc', true)).toEqual([]);
+    expect(rows(await search('OrdSvc'))).toHaveLength(2);
   });
 });
 

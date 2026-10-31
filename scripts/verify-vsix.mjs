@@ -80,7 +80,7 @@ const PACKAGING = ['extension.vsixmanifest', '[Content_Types].xml'];
  * the same pull request.
  */
 const RECORDED_SIZES = {
-  'extension/dist/extension.js': 458_549,
+  'extension/dist/extension.js': 489_287,
   'extension/dist/worker.js': 893_714,
   'extension/dist/engine/plantuml.js': 3_359_666,
   'extension/dist/engine/viz-global.cjs': 1_445_436,

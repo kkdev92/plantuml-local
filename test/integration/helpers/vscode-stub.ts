@@ -158,6 +158,26 @@ export interface SymbolRegistrationStub {
   provider: { provideDocumentSymbols(document: TextEditorStub['document']): DocumentSymbolStub[] };
 }
 
+/** A `vscode.SymbolInformation` as the extension builds it: a workspace symbol, its range given when it is resolved. */
+export interface SymbolInformationStub {
+  name: string;
+  kind: number;
+  containerName: string;
+  location: { uri: UriStub; range: { start: PositionStub; end: PositionStub } | undefined };
+}
+
+/** A token as VS Code passes one: cancelled when the test says so. */
+export interface CancellationTokenStub {
+  isCancellationRequested: boolean;
+  onCancellationRequested(listener: () => void): { dispose(): void };
+}
+
+/** A workspace symbol provider as registered. */
+export interface WorkspaceSymbolRegistrationStub {
+  provideWorkspaceSymbols(query: string, token: CancellationTokenStub): Promise<SymbolInformationStub[]>;
+  resolveWorkspaceSymbol(symbol: SymbolInformationStub, token: CancellationTokenStub): Promise<SymbolInformationStub>;
+}
+
 /** A `vscode.CodeAction` as the extension builds it. */
 export interface CodeActionStub {
   title: string;
@@ -545,6 +565,7 @@ export interface VscodeStub {
     ) => { dispose(): void };
     /** Throws for an id already in use, as VS Code does. */
     createLanguageStatusItem: (id: string, selector: unknown) => LanguageStatusItemStub;
+    registerWorkspaceSymbolProvider: (provider: WorkspaceSymbolRegistrationStub) => { dispose(): void };
   };
   Color: new (red: number, green: number, blue: number, alpha: number) => ColorStub;
   ColorInformation: new (range: ColorInformationStub['range'], color: ColorStub) => ColorInformationStub;
@@ -559,7 +580,18 @@ export interface VscodeStub {
     range: DocumentSymbolStub['range'],
     selectionRange: DocumentSymbolStub['selectionRange']
   ) => DocumentSymbolStub;
-  SymbolKind: Record<'Module' | 'Namespace' | 'Package' | 'Class' | 'Enum' | 'Interface' | 'Object', number>;
+  SymbolKind: Record<
+    'Module' | 'Namespace' | 'Package' | 'Class' | 'Method' | 'Enum' | 'Interface' | 'Function' | 'Constant' | 'Object',
+    number
+  >;
+  SymbolInformation: new (
+    name: string,
+    kind: number,
+    containerName: string,
+    location: SymbolInformationStub['location']
+  ) => SymbolInformationStub;
+  /** What a provider throws to give no answer, as VS Code's is: its message and name are `Canceled`. */
+  CancellationError: new () => Error;
   FoldingRange: new (start: number, end: number, kind?: number) => FoldingRangeStub;
   FoldingRangeKind: Record<'Comment' | 'Imports' | 'Region', number>;
   CompletionItem: new (label: CompletionItemStub['label'], kind?: number) => CompletionItemStub;
@@ -643,6 +675,8 @@ export interface VscodeStub {
     showInformationMessage: (...args: unknown[]) => Promise<unknown>;
     showWarningMessage: (...args: unknown[]) => Promise<unknown>;
     showErrorMessage: (...args: unknown[]) => Promise<unknown>;
+    /** Records the text (see `_test.statusBarMessages`); disposing it clears nothing recorded. */
+    setStatusBarMessage: (text: string, hideAfterTimeout?: number) => { dispose(): void };
     /** Records the document shown and the line selected (see `_test.shownDocuments`). */
     showTextDocument: (
       document: TextEditorStub['document'],
@@ -702,9 +736,9 @@ export interface VscodeStub {
     ) => { dispose(): void };
     onDidCloseTextDocument: (listener: (document: TextEditorStub['document']) => void) => { dispose(): void };
     onDidSaveTextDocument: (listener: (document: TextEditorStub['document']) => void) => { dispose(): void };
-    /** Never fires: the workspace starts trusted. */
+    /** Fires on `_test.grantTrust`: the workspace starts trusted. */
     onDidGrantWorkspaceTrust: (listener: () => void) => { dispose(): void };
-    /** Never fires: the folders stay as they are. */
+    /** Fires on `_test.changeWorkspaceFolders`. */
     onDidChangeWorkspaceFolders: (listener: () => void) => { dispose(): void };
     /** Kept in `_test.fileWatchers` until disposed. */
     createFileSystemWatcher: (pattern: unknown) => FileWatcherStub;
@@ -742,6 +776,10 @@ export interface VscodeStub {
     registerCommand: (id: string, handler: (...args: unknown[]) => unknown) => { dispose(): void };
     executeCommand: (id: string, ...args: unknown[]) => Promise<undefined>;
   };
+  extensions: {
+    /** Knows VS Code's Markdown extension alone, as `_test.setMarkdownExtension` says. */
+    getExtension: (id: string) => { id: string; isActive: boolean } | undefined;
+  };
   l10n: {
     t: (message: string, ...args: unknown[]) => string;
   };
@@ -753,6 +791,11 @@ export interface VscodeStub {
     registeredCommands: Map<string, (...args: unknown[]) => unknown>;
     themeListeners: (() => void)[];
     setThemeKind(kind: number): void;
+    /**
+     * What `extensions.getExtension` tells of VS Code's Markdown extension:
+     * started (the default), not started, or not in this extension host.
+     */
+    setMarkdownExtension(state: 'active' | 'inactive' | 'absent'): void;
     /** Latest values passed to the `setContext` command, by key. */
     contextKeys: Map<string, unknown>;
     /** Files written through `workspace.fs`, uri string → UTF-8 content. */
@@ -767,8 +810,8 @@ export interface VscodeStub {
      * Sets (or, with undefined, clears) a configuration value and fires
      * the change event — the kit caches an unscoped settings snapshot and
      * only rebuilds it on that event, exactly like real VS Code. With
-     * `folder`, the value applies only to resources under that URI, as a
-     * folder's own settings do.
+     * `folder`, the value applies only to that URI and the resources under
+     * it, as a folder's own settings do.
      */
     setConfiguration(key: string, value: unknown, folder?: string): void;
     /**
@@ -816,6 +859,10 @@ export interface VscodeStub {
     codeLensProviders: CodeLensRegistrationStub[];
     /** Colour providers registered, in order. */
     colorProviders: ColorRegistrationStub[];
+    /** Workspace symbol providers registered, in order. */
+    workspaceSymbolProviders: WorkspaceSymbolRegistrationStub[];
+    /** Texts shown in the status bar with `window.setStatusBarMessage`, in order. */
+    statusBarMessages: string[];
     /** Signature help providers registered, in order. */
     signatureProviders: SignatureRegistrationStub[];
     /** Text document content providers registered, in order. */
@@ -865,6 +912,10 @@ export interface VscodeStub {
     closeDocument(document: TextEditorStub['document']): void;
     /** Fires the save listeners for `document`, as a save would. */
     saveDocument(document: TextEditorStub['document']): void;
+    /** Trusts the workspace and fires the listeners, as granting trust would. */
+    grantTrust(): void;
+    /** Sets `workspace.workspaceFolders` and fires the listeners, as adding or removing a folder would. */
+    changeWorkspaceFolders(folders: unknown[] | undefined): void;
     /**
      * Registrations not yet disposed, counted by API: event listeners,
      * providers, diagnostic collections, panel serializers and commands.
@@ -912,6 +963,7 @@ export function createVscodeStub(): VscodeStub {
   const commandCalls: { id: string; args: unknown[] }[] = [];
   const registeredCommands = new Map<string, (...args: unknown[]) => unknown>();
   const themeListeners: (() => void)[] = [];
+  let markdownExtension: 'active' | 'inactive' | 'absent' = 'active';
   const editorListeners: ((editor: TextEditorStub | undefined) => void)[] = [];
   const selectionListeners: ((event: { textEditor: TextEditorStub }) => void)[] = [];
   const contextKeys = new Map<string, unknown>();
@@ -940,6 +992,8 @@ export function createVscodeStub(): VscodeStub {
   const changeListeners: ((event: { document: DocumentStub; contentChanges: unknown[] }) => void)[] = [];
   const closeListeners: ((document: DocumentStub) => void)[] = [];
   const saveListeners: ((document: DocumentStub) => void)[] = [];
+  const trustListeners: (() => void)[] = [];
+  const folderListeners: ((event: { added: unknown[]; removed: unknown[] }) => void)[] = [];
   const subscribe = <T>(listeners: T[], listener: T): { dispose(): void } => {
     listeners.push(listener);
     return {
@@ -1260,6 +1314,22 @@ export function createVscodeStub(): VscodeStub {
       public range: LocationStub['range']
     ) {}
   }
+  class SymbolInformation implements SymbolInformationStub {
+    constructor(
+      public name: string,
+      public kind: number,
+      public containerName: string,
+      public location: SymbolInformationStub['location']
+    ) {}
+  }
+  class CancellationError extends Error {
+    constructor() {
+      super('Canceled');
+      this.name = 'Canceled';
+    }
+  }
+  const workspaceSymbolProviders: WorkspaceSymbolRegistrationStub[] = [];
+  const statusBarMessages: string[] = [];
   const hoverProviders: HoverRegistrationStub[] = [];
   class Hover implements HoverStub {
     constructor(
@@ -1383,7 +1453,7 @@ export function createVscodeStub(): VscodeStub {
     return true;
   }
 
-  return {
+  const stub: VscodeStub = {
     ColorThemeKind: { Light: 1, Dark: 2, HighContrast: 3, HighContrastLight: 4 },
     DiagnosticSeverity: { Error: 0, Warning: 1, Information: 2, Hint: 3 },
     EventEmitter,
@@ -1421,7 +1491,20 @@ export function createVscodeStub(): VscodeStub {
     ColorPresentation,
     // A string here, where VS Code has a CodeActionKind; tests compare it as one.
     CodeActionKind: { QuickFix: 'quickfix' },
-    SymbolKind: { Module: 1, Namespace: 2, Package: 3, Class: 4, Enum: 9, Interface: 10, Object: 18 },
+    SymbolKind: {
+      Module: 1,
+      Namespace: 2,
+      Package: 3,
+      Class: 4,
+      Method: 5,
+      Enum: 9,
+      Interface: 10,
+      Function: 11,
+      Constant: 13,
+      Object: 18,
+    },
+    SymbolInformation,
+    CancellationError,
     languages: {
       createDiagnosticCollection: () => {
         const registration = track('languages.createDiagnosticCollection');
@@ -1478,6 +1561,14 @@ export function createVscodeStub(): VscodeStub {
         return track('languages.registerSignatureHelpProvider');
       },
       createLanguageStatusItem,
+      registerWorkspaceSymbolProvider: (provider) => {
+        workspaceSymbolProviders.push(provider);
+        return track('languages.registerWorkspaceSymbolProvider', {
+          dispose: () => {
+            workspaceSymbolProviders.splice(workspaceSymbolProviders.indexOf(provider), 1);
+          },
+        });
+      },
     },
     EndOfLine: { LF: 1, CRLF: 2 },
     Position,
@@ -1555,6 +1646,10 @@ export function createVscodeStub(): VscodeStub {
       showErrorMessage: async (...args) => {
         notifications.error.push(String(args[0]));
         return answer(args);
+      },
+      setStatusBarMessage: (text) => {
+        statusBarMessages.push(text);
+        return track('window.setStatusBarMessage');
       },
       showTextDocument: async (document, options) => {
         hooks.shownDocuments.push({ uri: document.uri.toString(), line: options?.selection?.start.line });
@@ -1690,7 +1785,7 @@ export function createVscodeStub(): VscodeStub {
             return languageValues.get(sectioned) as T;
           }
           for (const [folder, values] of folderConfiguration) {
-            if (resource?.startsWith(`${folder}/`) === true && values.has(key)) {
+            if ((resource === folder || resource?.startsWith(`${folder}/`) === true) && values.has(key)) {
               return values.get(key) as T;
             }
           }
@@ -1700,7 +1795,7 @@ export function createVscodeStub(): VscodeStub {
           const { resource } = scopeOf(scope);
           let workspaceFolderValue: T | undefined;
           for (const [folder, values] of folderConfiguration) {
-            if (resource?.startsWith(`${folder}/`) === true && values.has(key)) {
+            if ((resource === folder || resource?.startsWith(`${folder}/`) === true) && values.has(key)) {
               workspaceFolderValue = values.get(key) as T;
             }
           }
@@ -1718,8 +1813,9 @@ export function createVscodeStub(): VscodeStub {
         track('workspace.onDidChangeTextDocument', subscribe(changeListeners, listener)),
       onDidCloseTextDocument: (listener) => track('workspace.onDidCloseTextDocument', subscribe(closeListeners, listener)),
       onDidSaveTextDocument: (listener) => track('workspace.onDidSaveTextDocument', subscribe(saveListeners, listener)),
-      onDidGrantWorkspaceTrust: () => track('workspace.onDidGrantWorkspaceTrust'),
-      onDidChangeWorkspaceFolders: () => track('workspace.onDidChangeWorkspaceFolders'),
+      onDidGrantWorkspaceTrust: (listener) => track('workspace.onDidGrantWorkspaceTrust', subscribe(trustListeners, listener)),
+      onDidChangeWorkspaceFolders: (listener) =>
+        track('workspace.onDidChangeWorkspaceFolders', subscribe(folderListeners, listener)),
       createFileSystemWatcher: (pattern) => {
         const listeners = { create: [] as Listener[], change: [] as Listener[], delete: [] as Listener[] };
         type Listener = (uri: UriStub) => void;
@@ -1846,6 +1942,12 @@ export function createVscodeStub(): VscodeStub {
         return undefined;
       },
     },
+    extensions: {
+      getExtension: (id) =>
+        id === 'vscode.markdown-language-features' && markdownExtension !== 'absent'
+          ? { id, isActive: markdownExtension === 'active' }
+          : undefined,
+    },
     l10n: {
       // No bundle, so tests assert against the English defaults; `{0}`-style
       // placeholders are filled in from the arguments, as vscode.l10n.t does.
@@ -1864,6 +1966,9 @@ export function createVscodeStub(): VscodeStub {
         for (const listener of themeListeners) {
           listener();
         }
+      },
+      setMarkdownExtension: (state) => {
+        markdownExtension = state;
       },
       contextKeys,
       writtenFiles,
@@ -1922,6 +2027,8 @@ export function createVscodeStub(): VscodeStub {
       hoverProviders,
       codeLensProviders,
       colorProviders,
+      workspaceSymbolProviders,
+      statusBarMessages,
       signatureProviders,
       contentProviders,
       languageStatusItems,
@@ -1992,8 +2099,21 @@ export function createVscodeStub(): VscodeStub {
           listener(document);
         }
       },
+      grantTrust: () => {
+        stub.workspace.isTrusted = true;
+        for (const listener of [...trustListeners]) {
+          listener();
+        }
+      },
+      changeWorkspaceFolders: (folders) => {
+        stub.workspace.workspaceFolders = folders;
+        for (const listener of [...folderListeners]) {
+          listener({ added: [], removed: [] });
+        }
+      },
       live: () => Object.fromEntries([...live].filter(([, count]) => count !== 0)),
       fileWatchers,
     },
   };
+  return stub;
 }

@@ -49,6 +49,7 @@ Your diagram source is processed locally and is not sent to a rendering service.
 - **Writing Help**: Completion for start lines, directives, themes and icons, the aliases and words of the diagram you are in, the procedures, functions and variables it and the files it includes define — with parameter hints for their calls — snippets of sequence and activity blocks, the properties of common `<style>` rules and a few `skinparam` names with their values, templates for sixteen kinds of diagram, and quick fixes that name a diagram for export and add a missing end line
 - **Go to Definition**: `F12`, Ctrl+Click and Peek on a call, a variable or a participant lead to where the diagram, a file it includes or a bundled library defines or declares it — never to another diagram — and a file of the C4 and Azure libraries opens read-only
 - **Find All References**: `Shift+Alt+F12`, `Shift+F12` and Peek list each call and use of a procedure, function or variable, and each line naming a participant, that leads to the same definition — in the diagram and the files it includes, never in another diagram
+- **Go to Symbol in Workspace**: `Ctrl+T` finds the named diagrams, the declared elements and the procedures, functions and macros of the Markdown and PlantUML files in the workspace folders, each with the diagram it is in, what declares it and its line — in a trusted workspace, without drawing anything
 - **Hovers**: A directive, the kind of diagram after `@start`, a bundled theme, an OpenIconic icon, and the style properties and `skinparam` names the completion offers show what they do and how they are written, in English or Japanese, with nothing fetched; a call or a variable shows each definition it may stand for, with the comment above it as written; the path of an include shows the file it reads, or why it reads none
 - **Actions Above Each Diagram**: *Preview*, *Export SVG* and *Export PNG* sit above the first line of each diagram, in `.puml` files and Markdown alike, and act on that diagram
 - **Go to Diagram**: *Go to Diagram in Document…* lists the diagram blocks of a Markdown file — with the heading above each, its kind and its title or first line — and moves the cursor to the one picked
@@ -502,6 +503,54 @@ marked *unresolved* above — one an include that is not read here may define
 again — are not listed; the Language Status then says *(partial)* and the
 output which includes were not read. At most 5,000 places are listed, and
 when the list stops there, the Language Status and the output say so.
+
+### Finding a symbol in the workspace
+
+*Go to Symbol in Workspace* (`Ctrl+T`) lists, from the Markdown and PlantUML
+files of the workspace folders:
+
+- each diagram named with `id=` on its start line, as in
+  `@startuml(id=orders)`, and each Markdown block named after its language,
+  as in ```` ```plantuml orders ````
+- each element a line declares with its keyword — a `participant`, a
+  `class`, a `component` and the like — by its alias when it has one
+- each procedure, function and macro defined with `!procedure`, `!function`,
+  `!define` or `!definelong`
+
+Beside each name, the list shows the diagram it is in, what declares it and
+its line, as in `orders · participant · line 2`, then the path of its file. A
+declaration under `!if`, `!while` or `!foreach` is marked *conditional*, as
+running the diagram may leave it out, and one in a diagram, a block or a body
+without its end line *unclosed*. A query matches the letters of a name in
+their order, in any case: `OrdSvc` finds `OrderService`. Picking a name opens
+its file at the name, as the file is then: a declaration that has moved is
+found again by its name, kind and diagram, and when it is gone, or there are
+now two, a warning asks you to search again.
+
+The extension starts once VS Code has started up, so that the search is there
+before a Markdown or PlantUML file is opened, but nothing is read until a
+query is typed. The first one reads the Markdown files and the `.puml`,
+`.plantuml`, `.pu`, `.iuml` and `.wsd` files of the workspace folders, and the
+queries after it are answered from what was found, with the unsaved changes of
+open documents; what is created, changed or deleted on disk is searched again
+at the next query. As the export of a folder does, the search skips `.git`,
+`.hg`, `.svn`, `node_modules`, `dist` and `build` folders and follows no
+symbolic link or junction, and a workspace folder inside another is searched
+once, as its own.
+`plantumlLocal.workspaceSymbols.exclude` leaves out more — `docs/**` a folder
+and what it holds, `**/*.wsd` every `.wsd` file — and a pattern it cannot read
+keeps the folder out of the search until it is fixed, with a warning;
+`plantumlLocal.workspaceSymbols.enabled` turns the search off for a folder.
+Nothing is drawn and no `!include` is followed, and in Restricted Mode nothing
+is read at all.
+
+A search reads at most 500 files, lists at most 10,000 folders and 100,000
+entries, goes at most 64 folders deep and stops after 30 seconds, for all the
+workspace folders together; a file larger than 2 MiB or longer than 50,000
+lines, or not UTF-8 text, is not read, and at most 5,000 names are listed.
+When a search stops at a limit, cannot read a file or a folder, or leaves out
+a folder that is not on disk, the status bar says so, and the output says
+what.
 
 ### Hovers
 
@@ -1011,6 +1060,12 @@ and would show the referenced image as a second copy.
 - Find All References searches a diagram and the files it includes: from a
   file that other files include, the diagrams that include it are not
   searched, nor are the files of the bundled libraries
+- Go to Symbol in Workspace reads each file as written, running nothing: a
+  name declared by a procedure call or in an included file is not listed
+  under the diagram, and a name under `!if` is listed — marked
+  *conditional* — whether or not the condition holds. A change on disk in a
+  folder that `files.watcherExclude` leaves out may not be seen until the
+  search starts again
 - Highlighting cannot tell which diagram type a `@startuml` block will turn
   into, so it colours the syntax of all of them: a line the engine rejects in
   one diagram type can still be coloured. Nor can it tell which names
@@ -1037,6 +1092,8 @@ and would show the referenced image as a second copy.
 | `plantumlLocal.codeLens.enabled` | `true` | Show *Preview*, *Export SVG* and *Export PNG* above each diagram in Markdown and PlantUML files; `editor.codeLens` must be on as well. Can be set per folder |
 | `plantumlLocal.styleHelp.enabled` | `true` | Offer the properties of common `<style>` rules and a few `skinparam` names, with their values, and explain them on hover; the other suggestions and hovers stay. Can be set per folder |
 | `plantumlLocal.includePaths` | `[]` | Folders a bare `!include` name is also looked for in, after the folder of the including file: relative to the workspace folder, up to 16. Can be set per folder; not used until the workspace is trusted |
+| `plantumlLocal.workspaceSymbols.enabled` | `true` | Search the Markdown and PlantUML files of the folder with *Go to Symbol in Workspace* (`Ctrl+T`). Can be set per folder; not used until the workspace is trusted |
+| `plantumlLocal.workspaceSymbols.exclude` | `[]` | Paths *Go to Symbol in Workspace* leaves out, relative to the workspace folder: up to 32 patterns, separated into folders by `/`. `?` stands for one character of a name and `*` for any number; `**` on its own, for any number of folders. Case-sensitive. A pattern it cannot read keeps the folder out of the search until it is fixed. Can be set per folder; not used until the workspace is trusted |
 
 A diagram that picks a `!theme` is drawn in that theme's colours, and most
 themes paint no background of their own, leaving the diagram on the backdrop

@@ -13,6 +13,9 @@ export const EXTENSION_NAME = 'PlantUML Local';
 /** The extension as VS Code identifies it: `publisher.name` in package.json. */
 export const PACKAGE_ID = 'kkdev92.plantuml-local';
 
+/** VS Code's own Markdown extension, whose previews draw the diagrams of Markdown. */
+export const MARKDOWN_EXTENSION = 'vscode.markdown-language-features';
+
 /** Command identifiers contributed in package.json. */
 export const COMMANDS = {
   CLEAR_CACHE: `${EXTENSION_ID}.clearCache`,
@@ -84,6 +87,8 @@ export const CONFIG = {
   INCLUDE_PATHS: 'includePaths',
   CODE_LENS_ENABLED: 'codeLens.enabled',
   STYLE_HELP_ENABLED: 'styleHelp.enabled',
+  WORKSPACE_SYMBOLS_ENABLED: 'workspaceSymbols.enabled',
+  WORKSPACE_SYMBOLS_EXCLUDE: 'workspaceSymbols.exclude',
 } as const;
 
 /**
@@ -199,6 +204,27 @@ export const ANALYSIS_LIMITS = {
   fileLines: 50_000,
   totalBytes: 32 * 1024 * 1024,
   results: 5_000,
+} as const;
+
+/**
+ * How far Go to Symbol in Workspace reads (src/language/workspace-symbols.ts),
+ * for all the workspace folders together: the files it reads, the folders it
+ * lists, the entries it takes from them, how deep it goes and how long it
+ * takes. A search that stops at one of these says so, and is not taken for
+ * the whole. Each file is read within {@link ANALYSIS_LIMITS}, and the answer
+ * cut at its `results`. A query, and the patterns of
+ * `plantumlLocal.workspaceSymbols.exclude`, longer than these lengths, or
+ * more patterns, are refused before anything is read.
+ */
+export const WORKSPACE_SYMBOL_LIMITS = {
+  files: 500,
+  directories: 10_000,
+  entries: 100_000,
+  depth: 64,
+  milliseconds: 30_000,
+  query: 256,
+  patterns: 32,
+  patternLength: 256,
 } as const;
 
 /**
