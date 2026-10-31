@@ -38,6 +38,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   it reports in the status bar and the output, and reads nothing in
   Restricted Mode. `plantumlLocal.workspaceSymbols.exclude` leaves out paths,
   and `plantumlLocal.workspaceSymbols.enabled` turns it off for a folder.
+- **Rename Symbol renames a participant's alias.** `F2` on the alias of a
+  sequence diagram's participant, in a Markdown block, renames it in one
+  edit: where a declaration gives it with `as`, and each line of the diagram
+  that names it — but no label, note text or comment. The whole diagram is
+  read first, and a diagram with a line of a form the rename does not read,
+  a line the preprocessor reads, or a note or a group left open is not
+  renamed in: VS Code says which line. A new name that cannot be an alias, is
+  a keyword of the diagram or names another participant is refused with the
+  reason. Elsewhere, `F2` renames what VS Code's Markdown support renames, as
+  before. The tests draw each form the rename reads with the bundled engine,
+  as written and as renamed. `plantumlLocal.rename.enabled` turns it off for
+  a folder.
 
 ### Changed
 

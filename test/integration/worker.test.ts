@@ -10,6 +10,7 @@ import { EMOJI_UNAVAILABLE } from '../../src/core/constants';
 import { englishMessages } from '../../src/core/messages';
 import type { RenderResponseMessage } from '../../src/core/types';
 import { SUPPORTED_DIAGRAMS } from '../../src/grammar/plantuml';
+import { newNameRefusal, renameAt, type NamePlace, type RenameTarget } from '../../src/language/alias-rename';
 import { DIRECTIVES, expandSnippet, SNIPPETS, TEMPLATES } from '../../src/language/completion';
 import { diagramKind, type DiagramKind } from '../../src/language/diagram-kind';
 import { helpFor, type Help } from '../../src/language/hover';
@@ -1166,6 +1167,314 @@ describe('the title a screen reader is told (dist, re-check on every engine upda
     const error = await render(['@startuml', 'title Has an error', 'A -> B : x', 'foo bar baz qux', '@enduml'].join('\n'));
     expect(recognizeEngineError(error)).not.toBeNull();
     expect(drawnTitle(error)).toBeNull();
+  });
+});
+
+// The rename of a participant's alias (src/language/alias-rename.ts) changes
+// the alias where the module reads that the diagram names the participant,
+// and nothing else. The engine draws a participant by the name it shows, and
+// the drawing keeps no alias, so a diagram is drawn the same once renamed: a
+// line the engine read otherwise than the module, a place missed or a label
+// changed, would add, lose or change what is drawn. And a place the engine
+// reads as the participant draws a new one when it alone is left out. So
+// each form the module reads is drawn as written, as renamed, and with each
+// place left out, and re-checked on every engine update.
+describe('the rename of an alias (dist, re-check on every engine update)', () => {
+  const NBSP = String.fromCharCode(0xa0);
+  const ELLIPSIS = String.fromCharCode(0x2026);
+  /** The alias at the cursor `§` in the diagram of `lines`, in a Markdown block, and the lines of the block without the cursor. */
+  const aliasAt = (lines: readonly string[], start = '@startuml', end = '@enduml'): { found: RenameTarget; plain: string[] } => {
+    const block = ['```plantuml', start, ...lines, end, '```', ''];
+    const row = block.findIndex((line) => line.includes('§'));
+    const plain = block.map((line) => line.replace('§', ''));
+    const found = renameAt(plain.join('\n'), row, (block[row] ?? '').indexOf('§'));
+    if (found === null || 'refused' in found) {
+      throw new Error(`not renamed: ${JSON.stringify(found)}`);
+    }
+    return { found, plain };
+  };
+  /** The diagram of the block `plain`, with `name` at `places`. */
+  const named = (plain: readonly string[], places: readonly NamePlace[], name: string): string => {
+    const lines = [...plain];
+    for (const { line, start, end } of [...places].reverse()) {
+      const text = lines[line] ?? '';
+      lines[line] = text.slice(0, start) + name + text.slice(end);
+    }
+    return lines.slice(1, -2).join('\n');
+  };
+
+  const DIAGRAMS: [string, string[]][] = [
+    ['a declaration with the name shown first', ['participant "Orders desk" as §A', 'A -> B : x']],
+    ['a declaration with the name shown after', ['participant §A as "Orders desk" order 20', 'participant B order 10', 'A -> B : x']],
+    ['a declaration with an unquoted name shown', ['participant Desk As §A', 'A -> B : x']],
+    [
+      'each role',
+      [
+        'actor "Clerk" as §A',
+        'boundary "Gate" as G',
+        'control "Control" as C',
+        'entity "Entity" as E',
+        'database "Base" as D',
+        'collections "Lists" as L',
+        'queue "Queue" as Q',
+        'A -> G : x',
+        'A -> C : x',
+        'A -> E : x',
+        'A -> D : x',
+        'A -> L : x',
+        'A -> Q : x',
+      ],
+    ],
+    ['a role in upper case', ['QUEUE "Orders desk" AS §A', 'A -> B : x']],
+    [
+      'each arrow',
+      [
+        'participant "Orders desk" as §A',
+        'A -> B : 1',
+        'A --> B : 2',
+        'B <- A : 3',
+        'B <-- A : 4',
+        'A ->> B : 5',
+        'A -->> B : 6',
+        'B <<- A : 7',
+        'B <<-- A : 8',
+        'A->B:9',
+        'A -> A : A',
+      ],
+    ],
+    [
+      'activations, creations and destructions',
+      [
+        'participant B',
+        'participant "Orders desk" as §A',
+        'create A',
+        'B -> A : new',
+        'activate A',
+        'A -> B : x',
+        'deactivate A',
+        'create C',
+        'A -> C : new',
+        'destroy A',
+      ],
+    ],
+    [
+      'notes',
+      [
+        'participant "Orders desk" as §A',
+        'participant B',
+        'A -> B : x',
+        'note left of A : A waits',
+        'note right of A : r',
+        'note over A : o',
+        'note over A, B : ob',
+        'note over B,A : ba',
+        'noteleft of A : glued',
+        'NOTE  OVER A : upper',
+        'note left of A',
+        'A -> B : in the note',
+        'end note',
+        'note over A, B',
+        'A -> B : in the note',
+        'end note',
+      ],
+    ],
+    [
+      'the text of notes, as the engine ends it',
+      [
+        'participant "Orders desk" as §A',
+        'note left of A',
+        'end  note',
+        'A -> B : in the note',
+        'end note',
+        'note right of A',
+        "/'",
+        'end note',
+        'A -> B : in a comment',
+        "'/",
+        "' end note",
+        'A -> B : in the note',
+        'end note',
+        'note over A',
+        'n',
+        `end${NBSP}note`,
+        'A -> B : after',
+      ],
+    ],
+    [
+      'references',
+      [
+        'participant "Orders desk" as §A',
+        'participant B',
+        'A -> B : x',
+        'ref over A, B : r',
+        'ref over B, A',
+        'A -> B : in the reference',
+        'end ref',
+        'ref over A, B',
+        'r',
+        'end',
+        'ref over A, B',
+        'r',
+        'endref',
+      ],
+    ],
+    [
+      'groups',
+      [
+        'participant "Orders desk" as §A',
+        'participant B',
+        'alt#Gold #LightBlue one',
+        'A -> B : x',
+        'else #Pink two',
+        'A -> B : y',
+        'end alt',
+        'loop 3 times',
+        'opt',
+        'group Shop',
+        'critical',
+        'A -> B : z',
+        'end',
+        'end',
+        'end',
+        'end',
+        'par',
+        'A -> B : p',
+        'end',
+        'break',
+        'A -> B : b',
+        'end',
+        'alt one',
+        'note over A',
+        'end',
+        'end note',
+        'A -> B : w',
+        'end',
+      ],
+    ],
+    [
+      'lines that name no participant',
+      [
+        'autonumber',
+        'autonumber 10 10 "<b>[000]"',
+        'title Orders and A',
+        'participant "Orders desk" as §A',
+        '== A ==',
+        'A -> B : order',
+        'activate B',
+        'return A done',
+        '...',
+        '...A waits...',
+        ELLIPSIS,
+        '|||',
+        '||45||',
+        'skinparam sequenceMessageAlign center',
+        '<style>',
+        'participant {',
+        '  FontColor red',
+        '}',
+        '</style>',
+        '<style>participant { FontColor red }</style>',
+        'autonumber stop',
+        'A -> B : x',
+        'autonumber resume',
+        'autonumber resume 10 "<b>(00)"',
+        'A -> B : y',
+        'autonumber 1.1.1',
+        'autonumber inc A',
+        'A -> B : z',
+        "' A -> B : a comment",
+        "/' A -> B '/",
+        "/'",
+        'A -> B : in a block comment',
+        "and its end '/",
+      ],
+    ],
+    [
+      'a title that looks like a message, and names the engine keeps apart',
+      [
+        'title A -> B : not a message',
+        'participant "Orders desk" as §A',
+        'A -> B : x',
+        'a -> B : lower case',
+        'AB -> B : longer',
+        'A. -> B : a dot',
+        'A@ -> B : an at sign',
+        'create participant',
+        'B -> participant : new',
+      ],
+    ],
+    [
+      'keywords in any case, and indented lines',
+      [
+        'PARTICIPANT "Orders desk" AS §A',
+        '  ACTIVATE A',
+        '\tA -> B : x',
+        `${NBSP}A -> B : y${NBSP}`,
+        'NOTE LEFT OF A : n',
+        'Ref Over A, B : r',
+        'ALT one',
+        '    A -> B : z',
+        'ELSE two',
+        'END',
+      ],
+    ],
+    [
+      'styles ended by an indented end, and by <style>',
+      ['<style>', 'participant {', '}', '<style>', 'participant "Orders desk" as §A', 'A -> B : x', '<style>', 'arrow {', '}', '  </style>  '],
+    ],
+  ];
+
+  it.each(DIAGRAMS)('draws %s the same once the alias is renamed, and differently with any place left out', async (_name, lines) => {
+    const { found, plain } = aliasAt(lines);
+    expect(newNameRefusal(found, 'Orders')).toBeNull();
+    const drawn = await render(named(plain, [], 'Orders'));
+    expect(recognizeEngineError(drawn), drawn.slice(0, 400)).toBeNull();
+    expect(await render(named(plain, found.places, 'Orders'))).toBe(drawn);
+    for (const left of found.places) {
+      const others = found.places.filter((place) => place !== left);
+      expect(await render(named(plain, others, 'Orders')), `${left.line}:${left.start} left out`).not.toBe(drawn);
+    }
+  });
+
+  it('draws a diagram with its start line given an id, or indented, the same once renamed', async () => {
+    for (const [start, end] of [
+      ['@startuml(id=orders)', '@enduml'],
+      ['  @startuml', ' @enduml '],
+    ]) {
+      const { found, plain } = aliasAt(['participant "Orders desk" as §A', 'A -> B : x'], start, end);
+      const drawn = await render(named(plain, [], 'Orders'));
+      expect(recognizeEngineError(drawn)).toBeNull();
+      expect(await render(named(plain, found.places, 'Orders'))).toBe(drawn);
+    }
+  });
+
+  it('draws differently a rename that changes a label', async () => {
+    const drawn = await render(['@startuml', 'participant "Orders desk" as A', 'A -> B : A', '@enduml'].join('\n'));
+    expect(await render(['@startuml', 'participant "Orders desk" as Orders', 'Orders -> B : Orders', '@enduml'].join('\n'))).not.toBe(
+      drawn
+    );
+  });
+
+  it.each([
+    'title',
+    'mainframe',
+    'caption',
+    'legend',
+    'footer',
+    'header',
+    'leftfooter',
+    'rightfooter',
+    'centerfooter',
+    'leftheader',
+    'rightheader',
+    'centerheader',
+    'LeftHeader',
+  ])('draws a message from a participant named %s as something else, so the rename refuses the name', async (word) => {
+    const diagram = (alias: string): string =>
+      ['@startuml', `participant "Orders desk" as ${alias}`, `${alias} -> B : x`, '@enduml'].join('\n');
+    expect(await render(diagram(word))).not.toBe(await render(diagram('Orders')));
+    const { found } = aliasAt(['participant "Orders desk" as §A', 'A -> B : x']);
+    expect(newNameRefusal(found, word)).toEqual({ reason: 'reserved', name: word });
   });
 });
 

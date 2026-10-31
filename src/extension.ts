@@ -153,6 +153,7 @@ import { listDiagrams } from './language/diagram-list';
 import { foldingRanges } from './language/folding';
 import { declarations, type Declaration } from './language/symbols';
 import { WorkspaceSymbolSearch } from './language/workspace-symbol-provider';
+import { AliasRename } from './language/alias-rename-provider';
 import {
   checkSource,
   PROBLEM_CODES,
@@ -229,6 +230,8 @@ export const Settings = defineSettings({
     // value the search cannot read stops the search of the folder rather than
     // widening it.
     [CONFIG.WORKSPACE_SYMBOLS_EXCLUDE]: setting.stringArray({ default: [], scope: 'resource' }),
+    // Resource-scoped, so a folder can leave F2 to the Markdown rename: read per document.
+    [CONFIG.RENAME_ENABLED]: setting.boolean({ default: true, scope: 'resource' }),
   },
 });
 
@@ -4469,6 +4472,32 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
             search.reset();
           }
         })
+      );
+      return undefined;
+    },
+  });
+
+  module.raw.register({
+    id: 'plantuml.rename',
+    inject: { settings: Settings.token, l10n: Localization },
+    bind: ({ registrations }, { settings, l10n }): undefined => {
+      // Rename Symbol on the alias of a sequence diagram's participant in a
+      // Markdown block (src/language/alias-rename-provider.ts), on disk or
+      // untitled. Registered by language as the Markdown rename is, so that
+      // VS Code asks this one first. PlantUML files are left out: another
+      // file can include one, and use its names.
+      registrations.own(
+        vscode.languages.registerRenameProvider(
+          [
+            { language: 'markdown', scheme: 'file' },
+            { language: 'markdown', scheme: 'untitled' },
+          ],
+          new AliasRename({
+            l10n,
+            enabled: (document: vscode.Uri): boolean =>
+              settings.read({ resource: document }).values[CONFIG.RENAME_ENABLED] !== false,
+          })
+        )
       );
       return undefined;
     },

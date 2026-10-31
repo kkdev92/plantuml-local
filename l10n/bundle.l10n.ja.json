@@ -424,5 +424,22 @@
   "Pattern {0}, {1}, ends with /. For a folder and what it holds, write folder/**.": "{0} 番目のパターン {1} が / で終わっています。フォルダーとその中のすべてを外すには、folder/** と書いてください。",
   "Pattern {0}, {1}, has // in it.": "{0} 番目のパターン {1} に // があります。",
   "Pattern {0}, {1}, has . or .. as a folder.": "{0} 番目のパターン {1} に、フォルダーとしての . か .. があります。",
-  "Pattern {0}, {1}, has ** with other characters between two /.": "{0} 番目のパターン {1} で、/ と / の間に ** とほかの文字が並んでいます。"
+  "Pattern {0}, {1}, has ** with other characters between two /.": "{0} 番目のパターン {1} で、/ と / の間に ** とほかの文字が並んでいます。",
+  "PlantUML Local does not rename in a document larger than {0} MiB or longer than {1} lines.": "PlantUML Local は、{0} MiB または {1} 行を超える文書では名前を変更しません。",
+  "PlantUML Local finds no alias of a participant to rename here.": "PlantUML Local は、ここで名前を変更できる参加者の別名を見つけられません。",
+  "PlantUML Local does not rename in a code block that has no closing fence.": "PlantUML Local は、閉じるフェンスのないコードブロックでは名前を変更しません。",
+  "PlantUML Local renames only in a code block that holds one diagram, from @startuml to @enduml.": "PlantUML Local が名前を変更するのは、@startuml から @enduml までの図を 1 つだけ持つコードブロックの中だけです。",
+  "PlantUML Local cannot match the lines of this code block to its diagram, and does not rename in it.": "PlantUML Local は、このコードブロックの行を図の行と対応付けられないため、名前を変更しません。",
+  "PlantUML Local does not rename in this diagram: line {0} is not of a form it reads, so what the line names cannot be told.": "PlantUML Local は、この図では名前を変更しません。{0} 行目が読み取れない形の行で、その行が何を指すか分からないためです。",
+  "PlantUML Local does not rename in this diagram: line {0} is read by the preprocessor, which can bring in names that are not seen here.": "PlantUML Local は、この図では名前を変更しません。{0} 行目はプリプロセッサが読む行で、ここからは見えない名前を持ち込むことがあるためです。",
+  "PlantUML Local does not rename in this diagram: the note, reference, style or group that starts on line {0} is not closed.": "PlantUML Local は、この図では名前を変更しません。{0} 行目から始まるノート、参照、style、またはグループが閉じていないためです。",
+  "PlantUML Local does not rename {0}: it is not declared, so it is also the name the diagram shows. Give it an alias with as to rename it.": "PlantUML Local は {0} の名前を変更しません。宣言されていないため、図に表示される名前でもあります。名前を変更するには、as で別名を付けてください。",
+  "PlantUML Local does not rename {0}: it is declared without as, so it is also the name the diagram shows. Give it an alias with as to rename it.": "PlantUML Local は {0} の名前を変更しません。as を使わずに宣言されているため、図に表示される名前でもあります。名前を変更するには、as で別名を付けてください。",
+  "PlantUML Local does not rename {0}: it is declared more than once.": "PlantUML Local は {0} の名前を変更しません。2 回以上宣言されています。",
+  "PlantUML Local does not rename {0}: it renames only an alias of ASCII letters, digits and _, up to {1} characters long.": "PlantUML Local は {0} の名前を変更しません。変更できるのは、ASCII の英字・数字・_ だけでできた {1} 文字までの別名です。",
+  "PlantUML Local does not rename {0}: it is used in more than {1} places.": "PlantUML Local は {0} の名前を変更しません。{1} か所を超えて使われています。",
+  "PlantUML Local does not rename to a name longer than {0} characters.": "PlantUML Local は、{0} 文字を超える名前には変更しません。",
+  "PlantUML Local does not rename to {0}: an alias is of ASCII letters, digits and _, and does not start with a digit.": "PlantUML Local は {0} には変更しません。別名は、ASCII の英字・数字・_ でできていて、数字で始まらない名前にしてください。",
+  "PlantUML Local does not rename to {0}: it is a keyword of the diagram.": "PlantUML Local は {0} には変更しません。図のキーワードです。",
+  "PlantUML Local does not rename to {0}: a participant of the diagram has that name already.": "PlantUML Local は {0} には変更しません。図の参加者に、もうその名前があります。"
 }
