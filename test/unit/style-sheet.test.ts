@@ -7,7 +7,7 @@ const upTo = (...lines: string[]): ReturnType<typeof readStyleSheet> => {
   const line = lines.findIndex((text) => text.includes('|'));
   const column = lines[line]?.indexOf('|') ?? 0;
   return readStyleSheet(
-    lines.map((text) => text.replace('|', '')),
+    lines.map((text) => text.replaceAll('|', '')),
     { line, column }
   );
 };

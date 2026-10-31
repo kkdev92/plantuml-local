@@ -34,7 +34,7 @@ const rule = (...selectors: string[]): StyleRule => {
 const placeOf = (lines: readonly string[], bare = true, names = NAMES): SettingPlace | null => {
   const line = lines.findIndex((text) => text.includes('|'));
   const column = lines[line]?.indexOf('|') ?? 0;
-  return settingAt(lines.map((text) => text.replace('|', '')).join('\n'), line, column, bare, names);
+  return settingAt(lines.map((text) => text.replaceAll('|', '')).join('\n'), line, column, bare, names);
 };
 
 /** `body` in a style sheet of a diagram. */
@@ -93,7 +93,7 @@ describe('settingAt', () => {
     const lines = participant('FontColor: #re|d;');
     const line = lines.findIndex((text) => text.includes('|'));
     const column = lines[line]?.indexOf('|') ?? 0;
-    const source = lines.map((text) => text.replace('|', '')).join('\r\n');
+    const source = lines.map((text) => text.replaceAll('|', '')).join('\r\n');
 
     expect(settingAt(source, line, column, true, NAMES)).toEqual(placeOf(lines));
     expect(placeOf(lines)).toMatchObject({ kind: 'value', start: 15, end: 19 });

@@ -21,7 +21,7 @@ const ANCHORS = {
 };
 
 /** `name` for a regular expression: a minified name may hold `$`. */
-const literal = (name) => name.replace(/\$/g, '\\$');
+const literal = (name) => RegExp.escape(name);
 
 /** The strings of the engine's string pool, in their order. */
 function stringPool(script) {
