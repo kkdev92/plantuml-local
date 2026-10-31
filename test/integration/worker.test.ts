@@ -14,6 +14,20 @@ import { DIRECTIVES, expandSnippet, SNIPPETS, TEMPLATES } from '../../src/langua
 import { diagramKind, type DiagramKind } from '../../src/language/diagram-kind';
 import { helpFor, type Help } from '../../src/language/hover';
 import { protect } from '../../src/language/protected';
+import {
+  EXAMPLE_BODIES,
+  propertyHelp,
+  selectorText,
+  settingSuggestions,
+  skinparamHelp,
+  SKINPARAMS,
+  STYLE_PROPERTIES,
+  STYLE_RULES,
+  styleExample,
+  type OfferedSkinparam,
+  type StyleNames,
+  type ValueKind,
+} from '../../src/language/style';
 import { recognizeEngineError } from '../../src/render/engine-error';
 import { drawnTitle } from '../../src/render/title';
 import {
@@ -831,6 +845,107 @@ describe('the colours the picker edits (dist, re-check on every engine update)',
     const svg = await render(`@startuml\nrectangle R #${name}\n@enduml`);
     expect(recognizeEngineError(svg)).toBeNull();
     expect(svg.toUpperCase()).toContain(`FILL="${hex}"`);
+  });
+});
+
+// The style items and skinparams the completion offers and explains
+// (src/language/style.ts): each property of each rule draws its value, in
+// each kind of diagram the rule is offered for, written either way and in
+// any case, as the help says. Names come from the engine at build time; this
+// holds which rule offers which property to what the engine draws, so an
+// engine update that stops drawing one fails here.
+describe('the style items the completion offers (dist, re-check on every engine update)', () => {
+  const names = JSON.parse(readFileSync(join(__dirname, '../../dist/engine/style-names.json'), 'utf8')) as StyleNames;
+  /** What a value of each kind draws in the SVG: the colour, the font, the size of the text, the width of a line. */
+  const MARKS: Readonly<Record<ValueKind, (value: string) => RegExp>> = {
+    color: (value) => new RegExp(value, 'i'),
+    font: (value) => new RegExp(`font-family="${value}"`),
+    integer: (value) => new RegExp(`font-size="${value}"`),
+    number: (value) => new RegExp(`stroke-width[:=]"?${value.replace('.', '\\.')}\\b`),
+  };
+  const controls = new Map<string, Promise<string>>();
+  /** The diagram of kind `kind`, drawn without a style. */
+  const control = (kind: keyof typeof EXAMPLE_BODIES): Promise<string> => {
+    let drawn = controls.get(kind);
+    if (drawn === undefined) {
+      drawn = render(['@startuml', ...EXAMPLE_BODIES[kind], '@enduml'].join('\n'));
+      controls.set(kind, drawn);
+    }
+    return drawn;
+  };
+  /** The lines of the style sheet in lower case. */
+  const lowerCase = (lines: readonly string[]): string[] => {
+    const end = lines.indexOf('</style>');
+    return lines.map((line, at) => (at < end ? line.toLowerCase() : line));
+  };
+
+  it('offers only names the engine knows, which the build read from it', () => {
+    expect(names.properties).toContain('Shadowing');
+    expect(names.selectors).toContain('class_');
+    for (const property of Object.keys(STYLE_PROPERTIES)) {
+      expect(names.properties, property).toContain(property);
+    }
+    for (const { selectors } of STYLE_RULES) {
+      for (const selector of selectors) {
+        expect(names.selectors, selector).toContain(selector);
+      }
+    }
+  });
+
+  it.each(
+    STYLE_RULES.flatMap((rule) =>
+      rule.drawnIn.flatMap((kind) =>
+        rule.properties.map((property) => [rule.selectors.map(selectorText).join(' > '), kind, property, rule] as const)
+      )
+    )
+  )('draws %s in a %s diagram with %s, written either way and in any case', async (_path, kind, property, rule) => {
+    const { kind: valueKind, example } = STYLE_PROPERTIES[property];
+    const mark = MARKS[valueKind](example);
+    expect(mark.test(await control(kind))).toBe(false);
+    const colon = styleExample(rule, property, example, 'colon', kind);
+    if (kind === rule.drawnIn[0]) {
+      expect(propertyHelp(rule, property, englishMessages).example).toBe(colon.join('\n'));
+    }
+    for (const lines of [colon, styleExample(rule, property, example, 'space', kind), lowerCase(colon)]) {
+      const svg = await render(['@startuml', ...lines, '@enduml'].join('\n'));
+      expect(recognizeEngineError(svg), lines.join('\n')).toBeNull();
+      expect(mark.test(svg), lines.join('\n')).toBe(true);
+    }
+  });
+
+  it('draws no background for the arrows of a sequence diagram, which is why it is not offered there', async () => {
+    const arrow = STYLE_RULES.find(({ selectors }) => selectors.at(-1) === 'arrow');
+    expect(arrow?.properties).not.toContain('BackGroundColor');
+    for (const form of ['colon', 'space'] as const) {
+      const lines = styleExample({ ...(arrow ?? STYLE_RULES[0]!), properties: [] }, 'BackGroundColor', '#FFF3E0', form);
+      const svg = await render(['@startuml', ...lines, '@enduml'].join('\n'));
+      expect(recognizeEngineError(svg)).toBeNull();
+      expect(svg).not.toMatch(/#FFF3E0/i);
+    }
+  });
+
+  it('draws the fonts offered for a value as they are written', async () => {
+    const element = STYLE_RULES[0]!;
+    const fonts = settingSuggestions(
+      { kind: 'value', rule: element, property: 'FontName', start: 0, end: 0 },
+      '',
+      names,
+      englishMessages
+    ).map(({ label }) => label);
+    expect(fonts.length).toBeGreaterThan(0);
+    for (const font of fonts) {
+      const svg = await render(['@startuml', ...styleExample(element, 'FontName', font), '@enduml'].join('\n'));
+      expect(svg, font).toMatch(MARKS.font(font));
+    }
+  });
+
+  it.each(Object.entries(SKINPARAMS))('draws skinparam %s as its help shows it', async (name, { kind, example }) => {
+    const mark = MARKS[kind](example);
+    expect(mark.test(await control('sequence'))).toBe(false);
+    const shown = skinparamHelp(name as OfferedSkinparam, englishMessages).example ?? '';
+    const svg = await render(['@startuml', shown, '@enduml'].join('\n'));
+    expect(recognizeEngineError(svg)).toBeNull();
+    expect(mark.test(svg), name).toBe(true);
   });
 });
 

@@ -564,7 +564,18 @@ export interface VscodeStub {
   FoldingRangeKind: Record<'Comment' | 'Imports' | 'Region', number>;
   CompletionItem: new (label: CompletionItemStub['label'], kind?: number) => CompletionItemStub;
   CompletionItemKind: Record<
-    'Text' | 'Method' | 'Function' | 'Variable' | 'Keyword' | 'Value' | 'Snippet' | 'File' | 'Folder' | 'Constant',
+    | 'Text'
+    | 'Method'
+    | 'Function'
+    | 'Variable'
+    | 'Property'
+    | 'Keyword'
+    | 'Value'
+    | 'Snippet'
+    | 'Color'
+    | 'File'
+    | 'Folder'
+    | 'Constant',
     number
   >;
   CompletionTriggerKind: Record<'Invoke' | 'TriggerCharacter' | 'TriggerForIncompleteCompletions', number>;
@@ -1384,9 +1395,11 @@ export function createVscodeStub(): VscodeStub {
       Method: 1,
       Function: 2,
       Variable: 5,
+      Property: 9,
       Keyword: 13,
       Value: 11,
       Snippet: 14,
+      Color: 15,
       File: 16,
       Folder: 18,
       Constant: 20,

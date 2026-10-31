@@ -83,6 +83,7 @@ export const CONFIG = {
   DIAGNOSTICS_ENABLED: 'diagnostics.enabled',
   INCLUDE_PATHS: 'includePaths',
   CODE_LENS_ENABLED: 'codeLens.enabled',
+  STYLE_HELP_ENABLED: 'styleHelp.enabled',
 } as const;
 
 /**

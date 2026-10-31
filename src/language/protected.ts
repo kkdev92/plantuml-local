@@ -11,7 +11,9 @@
  * as the engine's preprocessor drops them before anything else is read. A
  * `/' … '/` or an apostrophe within a line is drawn as text by the bundled
  * engine, so it is code here. Notes and texts end where the folding ends
- * them (textEnd in src/language/folding.ts).
+ * them (textEnd in src/language/folding.ts). The lines of a style sheet
+ * stay protected from the names, and are marked for the completion and the
+ * hovers of style items (src/language/style.ts), which read them alone.
  *
  * Like the folding, this has no dependency on the `vscode` module.
  */
@@ -30,6 +32,8 @@ export interface CodeLine {
    * in it.
    */
   spans: readonly (readonly [start: number, end: number])[];
+  /** In a `<style>` block of several lines: `open` on its start line, `sheet` on a line of its style sheet that is not a comment. */
+  style?: 'open' | 'sheet';
 }
 
 /** A sprite's keyword and name, before its data. */
@@ -129,7 +133,7 @@ export function protect(lines: readonly string[], data: boolean): CodeLine[] {
     }
     if (style) {
       style = !STYLE_END.test(line);
-      return protectedLine(line);
+      return style ? { ...protectedLine(line), style: 'sheet' } : protectedLine(line);
     }
     if (json > 0) {
       json += depth(line);
@@ -138,7 +142,7 @@ export function protect(lines: readonly string[], data: boolean): CodeLine[] {
 
     if (STYLE.test(line)) {
       style = !STYLE_END.test(line);
-      return protectedLine(line);
+      return style ? { ...protectedLine(line), style: 'open' } : protectedLine(line);
     }
     const sprited = SPRITE.exec(line);
     if (sprited !== null) {

@@ -27,6 +27,7 @@ import {
   type WebviewPanelStub,
 } from './helpers/vscode-stub';
 import { englishMessages } from '../../src/core/messages';
+import { expandSnippet, SNIPPETS } from '../../src/language/completion';
 import {
   codeBlock,
   escapeLines,
@@ -36,6 +37,7 @@ import {
   inlineCode,
   type BuiltinTarget,
 } from '../../src/language/hover';
+import { propertyHelp, skinparamHelp, STYLE_RULES } from '../../src/language/style';
 
 /**
  * Loads the built dist/extension.js with a stubbed `vscode` module and
@@ -2272,6 +2274,212 @@ describe('completion (dist)', () => {
         vscodeStub._test.setLanguageConfiguration('plantuml', 'editor.wordBasedSuggestions', undefined);
       }
     });
+  });
+});
+
+describe('style items and skinparams in completion and hovers (dist)', () => {
+  /** As VS Code asks while a word is typed, or on Ctrl+Space. */
+  const invoke = async (document: TextEditorStub['document'], line: number, character: number): Promise<CompletionItemStub[] | undefined> =>
+    await vscodeStub._test.completionProviders[0]?.provider.provideCompletionItems(
+      document,
+      new vscodeStub.Position(line, character),
+      undefined,
+      { triggerKind: vscodeStub.CompletionTriggerKind.Invoke }
+    );
+  const labelOf = (item: CompletionItemStub): string => (typeof item.label === 'string' ? item.label : item.label.label);
+  /** The hover at the position: its sections, as Markdown, and the columns it is for on its line. */
+  const hoverAt = async (
+    document: TextEditorStub['document'],
+    line: number,
+    character: number
+  ): Promise<{ sections: string[]; columns: [number, number] } | undefined> => {
+    const hover = await vscodeStub._test.hoverProviders[0]?.provider.provideHover(document, new vscodeStub.Position(line, character), {
+      isCancellationRequested: false,
+    });
+    if (hover === undefined) {
+      return undefined;
+    }
+    for (const section of hover.contents) {
+      expect(section.isTrusted).toBe(false);
+      expect(section.supportHtml).toBe(false);
+    }
+    return {
+      sections: hover.contents.map((section) => section.value),
+      columns: [hover.range?.start.character ?? -1, hover.range?.end.character ?? -1],
+    };
+  };
+  const participant = STYLE_RULES.find(({ selectors }) => selectors.at(-1) === 'participant')!;
+  /**
+   * A diagram whose participant rule holds `line`, on line 4, and whose
+   * line 8 is `skinparam`; its end line is line 10. What follows the cursor
+   * is not read, what precedes it is: a property left without a value
+   * takes the next line as its value, as the engine reads it.
+   */
+  const sheet = (line: string, skinparam = 'skinparam default'): string =>
+    ['@startuml', '<style>', 'sequenceDiagram {', '  participant {', `    ${line}`, '  }', '}', '</style>', skinparam, 'Alice -> Bob', '@enduml'].join(
+      '\n'
+    );
+
+  it('offers the properties of a rule, each with its help, replacing the name only', async () => {
+    const document = makeEditor('file:///c/style/props.puml', sheet('Font'), 0, { languageId: 'plantuml' }).document;
+
+    const items = (await invoke(document, 4, 8)) ?? [];
+    expect(items.map(labelOf)).toEqual(['FontName', 'FontSize', 'FontColor', 'BackGroundColor', 'LineColor', 'LineThickness']);
+    expect(items[2]).toMatchObject({ kind: vscodeStub.CompletionItemKind.Property, insertText: 'FontColor' });
+    expect(items[2]?.range).toEqual({
+      inserting: { start: { line: 4, character: 4 }, end: { line: 4, character: 8 } },
+      replacing: { start: { line: 4, character: 4 }, end: { line: 4, character: 8 } },
+    });
+    const documentation = items[2]?.documentation as MarkdownStringStub;
+    expect(documentation).toMatchObject({ isTrusted: false, supportHtml: false });
+    expect(documentation.value).toBe(helpMarkdown(propertyHelp(participant, 'FontColor', englishMessages), englishMessages));
+  });
+
+  it('offers the values of a property, in the form typed, replacing the value only, and opens on no space', async () => {
+    const document = makeEditor('file:///c/style/values.puml', sheet('FontColor: #to;'), 0, { languageId: 'plantuml' }).document;
+
+    const colours = (await invoke(document, 4, 18)) ?? [];
+    const tomato = colours.find((item) => labelOf(item) === '#tomato');
+    expect(tomato).toMatchObject({ kind: vscodeStub.CompletionItemKind.Color, detail: '#FF6347', insertText: '#tomato' });
+    // The semicolon after the value stays.
+    expect(tomato?.range?.replacing).toEqual({ start: { line: 4, character: 15 }, end: { line: 4, character: 18 } });
+    // After a space, the list waits for a letter or Ctrl+Space.
+    const spacedDocument = makeEditor('file:///c/style/space.puml', sheet('LineColor '), 0, { languageId: 'plantuml' }).document;
+    const spaced = await vscodeStub._test.completionProviders[0]?.provider.provideCompletionItems(
+      spacedDocument,
+      new vscodeStub.Position(4, 14),
+      undefined,
+      { triggerKind: vscodeStub.CompletionTriggerKind.TriggerCharacter, triggerCharacter: ' ' }
+    );
+    expect(spaced).toBeUndefined();
+    expect((await invoke(spacedDocument, 4, 14))?.map(labelOf)).toContain('#tomato');
+  });
+
+  it('offers the skinparams and their values, and nothing in a rule it does not offer', async () => {
+    const document = makeEditor('file:///c/style/skinparams.puml', sheet('FontColor red'), 0, { languageId: 'plantuml' }).document;
+
+    const names = (await invoke(document, 8, 17)) ?? [];
+    expect(names.map(labelOf)).toEqual(['defaultFontName', 'defaultFontSize', 'defaultFontColor', 'backgroundColor']);
+    expect(names[0]?.range?.replacing).toEqual({ start: { line: 8, character: 10 }, end: { line: 8, character: 17 } });
+    expect((names[3]?.documentation as MarkdownStringStub).value).toBe(
+      helpMarkdown(skinparamHelp('backgroundColor', englishMessages), englishMessages)
+    );
+    const value = makeEditor('file:///c/style/value.puml', sheet('FontColor red', 'skinparam backgroundColor '), 0, {
+      languageId: 'plantuml',
+    }).document;
+    expect((await invoke(value, 8, 26))?.map(labelOf)).toContain('#white');
+    // A rule the catalogue has not: nothing, as before.
+    const other = makeEditor('file:///c/style/other.puml', ['@startuml', '<style>', 'note {', '  Font', '}', '</style>', '@enduml'].join('\n'), 0, {
+      languageId: 'plantuml',
+    }).document;
+    expect(await invoke(other, 3, 6)).toBeUndefined();
+  });
+
+  it('works in a Markdown block in a quote, its markers outside what it replaces, the other words after', async () => {
+    const document = makeEditor(
+      'file:///c/style/quote.md',
+      [
+        '> ```plantuml',
+        '> <style>',
+        '> element {',
+        '>   LineColor: #E0',
+        '> }',
+        '> </style>',
+        '> skinparam defaultFontSize ',
+        '> skinparam BackgroundColor #FFF',
+        '> skinparam ',
+        '> Alice -> Bob',
+        '> ```',
+      ].join('\n'),
+      0
+    ).document;
+
+    const colours = (await invoke(document, 3, 18)) ?? [];
+    expect(colours.length).toBeGreaterThan(100);
+    expect(colours[0]?.range?.replacing).toEqual({ start: { line: 3, character: 15 }, end: { line: 3, character: 18 } });
+    const sizes = (await invoke(document, 6, 28)) ?? [];
+    expect(sizes.slice(0, 7).map(labelOf)).toEqual(['10', '12', '14', '16', '18', '20', '24']);
+    expect(sizes[0]?.range?.replacing).toEqual({ start: { line: 6, character: 28 }, end: { line: 6, character: 28 } });
+    // Markdown lists the words of the block too, as it did.
+    expect(sizes.map(labelOf)).toContain('Alice');
+    // But not a word that is a name offered, in any case.
+    const names = ((await invoke(document, 8, 12)) ?? []).map(labelOf);
+    expect(names.slice(0, 4)).toEqual(['defaultFontName', 'defaultFontSize', 'defaultFontColor', 'backgroundColor']);
+    expect(names.filter((name) => name.toLowerCase() === 'backgroundcolor')).toEqual(['backgroundColor']);
+    expect(names).toContain('Alice');
+  });
+
+  it('explains a property and a skinparam on hover, in any case, and nothing on a value or a selector', async () => {
+    const document = makeEditor(
+      'file:///c/style/hover.puml',
+      [
+        '@startuml',
+        '<style>',
+        'sequenceDiagram {',
+        '  participant {',
+        '    fontcolor: red;',
+        '  }',
+        '}',
+        '</style>',
+        'skinparam BackgroundColor #FFF',
+        'Alice -> Bob',
+        '@enduml',
+      ].join('\n'),
+      0,
+      { languageId: 'plantuml' }
+    ).document;
+
+    expect(await hoverAt(document, 4, 6)).toEqual({
+      sections: [helpMarkdown(propertyHelp(participant, 'FontColor', englishMessages), englishMessages)],
+      columns: [4, 13],
+    });
+    expect(await hoverAt(document, 8, 12)).toEqual({
+      sections: [helpMarkdown(skinparamHelp('backgroundColor', englishMessages), englishMessages)],
+      columns: [10, 25],
+    });
+    expect(await hoverAt(document, 4, 16)).toBeUndefined();
+    expect(await hoverAt(document, 2, 4)).toBeUndefined();
+    expect(await hoverAt(document, 8, 27)).toBeUndefined();
+  });
+
+  it('offers and explains nothing while plantumlLocal.styleHelp.enabled is off for the document, and leaves the rest', async () => {
+    const document = makeEditor('file:///c/styleoff/props.puml', sheet('Font'), 0, { languageId: 'plantuml' }).document;
+    const hovered = makeEditor('file:///c/styleoff/hover.puml', sheet('FontColor red'), 0, { languageId: 'plantuml' }).document;
+    try {
+      vscodeStub._test.setConfiguration('styleHelp.enabled', false, 'file:///c/styleoff');
+      expect(await invoke(document, 4, 8)).toBeUndefined();
+      expect(await invoke(document, 8, 17)).toBeUndefined();
+      expect(await hoverAt(hovered, 4, 6)).toBeUndefined();
+      // The other suggestions stay: the end line of the diagram.
+      expect((await invoke(document, 10, 3))?.map(labelOf)).toContain('@enduml');
+      // Another folder keeps the help.
+      const other = makeEditor('file:///c/style/props.puml', sheet('Font'), 0, { languageId: 'plantuml' }).document;
+      expect((await invoke(other, 4, 8))?.map(labelOf)).toContain('FontColor');
+    } finally {
+      vscodeStub._test.setConfiguration('styleHelp.enabled', undefined, 'file:///c/styleoff');
+    }
+    expect((await invoke(document, 4, 8))?.map(labelOf)).toContain('FontColor');
+    expect(await hoverAt(hovered, 4, 6)).toBeDefined();
+  });
+
+  it('explains each snippet of syntax in the details of the list, with the lines it inserts', async () => {
+    const document = makeEditor('file:///c/style/snippets.puml', ['@startuml', 'participant A', 'A -> B : hi', '', '@enduml'].join('\n'), 0, {
+      languageId: 'plantuml',
+    }).document;
+
+    const snippets = ((await invoke(document, 3, 0)) ?? []).filter((item) => item.kind === vscodeStub.CompletionItemKind.Snippet);
+    expect(snippets.map(labelOf)).toEqual(SNIPPETS.sequence.map(({ label }) => label));
+    for (const [index, item] of snippets.entries()) {
+      const documentation = item.documentation as MarkdownStringStub;
+      expect(documentation).toMatchObject({ isTrusted: false, supportHtml: false });
+      expect(documentation.value).toContain(codeBlock(expandSnippet(SNIPPETS.sequence[index]?.body ?? ''), 'plantuml'));
+    }
+    expect((snippets[0]?.documentation as MarkdownStringStub).value).toBe(
+      [
+        escapeMarkdown('A box of messages for each case: those sent when the condition holds, then, after else, the others.'),
+        codeBlock('alt condition\n  \nelse otherwise\n  \nend', 'plantuml'),
+      ].join('\n\n')
+    );
   });
 });
 

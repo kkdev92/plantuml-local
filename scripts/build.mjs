@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { runInNewContext } from 'node:vm';
 import * as esbuild from 'esbuild';
 import { noticesProblems } from './notices.mjs';
+import { readStyleNames } from './style-names.mjs';
 
 const require = createRequire(import.meta.url);
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -24,8 +25,9 @@ const watch = process.argv.includes('--watch');
  * it must be renamed to .cjs so Node parses it as CommonJS. openiconic.js
  * is a classic script that fills a global table (the `<&icon>` set),
  * renamed for the same reason; the `!theme` table is rebuilt by
- * writeThemes(). The package's emoji.js is left out: its images are not
- * under a licence this extension ships.
+ * writeThemes(), and the names of style properties and selectors are read
+ * from plantuml.js by writeStyleNames(). The package's emoji.js is left
+ * out: its images are not under a licence this extension ships.
  */
 function copyEngine() {
   mkdirSync(engineDir, { recursive: true });
@@ -46,6 +48,7 @@ function copyEngine() {
   }
 
   writeThemes(join(engineDir, 'themes.cjs'));
+  writeStyleNames(join(engineDir, 'style-names.json'));
 
   // Mark plantuml.js as ESM so Node loads it directly instead of trying
   // CommonJS first and reparsing (which logs MODULE_TYPELESS_PACKAGE_JSON).
@@ -59,6 +62,20 @@ function copyEngine() {
     if (problem !== undefined) {
       throw new Error(`${problem}, a licence this extension does not ship`);
     }
+  }
+}
+
+/**
+ * The names of the properties and the selectors of a `<style>` block that
+ * the engine knows (scripts/style-names.mjs), which the completion and the
+ * hovers offer and explain in the engine's spelling. The build stops when
+ * plantuml.js no longer gives them.
+ */
+function writeStyleNames(to) {
+  const names = readStyleNames(readFileSync(require.resolve('@plantuml/core/plantuml.js'), 'utf8'));
+  const text = `${JSON.stringify(names)}\n`;
+  if (readIfPresent(to)?.toString('utf8') !== text) {
+    writeFileSync(to, text);
   }
 }
 

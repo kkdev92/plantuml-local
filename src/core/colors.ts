@@ -1,18 +1,22 @@
 /**
  * The colours a diagram's source sets where the colour picker shows and
  * edits them: the value of a `skinparam`, the colour at the end of an
- * element's declaration, and a colour property in a `<style>` block. Each
- * is `#` and three or six hex digits, or `#` and a name the bundled engine
- * knows. Anything else is left alone: a gradient (`#red/blue`), a colour
- * with a style modifier (`#red;line:blue`), a colour with an alpha
- * (`#80AABBCC`), a name the engine does not know, and a `#` in a comment, a
- * string, a URL or the rows of a sprite.
+ * element's declaration, and the value of a colour property in a `<style>`
+ * block, written `LineColor #E00` or `LineColor: #E00;`. Each is `#` and
+ * three or six hex digits, or `#` and a name the bundled engine knows; in a
+ * `<style>` block, the name may go without `#`, as PlantUML's examples of a
+ * style write it, unless it would read as hex digits. Anything else is left
+ * alone: a gradient (`#red/blue`), a colour with a style modifier
+ * (`#red;line:blue`), a colour with an alpha (`#80AABBCC`), a name the
+ * engine does not know, and a `#` in a comment, a string, a URL or the rows
+ * of a sprite.
  *
  * Like the rest of src/core, this has no dependency on the `vscode` module.
  * Lines and columns are counted from 0.
  */
 
 import { forEachCodeLine } from './shape';
+import { readStyleSheet } from './style-sheet';
 
 /**
  * The names the bundled engine draws, and what it draws them as: each one
@@ -196,8 +200,12 @@ const TRAILING = /\s(#(?:[0-9A-Fa-f]{3}|[0-9A-Fa-f]{6}|[A-Za-z]+))(?:\s*\{)?\s*$
 const SKINPARAM = /^\s*skinparam\s+\S+\s+#\S+\s*$/i;
 /** A line of a `skinparam … {` block: `<Name> <value>`. */
 const SKINPARAM_ENTRY = /^\s*[A-Za-z][\w<>]*\s+#\S+\s*$/;
-/** A colour property of a `<style>` block: `<…Color…> <value>`, maybe ended with `;`. */
-const STYLE_ENTRY = /^\s*[A-Za-z]*colou?r[A-Za-z]*\s+#\S+\s*;?\s*$/i;
+/** A colour property of a `<style>` block, by its name. */
+const STYLE_COLOR = /^[A-Za-z]*colou?r[A-Za-z]*$/i;
+/** A colour token that is all of a value: `#` and three or six hex digits, or letters. */
+const COLOR_TOKEN = /^#(?:[0-9A-Fa-f]{3}|[0-9A-Fa-f]{6}|[A-Za-z]+)$/;
+/** A name without `#` that would not read as hex digits. */
+const BARE_NAME = /^(?![0-9A-Fa-f]{3}$|[0-9A-Fa-f]{6}$)[A-Za-z]+$/;
 /**
  * A declaration of an element that takes a colour at its end, by the word
  * that starts it.
@@ -248,10 +256,30 @@ export function rgbOf(hex: string): { red: number; green: number; blue: number }
 export function findColors(source: string): ColorUse[] {
   const found: ColorUse[] = [];
   let inSprite = false;
-  let inStyle = false;
   let inSkinparam = false;
+  /** The lines of the `<style>` block read so far, from line `from`: a comment line is a gap. */
+  let style: { from: number; lines: (string | undefined)[] } | null = null;
+  /** The colours of a `<style>` block, read as the completion reads it (src/core/style-sheet.ts). */
+  const styleColors = ({ from, lines }: { from: number; lines: (string | undefined)[] }): void => {
+    for (const { name, value } of readStyleSheet(Array.from(lines, (line) => line ?? '')).properties) {
+      const token = BARE_NAME.test(value.text) ? `#${value.text}` : value.text;
+      const hex = STYLE_COLOR.test(name) && COLOR_TOKEN.test(token) ? toHex(token) : null;
+      if (hex !== null) {
+        found.push({ line: from + value.line, start: value.start, end: value.end, hex });
+      }
+    }
+  };
   forEachCodeLine(source, (line, index) => {
     const trimmed = line.trim();
+    if (style !== null) {
+      if (/^<\/style>$/i.test(trimmed)) {
+        styleColors(style);
+        style = null;
+      } else {
+        style.lines[index - style.from] = line;
+      }
+      return;
+    }
     if (inSprite) {
       inSprite = trimmed !== '}';
       return;
@@ -261,11 +289,7 @@ export function findColors(source: string): ColorUse[] {
       return;
     }
     if (/^<style>$/i.test(trimmed)) {
-      inStyle = true;
-      return;
-    }
-    if (/^<\/style>$/i.test(trimmed)) {
-      inStyle = false;
+      style = { from: index + 1, lines: [] };
       return;
     }
     if (/^skinparam\b.*\{$/i.test(trimmed)) {
@@ -276,15 +300,11 @@ export function findColors(source: string): ColorUse[] {
       inSkinparam = false;
       return;
     }
-    const where = inStyle
-      ? STYLE_ENTRY.test(line)
-      : inSkinparam
-        ? SKINPARAM_ENTRY.test(line)
-        : SKINPARAM.test(line) || ELEMENT.test(line);
+    const where = inSkinparam ? SKINPARAM_ENTRY.test(line) : SKINPARAM.test(line) || ELEMENT.test(line);
     if (!where) {
       return;
     }
-    const match = TRAILING.exec(inStyle ? line.replace(/;\s*$/, '') : line);
+    const match = TRAILING.exec(line);
     if (match === null || match[1] === undefined) {
       return;
     }
@@ -295,5 +315,9 @@ export function findColors(source: string): ColorUse[] {
     const start = match.index + 1;
     found.push({ line: index, start, end: start + match[1].length, hex });
   });
+  // A block left open goes on to the end of the source.
+  if (style !== null) {
+    styleColors(style);
+  }
   return found;
 }

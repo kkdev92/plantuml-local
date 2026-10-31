@@ -48,6 +48,7 @@ const REQUIRED = [
   'extension/dist/engine/viz-global.cjs',
   'extension/dist/engine/themes.cjs',
   'extension/dist/engine/openiconic.cjs',
+  'extension/dist/engine/style-names.json',
   'extension/dist/engine/package.json',
   'extension/language-configuration.json',
   'extension/dist/syntaxes/plantuml.tmLanguage.json',

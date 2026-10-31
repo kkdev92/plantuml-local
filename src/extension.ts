@@ -80,6 +80,7 @@ import { errorMessage, libraryNotBundled } from './core/messages';
 import { lineAfterEdits, planReferenceEdits, type ReferenceEdit } from './export/references';
 import {
   diagramAt,
+  expandSnippet,
   lineContext,
   mightSuggest,
   readCompletionData,
@@ -142,6 +143,7 @@ import {
   inlineCode,
 } from './language/hover';
 import { LIBRARY_SCHEME, libraryOfPath, libraryPath, libraryText } from './language/library-view';
+import { settingAt, settingHelp, settingSuggestions, type StyleNames } from './language/style';
 import { templatePlace } from './language/templates';
 import { missingEndAt, namesDiagram, unnamedAt, withName } from './language/code-actions';
 import { diagramLenses, diagramTarget, targetBlock, type DiagramAction, type DiagramTarget } from './language/code-lens';
@@ -216,6 +218,8 @@ export const Settings = defineSettings({
     [CONFIG.INCLUDE_PATHS]: setting.stringArray({ default: [], scope: 'resource' }),
     // Resource-scoped, so a folder can do without the lenses: read per document.
     [CONFIG.CODE_LENS_ENABLED]: setting.boolean({ default: true, scope: 'resource' }),
+    // Resource-scoped, so a folder can do without the help on style items: read per document.
+    [CONFIG.STYLE_HELP_ENABLED]: setting.boolean({ default: true, scope: 'resource' }),
   },
 });
 
@@ -364,6 +368,22 @@ function snippetNames(l10n: { t(message: string): string }): Record<string, stri
     while: l10n.t('Loop that tests its condition first'),
     repeat: l10n.t('Loop that tests its condition last'),
     fork: l10n.t('Parallel actions'),
+  };
+}
+
+/** What each snippet of syntax draws, in the display language, for the details of the list. */
+function snippetTexts(l10n: { t(message: string): string }): Record<string, string> {
+  return {
+    alt: l10n.t('A box of messages for each case: those sent when the condition holds, then, after else, the others.'),
+    opt: l10n.t('A box of messages that are sent only when the condition holds.'),
+    loop: l10n.t('A box of messages that are sent again while the condition holds.'),
+    par: l10n.t('A box of messages sent at the same time, each group after else.'),
+    ref: l10n.t('A box over participants that stands for another diagram, named in it.'),
+    note: l10n.t('A note of several lines over a participant, or on its left or right.'),
+    if: l10n.t('The actions taken when the condition holds, then, after else, the others.'),
+    while: l10n.t('Actions repeated while the condition holds, which is tested before each time.'),
+    repeat: l10n.t('Actions repeated while the condition holds, which is tested after each time.'),
+    fork: l10n.t('Actions that run at the same time, each group after fork again.'),
   };
 }
 
@@ -3076,6 +3096,7 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
       let blocks: readonly PlantUmlBlock[] = [];
       const names = templateNames(l10n);
       const snippets = snippetNames(l10n);
+      const snippetHelp = snippetTexts(l10n);
 
       /** The PlantUML block of a Markdown document that `position` lies in. */
       const blockAt = (document: vscode.TextDocument, position: vscode.Position): PlantUmlBlock | undefined => {
@@ -3132,6 +3153,14 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
           readFileSync(join(__dirname, 'engine', 'themes.cjs'), 'utf8'),
           readFileSync(join(__dirname, 'engine', 'openiconic.cjs'), 'utf8')
         ));
+
+      let styleNames: StyleNames | undefined;
+      /** The names of the style properties and selectors the bundled engine knows, as the build reads them, read when first asked for. */
+      const styleNamesOf = (): StyleNames =>
+        (styleNames ??= JSON.parse(readFileSync(join(__dirname, 'engine', 'style-names.json'), 'utf8')) as StyleNames);
+      /** Whether the style items and skinparams are offered and explained in `document`: plantumlLocal.styleHelp.enabled. */
+      const styleHelpIn = (document: vscode.TextDocument): boolean =>
+        settings.read({ resource: document.uri }).values[CONFIG.STYLE_HELP_ENABLED] !== false;
 
       /** Suggestions on a diagram line: templates only where a diagram can start. */
       const inDiagram = (before: string, after: string, open: string | null): Suggestions | null =>
@@ -3552,6 +3581,12 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
             );
             snippet.insertText = new vscode.SnippetString(body.replace(/\n/g, `\n${lead}`));
             snippet.keepWhitespace = true;
+            const text = snippetHelp[label];
+            if (text !== undefined) {
+              snippet.documentation = untrusted(
+                [escapeMarkdown(text), codeBlock(expandSnippet(body), 'plantuml')].join('\n\n')
+              );
+            }
             return snippet;
           }),
           ...defined,
@@ -3565,6 +3600,54 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         ];
       };
 
+      /**
+       * The properties a rule of a style sheet offers at `position`, or the
+       * skinparams, or the values of one (src/language/style.ts), each
+       * replacing the name or the value there only; undefined where none
+       * is offered, or plantumlLocal.styleHelp.enabled is off.
+       */
+      const settingsAt = (
+        document: vscode.TextDocument,
+        position: vscode.Position,
+        text: string
+      ): vscode.CompletionItem[] | undefined => {
+        const where = styleHelpIn(document) ? sourceAt(document, position, text) : null;
+        if (where === null) {
+          return undefined;
+        }
+        const column = position.character - where.offset;
+        const place = settingAt(where.source, where.line, column, where.bare, styleNamesOf());
+        if (place === null) {
+          return undefined;
+        }
+        const start = new vscode.Position(position.line, where.offset + place.start);
+        const range = {
+          inserting: new vscode.Range(start, position),
+          replacing: new vscode.Range(start, new vscode.Position(position.line, where.offset + place.end)),
+        };
+        const kinds = {
+          property: vscode.CompletionItemKind.Property,
+          skinparam: vscode.CompletionItemKind.Property,
+          value: vscode.CompletionItemKind.Value,
+          color: vscode.CompletionItemKind.Color,
+        };
+        const typed = text.slice(where.offset + place.start, position.character);
+        return settingSuggestions(place, typed, styleNamesOf(), l10n).map((suggestion, index) => {
+          const item = new vscode.CompletionItem(suggestion.label, kinds[suggestion.kind]);
+          item.insertText = suggestion.insert;
+          item.range = range;
+          item.sortText = String(index).padStart(4, '0');
+          if (suggestion.detail !== undefined) {
+            // A colour's `#RRGGBB`, from which VS Code draws its swatch.
+            item.detail = suggestion.detail;
+          }
+          if (suggestion.help !== undefined) {
+            item.documentation = untrusted(helpMarkdown(suggestion.help, l10n));
+          }
+          return item;
+        });
+      };
+
       const provide = async (
         document: vscode.TextDocument,
         position: vscode.Position,
@@ -3576,9 +3659,22 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
           ? find(document, position, text)
           : { found: null, offset: 0 };
         if (found === null) {
-          // A trigger character asks for what follows it only: `$` for a name that starts with it.
+          // A trigger character asks for what follows it only: `$` for a name
+          // that starts with it. A space opens no list of style items.
           const trigger =
             context?.triggerKind === vscode.CompletionTriggerKind.TriggerCharacter ? context.triggerCharacter : undefined;
+          const offered = trigger === undefined ? settingsAt(document, position, text) : undefined;
+          if (offered !== undefined) {
+            // A word of the diagram that is also a name or a value offered here is offered once, as that.
+            const labelOf = ({ label }: vscode.CompletionItem): string =>
+              (typeof label === 'string' ? label : label.label).toLowerCase();
+            const taken = new Set(offered.map(labelOf));
+            const names = (await namesAt(document, position, text, token)) ?? [];
+            return [
+              ...offered,
+              ...names.filter((item) => item.kind !== vscode.CompletionItemKind.Text || !taken.has(labelOf(item))),
+            ];
+          }
           return trigger === undefined || trigger === '$'
             ? namesAt(document, position, text, token)
             : undefined;
@@ -4029,9 +4125,10 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
        * OpenIconic icon, built-in help; on the path of an include, the file
        * it reads, found as a drawing finds it, or why it reads none; on a
        * call or a variable, each definition it may stand for, with how sure
-       * that is, as the completion describes it. Nothing in a comment, on the
-       * keywords of a diagram or its skinparam and style names, nor on a name
-       * nothing defines.
+       * that is, as the completion describes it; on a style item or a
+       * skinparam the completion offers (src/language/style.ts), its help.
+       * Nothing in a comment, on the keywords of a diagram or the other
+       * skinparam and style names, nor on a name nothing defines.
        */
       const hoverAt = async (
         document: vscode.TextDocument,
@@ -4147,6 +4244,16 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
               );
             }
           }
+        }
+
+        // A style item or a skinparam the completion offers, where no definition is.
+        const setting =
+          directive === undefined && styleHelpIn(document)
+            ? settingAt(where.source, where.line, column, where.bare, styleNamesOf())
+            : null;
+        const help = setting === null ? null : settingHelp(setting, line, styleNamesOf(), l10n);
+        if (setting !== null && help !== null) {
+          return hover([helpMarkdown(help, l10n)], setting.start, setting.end);
         }
 
         if (directive === undefined) {

@@ -46,10 +46,10 @@ Your diagram source is processed locally and is not sent to a rendering service.
 - **C4 and Azure Libraries**: `!include <C4/C4_Container>` and the other C4 modules, and the Azure icons with `!include <azure/…>`, ship inside the extension and render offline
 - **Fault-Tolerant**: A syntax error shows up inline at the broken diagram; the rest of the page stays intact
 - **Problems Panel**: Errors, warnings and unsupported syntax in the diagrams of open Markdown and PlantUML files are listed with their line, preview or not
-- **Writing Help**: Completion for start lines, directives, themes and icons, the aliases and words of the diagram you are in, the procedures, functions and variables it and the files it includes define — with parameter hints for their calls — snippets of sequence and activity blocks, templates for sixteen kinds of diagram, and quick fixes that name a diagram for export and add a missing end line
+- **Writing Help**: Completion for start lines, directives, themes and icons, the aliases and words of the diagram you are in, the procedures, functions and variables it and the files it includes define — with parameter hints for their calls — snippets of sequence and activity blocks, the properties of common `<style>` rules and a few `skinparam` names with their values, templates for sixteen kinds of diagram, and quick fixes that name a diagram for export and add a missing end line
 - **Go to Definition**: `F12`, Ctrl+Click and Peek on a call, a variable or a participant lead to where the diagram, a file it includes or a bundled library defines or declares it — never to another diagram — and a file of the C4 and Azure libraries opens read-only
 - **Find All References**: `Shift+Alt+F12`, `Shift+F12` and Peek list each call and use of a procedure, function or variable, and each line naming a participant, that leads to the same definition — in the diagram and the files it includes, never in another diagram
-- **Hovers**: A directive, the kind of diagram after `@start`, a bundled theme and an OpenIconic icon show what they do and how they are written, in English or Japanese, with nothing fetched; a call or a variable shows each definition it may stand for, with the comment above it as written; the path of an include shows the file it reads, or why it reads none
+- **Hovers**: A directive, the kind of diagram after `@start`, a bundled theme, an OpenIconic icon, and the style properties and `skinparam` names the completion offers show what they do and how they are written, in English or Japanese, with nothing fetched; a call or a variable shows each definition it may stand for, with the comment above it as written; the path of an include shows the file it reads, or why it reads none
 - **Actions Above Each Diagram**: *Preview*, *Export SVG* and *Export PNG* sit above the first line of each diagram, in `.puml` files and Markdown alike, and act on that diagram
 - **Go to Diagram**: *Go to Diagram in Document…* lists the diagram blocks of a Markdown file — with the heading above each, its kind and its title or first line — and moves the cursor to the one picked
 - **Diagram Dependencies**: *Show Diagram Dependencies* lists in the Explorer what each diagram of the editor asked for when last drawn — the files read, not found or refused, each under the file that asked — its include lines that no request matches, and the files of the bundled libraries read; with a file in the editor, the diagrams of open documents that read it
@@ -321,10 +321,11 @@ from other diagrams or from documents it does not include:
   `component [Web] as web`
 - in a sequence or an activity diagram, on a line of its own, snippets of its
   blocks with their parts to tab through: `alt`, `opt`, `loop`, `par`, `ref`
-  and `note`, or `if`, `while`, `repeat` and `fork`. A `@startuml` diagram is
-  taken for one or the other by lines that only that type reads, such as
-  `participant` or `activate`, and `start` or `:action;`. Where its lines do
-  not tell, no snippet is offered
+  and `note`, or `if`, `while`, `repeat` and `fork`, each saying in the
+  details of the list what it draws. A `@startuml` diagram is taken for one
+  or the other by lines that only that type reads, such as `participant` or
+  `activate`, and `start` or `:action;`. Where its lines do not tell, no
+  snippet is offered
 - the procedures, functions, macros and variables defined before the cursor,
   in the diagram or in the files it includes (see
   [Definitions and parameter hints](#definitions-and-parameter-hints))
@@ -338,6 +339,35 @@ every open document of the language, and follow their setting,
 inline suggestions are on there, which an extension cannot tell; so in a
 `.puml` file the diagram's words come only beside its aliases, snippets or
 definitions, and where they would come alone, the list is left to VS Code.
+
+In a `<style>` block, a few rules offer their properties, and each property
+its values, with help on each name in the details of the list:
+
+| Rule | Properties |
+| --- | --- |
+| `element { … }` | `FontName`, `FontSize`, `FontColor`, `BackGroundColor`, `LineColor`, `LineThickness` |
+| `sequenceDiagram { participant { … } }` | the same |
+| `sequenceDiagram { arrow { … } }` | the same but `BackGroundColor`, which the engine draws nothing for on an arrow |
+| `classDiagram { class { … } }` | the same as `element` |
+
+The names are the bundled engine's, read from it when the extension is built,
+and are found in any case, as the engine finds them. The values are the
+generic fonts `sans-serif`, `serif` and `monospace`, a few sizes and widths,
+and the colours the engine knows: with `#`, or as a name alone after a letter
+typed without it. A property is written `FontColor: #tomato;` or
+`FontColor #tomato`, and only the name or the value at the cursor is
+replaced: a colon, a semicolon or a brace around it stays. The block is read
+up to the cursor as the engine reads it, and nothing is offered where that
+leaves the rule in doubt: in a rule of several selectors, or with a `*`, a
+stereotype or an `@media` rule, in a rule the table does not hold, after a
+statement the engine refuses or a preprocessor line in the block, or in a
+comment, quoted text, a variable, or a value that holds a variable or a
+function. After `skinparam`, the list offers `defaultFontName`,
+`defaultFontSize`, `defaultFontColor` and `backgroundColor`, and their
+values; PlantUML still reads `skinparam`, and recommends a `<style>` block
+instead. Neither list opens on a space: in a `.puml` file it opens as a
+letter is typed, and with `Ctrl+Space` anywhere.
+`plantumlLocal.styleHelp.enabled` turns both lists and their hovers off.
 
 Markdown turns quick suggestions off, so in a Markdown file the list opens on
 those characters, or with *Trigger Suggest* (`Ctrl+Space`) — type `puml` and
@@ -497,8 +527,15 @@ directive counts in lower case only, and a theme or an icon by its own name,
 in its own case: `!Include`, `!theme Plain` and `<&Heart>` get no help. Nor
 does a theme or an icon whose name holds a word the diagram defines, as the
 engine may put a value in its place; where that word is a variable, the
-hover shows its definition instead. The keywords of each kind of diagram and
-the names of `skinparam` and style items have no help.
+hover shows its definition instead.
+
+A property of a `<style>` rule and a `skinparam` name that the completion
+offers (see [Completion](#completion)) get help too, in any case: what it
+sets — in that rule, for a property — what value it takes, both ways of
+writing it, and an example the bundled engine draws as it is. The engine
+reads a `FontSize` of `12.5` as `125`, for one, and the help says so. The
+keywords of each kind of diagram and the other names of `skinparam` and
+style items have no help.
 
 On a call of a procedure, a function or a macro, on a variable, and on a
 parameter in the body of its procedure or function, the hover shows the
@@ -537,15 +574,18 @@ Status and the output say which includes were not read.
 A swatch sits beside each colour a diagram sets where the extension can edit
 it: the value of a `skinparam`, on its own line or in a `skinparam … { }`
 block; the colour at the end of an element's declaration, as in `class Order
-#pink`; and a colour property in a `<style>` block. The swatch shows the
-colour as written — `#ABC`, `#AABBCC` or a name the bundled engine knows,
-such as `#pink` or `#Business` — not as the palette draws it in a dark
-editor. Clicking it opens VS Code's colour picker, and a pick is written back
+#pink`; and the value of a colour property in a `<style>` block, written
+`LineColor #E00` or `LineColor: #E00;`, with other properties on its line or
+not. The swatch shows the colour as written — `#ABC`, `#AABBCC` or a name the
+bundled engine knows, such as `#pink` or `#Business`, which in a `<style>`
+block may go without `#`, as in `FontColor: green;` — not as the palette
+draws it in a dark editor. Clicking it opens VS Code's colour picker, and a pick is written back
 as `#RRGGBB` in place of the token, as one edit. A pick with an alpha is
 offered nothing to write, as the token cannot carry it. A gradient
 (`#red/blue`), a colour with a style modifier (`#red;line:blue`), a colour
-with an alpha (`#80AABBCC`) and a `#` in a comment, a string or a URL get no
-swatch and are left as they are. VS Code's `editor.colorDecorators`, per
+with an alpha (`#80AABBCC`), a style value with a comment after it, which
+the engine reads as part of the value, and a `#` in a comment, a string or a
+URL get no swatch and are left as they are. VS Code's `editor.colorDecorators`, per
 language if wanted, turns the swatches off.
 
 ### Problems
@@ -995,6 +1035,7 @@ and would show the referenced image as a second copy.
 | `plantumlLocal.preview.updateMode` | `onChange` | When a changed diagram is drawn again in the previews: `onChange`, `onSave`, or `manual` (with *Clear Render Cache and Re-render*). Can be set per folder |
 | `plantumlLocal.diagnostics.enabled` | `true` | List the problems of the diagrams in open Markdown and PlantUML files in the Problems panel; can be set per folder |
 | `plantumlLocal.codeLens.enabled` | `true` | Show *Preview*, *Export SVG* and *Export PNG* above each diagram in Markdown and PlantUML files; `editor.codeLens` must be on as well. Can be set per folder |
+| `plantumlLocal.styleHelp.enabled` | `true` | Offer the properties of common `<style>` rules and a few `skinparam` names, with their values, and explain them on hover; the other suggestions and hovers stay. Can be set per folder |
 | `plantumlLocal.includePaths` | `[]` | Folders a bare `!include` name is also looked for in, after the folder of the including file: relative to the workspace folder, up to 16. Can be set per folder; not used until the workspace is trusted |
 
 A diagram that picks a `!theme` is drawn in that theme's colours, and most

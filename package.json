@@ -510,6 +510,12 @@
           "scope": "resource",
           "description": "%config.codeLens.enabled.description%"
         },
+        "plantumlLocal.styleHelp.enabled": {
+          "type": "boolean",
+          "default": true,
+          "scope": "resource",
+          "description": "%config.styleHelp.enabled.description%"
+        },
         "plantumlLocal.includePaths": {
           "type": "array",
           "items": {
