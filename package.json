@@ -545,6 +545,12 @@
           "default": [],
           "scope": "resource",
           "description": "%config.workspaceSymbols.exclude.description%"
+        },
+        "plantumlLocal.rename.enabled": {
+          "type": "boolean",
+          "default": true,
+          "scope": "resource",
+          "description": "%config.rename.enabled.description%"
         }
       }
     }

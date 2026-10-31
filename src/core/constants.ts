@@ -89,6 +89,7 @@ export const CONFIG = {
   STYLE_HELP_ENABLED: 'styleHelp.enabled',
   WORKSPACE_SYMBOLS_ENABLED: 'workspaceSymbols.enabled',
   WORKSPACE_SYMBOLS_EXCLUDE: 'workspaceSymbols.exclude',
+  RENAME_ENABLED: 'rename.enabled',
 } as const;
 
 /**
@@ -225,6 +226,19 @@ export const WORKSPACE_SYMBOL_LIMITS = {
   query: 256,
   patterns: 32,
   patternLength: 256,
+} as const;
+
+/**
+ * How far the rename of a participant's alias goes
+ * (src/language/alias-rename.ts): the places it changes at most, as one
+ * more is refused rather than cut short; the length of an alias; and the
+ * length of a line it reads, the most the engine reads a message from. A
+ * document past {@link ANALYSIS_LIMITS} is not read.
+ */
+export const RENAME_LIMITS = {
+  places: 1_000,
+  nameLength: 128,
+  lineLength: 2_000,
 } as const;
 
 /**

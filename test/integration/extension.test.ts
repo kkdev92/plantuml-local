@@ -21,6 +21,7 @@ import {
   type FileWatcherStub,
   type FoldingRangeStub,
   type MarkdownStringStub,
+  type RenameRegistrationStub,
   type SignatureHelpStub,
   type SymbolInformationStub,
   type TextEditorStub,
@@ -4376,6 +4377,185 @@ describe('Go to Symbol in Workspace (dist)', () => {
     vscodeStub._test.changeWorkspaceFolders([folderAt(ws, 'ws', 0)]);
     expect(await search('OrdSvc', true)).toEqual([]);
     expect(rows(await search('OrdSvc'))).toHaveLength(2);
+  });
+});
+
+describe('Rename Symbol on an alias (dist)', () => {
+  const provider = (): RenameRegistrationStub['provider'] => {
+    const registration = vscodeStub._test.renameProviders[0];
+    if (registration === undefined) {
+      throw new Error('no rename provider registered');
+    }
+    return registration.provider;
+  };
+  const token = (cancelled = false): CancellationTokenStub => ({
+    isCancellationRequested: cancelled,
+    onCancellationRequested: () => ({ dispose: () => undefined }),
+  });
+  const markdown = (path: string, lines: readonly string[], options?: { isUntitled?: boolean }): TextEditorStub['document'] =>
+    makeEditor(path, lines.join('\n'), 0, options).document;
+  const DIAGRAM = ['# Orders', '', '```plantuml', '@startuml', 'participant "Orders desk" as A', 'A -> B : A', '@enduml', '```', ''];
+  type RangeLike = { start: { line: number; character: number }; end: { line: number; character: number } };
+  const span = ({ start, end }: RangeLike): string =>
+    `${String(start.line)}:${String(start.character)}-${String(end.line)}:${String(end.character)}`;
+
+  /** What F2 at the place prepares: the range and the name put in the box; or why it refuses. */
+  const prepare = (document: TextEditorStub['document'], line: number, character: number): string | undefined => {
+    try {
+      const prepared = provider().prepareRename(document, new vscodeStub.Position(line, character), token());
+      return prepared === undefined ? undefined : `${span(prepared.range)} ${prepared.placeholder}`;
+    } catch (error) {
+      return `refused: ${(error as Error).message}`;
+    }
+  };
+
+  /** The text once the edits for `newName` are made, each a replacement in the document; or why it refuses. */
+  const rename = (
+    document: TextEditorStub['document'],
+    line: number,
+    character: number,
+    newName: string,
+    cancelled = false
+  ): string | undefined => {
+    let edit: ReturnType<RenameRegistrationStub['provider']['provideRenameEdits']>;
+    try {
+      edit = provider().provideRenameEdits(document, new vscodeStub.Position(line, character), newName, token(cancelled));
+    } catch (error) {
+      return `refused: ${(error as Error).message}`;
+    }
+    if (edit === undefined) {
+      return undefined;
+    }
+    const lines = document.getText().split('\n');
+    for (const op of [...edit.ops].reverse()) {
+      expect(op.type).toBe('replace');
+      expect(op.uri).toBe(document.uri.toString());
+      if (op.type === 'replace') {
+        expect(op.start.line).toBe(op.end.line);
+        const old = lines[op.start.line] ?? '';
+        lines[op.start.line] = old.slice(0, op.start.character) + op.text + old.slice(op.end.character);
+      }
+    }
+    return lines.join('\n');
+  };
+
+  it('is registered for Markdown files on disk and untitled, and not for PlantUML files', () => {
+    expect(vscodeStub._test.renameProviders.map(({ selector }) => selector)).toEqual([
+      [
+        { language: 'markdown', scheme: 'file' },
+        { language: 'markdown', scheme: 'untitled' },
+      ],
+    ]);
+  });
+
+  it('prepares on an alias and renames it with one edit, the label left as it is', () => {
+    const document = markdown('file:///c/rename/orders.md', DIAGRAM);
+    expect(prepare(document, 4, 29)).toBe('4:29-4:30 A');
+    expect(prepare(document, 5, 0)).toBe('5:0-5:1 A');
+    expect(rename(document, 5, 1, 'Orders')).toBe(
+      ['# Orders', '', '```plantuml', '@startuml', 'participant "Orders desk" as Orders', 'Orders -> B : A', '@enduml', '```', ''].join('\n')
+    );
+  });
+
+  it('renames in an untitled document', () => {
+    const document = markdown('untitled:Untitled-1', DIAGRAM, { isUntitled: true });
+    expect(prepare(document, 4, 29)).toBe('4:29-4:30 A');
+    expect(rename(document, 4, 29, 'Orders')).toContain('Orders -> B : A');
+  });
+
+  it('answers nothing where the cursor is on no participant name, for the Markdown rename to answer', () => {
+    const document = markdown('file:///c/rename/elsewhere.md', DIAGRAM);
+    for (const [line, character] of [
+      [0, 3],
+      [2, 4],
+      [3, 3],
+      [4, 15],
+      [5, 10],
+      [7, 1],
+    ] as const) {
+      expect(prepare(document, line, character), `${String(line)}:${String(character)}`).toBeUndefined();
+    }
+  });
+
+  it('refuses on a participant name that cannot be renamed, with the reason', () => {
+    const document = markdown('file:///c/rename/implicit.md', DIAGRAM);
+    const reason =
+      'refused: PlantUML Local does not rename B: it is not declared, so it is also the name the diagram shows. Give it an alias with as to rename it.';
+    expect(prepare(document, 5, 5)).toBe(reason);
+    expect(rename(document, 5, 5, 'Shop')).toBe(reason);
+  });
+
+  it('refuses a diagram with a line it does not read, giving the line', () => {
+    const document = markdown('file:///c/rename/box.md', [...DIAGRAM.slice(0, 6), 'box "Shop"', 'end box', ...DIAGRAM.slice(6)]);
+    const reason =
+      'refused: PlantUML Local does not rename in this diagram: line 7 is not of a form it reads, so what the line names cannot be told.';
+    expect(prepare(document, 4, 29)).toBe(reason);
+    expect(rename(document, 4, 29, 'Orders')).toBe(reason);
+  });
+
+  it('refuses a new name with the reason, and changes nothing', () => {
+    const document = markdown('file:///c/rename/names.md', DIAGRAM);
+    expect(rename(document, 4, 29, 'B')).toBe(
+      'refused: PlantUML Local does not rename to B: a participant of the diagram has that name already.'
+    );
+    expect(rename(document, 4, 29, 'End')).toBe('refused: PlantUML Local does not rename to End: it is a keyword of the diagram.');
+    expect(rename(document, 4, 29, '1a')).toBe(
+      'refused: PlantUML Local does not rename to 1a: an alias is of ASCII letters, digits and _, and does not start with a digit.'
+    );
+    expect(rename(document, 4, 29, 'a'.repeat(129))).toBe(
+      'refused: PlantUML Local does not rename to a name longer than 128 characters.'
+    );
+    expect(document.getText()).toBe(DIAGRAM.join('\n'));
+  });
+
+  it('makes no change for the same name', () => {
+    const document = markdown('file:///c/rename/same.md', DIAGRAM);
+    expect(rename(document, 4, 29, 'A')).toBe(DIAGRAM.join('\n'));
+    expect(provider().provideRenameEdits(document, new vscodeStub.Position(4, 29), 'A', token())?.ops).toEqual([]);
+  });
+
+  it('reads the document again when the edits are asked for', () => {
+    const document = markdown('file:///c/rename/changed.md', DIAGRAM);
+    expect(prepare(document, 4, 29)).toBe('4:29-4:30 A');
+    document.setText([...DIAGRAM.slice(0, 6), 'hide footbox', ...DIAGRAM.slice(6)].join('\n'));
+    expect(rename(document, 4, 29, 'Orders')).toBe(
+      'refused: PlantUML Local does not rename in this diagram: line 7 is not of a form it reads, so what the line names cannot be told.'
+    );
+    document.setText(['', ...DIAGRAM].join('\n'));
+    expect(rename(document, 4, 29, 'Orders')).toBe('refused: PlantUML Local finds no alias of a participant to rename here.');
+  });
+
+  it('makes no edit when cancelled, or past the most places', () => {
+    const document = markdown('file:///c/rename/limits.md', DIAGRAM);
+    expect(rename(document, 4, 29, 'Orders', true)).toBeUndefined();
+    const many = markdown('file:///c/rename/many.md', [
+      ...DIAGRAM.slice(0, 6),
+      ...Array.from({ length: 1_000 }, () => 'A -> B : again'),
+      ...DIAGRAM.slice(6),
+    ]);
+    const reason = 'refused: PlantUML Local does not rename A: it is used in more than 1000 places.';
+    expect(prepare(many, 4, 29)).toBe(reason);
+    expect(rename(many, 4, 29, 'Orders')).toBe(reason);
+  });
+
+  it('leaves a document past the limits of the analysis to the Markdown rename, and refuses its edits', () => {
+    const document = markdown('file:///c/rename/large.md', [...DIAGRAM, ...Array.from({ length: 50_000 }, () => '')]);
+    expect(prepare(document, 4, 29)).toBeUndefined();
+    expect(rename(document, 4, 29, 'Orders')).toBe(
+      'refused: PlantUML Local does not rename in a document larger than 2 MiB or longer than 50000 lines.'
+    );
+  });
+
+  it('answers nothing when plantumlLocal.rename.enabled is off', () => {
+    vscodeStub._test.setConfiguration('rename.enabled', false);
+    try {
+      const document = markdown('file:///c/rename/off.md', DIAGRAM);
+      expect(prepare(document, 4, 29)).toBeUndefined();
+      expect(rename(document, 4, 29, 'Orders')).toBeUndefined();
+    } finally {
+      vscodeStub._test.setConfiguration('rename.enabled', undefined);
+    }
+    expect(prepare(markdown('file:///c/rename/on.md', DIAGRAM), 4, 29)).toBe('4:29-4:30 A');
   });
 });
 

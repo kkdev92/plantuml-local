@@ -172,6 +172,24 @@ export interface CancellationTokenStub {
   onCancellationRequested(listener: () => void): { dispose(): void };
 }
 
+/** A rename provider as registered, with what it was registered for. */
+export interface RenameRegistrationStub {
+  selector: unknown;
+  provider: {
+    prepareRename(
+      document: TextEditorStub['document'],
+      position: PositionStub,
+      token: CancellationTokenStub
+    ): { range: { start: PositionStub; end: PositionStub }; placeholder: string } | undefined;
+    provideRenameEdits(
+      document: TextEditorStub['document'],
+      position: PositionStub,
+      newName: string,
+      token: CancellationTokenStub
+    ): WorkspaceEditStub | undefined;
+  };
+}
+
 /** A workspace symbol provider as registered. */
 export interface WorkspaceSymbolRegistrationStub {
   provideWorkspaceSymbols(query: string, token: CancellationTokenStub): Promise<SymbolInformationStub[]>;
@@ -566,6 +584,7 @@ export interface VscodeStub {
     /** Throws for an id already in use, as VS Code does. */
     createLanguageStatusItem: (id: string, selector: unknown) => LanguageStatusItemStub;
     registerWorkspaceSymbolProvider: (provider: WorkspaceSymbolRegistrationStub) => { dispose(): void };
+    registerRenameProvider: (selector: unknown, provider: RenameRegistrationStub['provider']) => { dispose(): void };
   };
   Color: new (red: number, green: number, blue: number, alpha: number) => ColorStub;
   ColorInformation: new (range: ColorInformationStub['range'], color: ColorStub) => ColorInformationStub;
@@ -861,6 +880,8 @@ export interface VscodeStub {
     colorProviders: ColorRegistrationStub[];
     /** Workspace symbol providers registered, in order. */
     workspaceSymbolProviders: WorkspaceSymbolRegistrationStub[];
+    /** Rename providers registered, in order. */
+    renameProviders: RenameRegistrationStub[];
     /** Texts shown in the status bar with `window.setStatusBarMessage`, in order. */
     statusBarMessages: string[];
     /** Signature help providers registered, in order. */
@@ -1329,6 +1350,7 @@ export function createVscodeStub(): VscodeStub {
     }
   }
   const workspaceSymbolProviders: WorkspaceSymbolRegistrationStub[] = [];
+  const renameProviders: RenameRegistrationStub[] = [];
   const statusBarMessages: string[] = [];
   const hoverProviders: HoverRegistrationStub[] = [];
   class Hover implements HoverStub {
@@ -1568,6 +1590,10 @@ export function createVscodeStub(): VscodeStub {
             workspaceSymbolProviders.splice(workspaceSymbolProviders.indexOf(provider), 1);
           },
         });
+      },
+      registerRenameProvider: (selector, provider) => {
+        renameProviders.push({ selector, provider });
+        return track('languages.registerRenameProvider');
       },
     },
     EndOfLine: { LF: 1, CRLF: 2 },
@@ -2028,6 +2054,7 @@ export function createVscodeStub(): VscodeStub {
       codeLensProviders,
       colorProviders,
       workspaceSymbolProviders,
+      renameProviders,
       statusBarMessages,
       signatureProviders,
       contentProviders,

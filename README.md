@@ -50,6 +50,7 @@ Your diagram source is processed locally and is not sent to a rendering service.
 - **Go to Definition**: `F12`, Ctrl+Click and Peek on a call, a variable or a participant lead to where the diagram, a file it includes or a bundled library defines or declares it — never to another diagram — and a file of the C4 and Azure libraries opens read-only
 - **Find All References**: `Shift+Alt+F12`, `Shift+F12` and Peek list each call and use of a procedure, function or variable, and each line naming a participant, that leads to the same definition — in the diagram and the files it includes, never in another diagram
 - **Go to Symbol in Workspace**: `Ctrl+T` finds the named diagrams, the declared elements and the procedures, functions and macros of the Markdown and PlantUML files in the workspace folders, each with the diagram it is in, what declares it and its line — in a trusted workspace, without drawing anything
+- **Rename Symbol**: `F2` on the alias of a sequence diagram's participant, in a Markdown block, renames it in one edit — where it is declared and each line that names it, but no label, note or comment; a diagram with a line the rename cannot read for sure is left as it is, and VS Code says which line
 - **Hovers**: A directive, the kind of diagram after `@start`, a bundled theme, an OpenIconic icon, and the style properties and `skinparam` names the completion offers show what they do and how they are written, in English or Japanese, with nothing fetched; a call or a variable shows each definition it may stand for, with the comment above it as written; the path of an include shows the file it reads, or why it reads none
 - **Actions Above Each Diagram**: *Preview*, *Export SVG* and *Export PNG* sit above the first line of each diagram, in `.puml` files and Markdown alike, and act on that diagram
 - **Go to Diagram**: *Go to Diagram in Document…* lists the diagram blocks of a Markdown file — with the heading above each, its kind and its title or first line — and moves the cursor to the one picked
@@ -551,6 +552,65 @@ lines, or not UTF-8 text, is not read, and at most 5,000 names are listed.
 When a search stops at a limit, cannot read a file or a folder, or leaves out
 a folder that is not on disk, the status bar says so, and the output says
 what.
+
+### Renaming a participant
+
+*Rename Symbol* (`F2`) on the alias of a participant, in a sequence diagram
+of a ```` ```plantuml ```` block in a Markdown file, gives it a new name in one
+edit: where a declaration gives it with `as`, and each line of the diagram
+that names it.
+
+````markdown
+```plantuml
+@startuml
+participant "Orders desk" as Orders
+participant Stock
+Orders -> Stock : reserve
+activate Orders
+note left of Orders : Orders waits for the stock
+@enduml
+```
+````
+
+Renaming `Orders` to `Desk` changes it on the four lines that name it, and
+leaves as they are the name the diagram shows, `Orders desk`, the labels, the
+text of notes and the comments. The diagram is drawn as before. One Undo takes
+the edit back, and `Ctrl+Enter` in the box the new name is typed in shows the
+edit in a preview first.
+
+The rename reads the whole diagram first, and goes ahead only when each of its
+lines is of a form it reads as the bundled engine does:
+
+- a declaration with `participant`, `actor`, `boundary`, `control`, `entity`,
+  `queue`, `database` or `collections` — `participant "Name" as A`,
+  `participant A as "Name"` or `participant Name as A`, with an `order` or
+  without
+- a message between two names with `->`, `-->`, `<-`, `<--`, `->>`, `-->>`,
+  `<<-` or `<<--`, with a label or without
+- `activate`, `deactivate`, `create` and `destroy` of a name
+- a note on one participant or over two, and a reference over participants,
+  on one line or over several
+- the groups `alt`, `opt`, `loop`, `par`, `break`, `critical` and `group`,
+  with their `else` and `end`
+- lines that name no participant: a title, a `skinparam`, a style, `return`,
+  a divider, a delay, a space, `autonumber`, comments and blank lines
+
+A diagram with a line of any other form, or a note, a reference, a style or a
+group without its end, is not renamed in, and VS Code says which line. So is
+a diagram with a line the preprocessor reads, as `!include` or `!define`,
+since what such a line brings in cannot be seen here. Only an alias of ASCII
+letters, digits and `_` that one declaration gives with `as` is renamed: a
+name used without one is also the name the diagram shows. The new name is
+refused, with the reason, when it is not of ASCII letters, digits and `_` or
+starts with a digit, is a keyword of the diagram, such as `title` or `note`,
+or is the name of another participant, declared or not.
+
+Where the cursor is on no participant's name, `F2` renames what VS Code's
+Markdown support renames — a heading, say — as before. The rename works in
+Markdown files on disk and untitled ones, in Restricted Mode too, but not in
+PlantUML files; `plantumlLocal.rename.enabled` turns it off for a folder. A
+document larger than 2 MiB or longer than 50,000 lines is not read, and a name
+used in more than 1,000 places is not renamed.
 
 ### Hovers
 
@@ -1066,6 +1126,11 @@ and would show the referenced image as a second copy.
   *conditional* — whether or not the condition holds. A change on disk in a
   folder that `files.watcherExclude` leaves out may not be seen until the
   search starts again
+- Rename Symbol renames only the alias of a sequence diagram's participant,
+  in a Markdown block, and only in a diagram whose every line is of a form
+  listed under [Renaming a participant](#renaming-a-participant): not in a
+  `.puml` file, not in a diagram that includes a file or uses the
+  preprocessor, and not an element of another kind of diagram
 - Highlighting cannot tell which diagram type a `@startuml` block will turn
   into, so it colours the syntax of all of them: a line the engine rejects in
   one diagram type can still be coloured. Nor can it tell which names
@@ -1094,6 +1159,7 @@ and would show the referenced image as a second copy.
 | `plantumlLocal.includePaths` | `[]` | Folders a bare `!include` name is also looked for in, after the folder of the including file: relative to the workspace folder, up to 16. Can be set per folder; not used until the workspace is trusted |
 | `plantumlLocal.workspaceSymbols.enabled` | `true` | Search the Markdown and PlantUML files of the folder with *Go to Symbol in Workspace* (`Ctrl+T`). Can be set per folder; not used until the workspace is trusted |
 | `plantumlLocal.workspaceSymbols.exclude` | `[]` | Paths *Go to Symbol in Workspace* leaves out, relative to the workspace folder: up to 32 patterns, separated into folders by `/`. `?` stands for one character of a name and `*` for any number; `**` on its own, for any number of folders. Case-sensitive. A pattern it cannot read keeps the folder out of the search until it is fixed. Can be set per folder; not used until the workspace is trusted |
+| `plantumlLocal.rename.enabled` | `true` | Rename the alias of a sequence diagram's participant with *Rename Symbol* (`F2`) in Markdown files. When off, `F2` is left to VS Code's Markdown rename. Can be set per folder |
 
 A diagram that picks a `!theme` is drawn in that theme's colours, and most
 themes paint no background of their own, leaving the diagram on the backdrop
