@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A start or end line written in a note is part of the note.** A line
+  beginning with `@startuml`, `@enduml` or `newpage` in a multi-line note or
+  legend — an example of how to write a diagram, say — counted as the
+  diagram's own: the preview of a `.puml` file and the Problems panel cut the
+  diagram at that line and reported a syntax error, and a Markdown block was
+  taken to hold a second diagram, or a second page, and was not drawn. The
+  engine reads such a line as the note's text, and so now do the previews,
+  the export and the Problems panel. A note with no end line before the next
+  diagram is read as before, keeping that diagram apart.
+
 ## [0.18.0] - 2026-10-30
 
 **Breaking: VS Code 1.144 or later is now required**, up from 1.138, in step

@@ -17,9 +17,9 @@
  */
 
 import { splitLines } from '../core/lines';
-import { END, START } from '../core/shape';
+import { DATA, END, START } from '../core/shape';
 import { DECLARED_ID } from '../export/blocks';
-import { DATA, PROCEDURE, textEnd } from './folding';
+import { PROCEDURE, textEnd } from './folding';
 
 export interface Declaration {
   /** The alias, or the name when there is no alias. */

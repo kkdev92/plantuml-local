@@ -21,7 +21,7 @@
  */
 
 import { splitLines } from '../core/lines';
-import { END, START } from '../core/shape';
+import { DATA, END, FLOATING_TEXT, LABEL_COLON, NOTE, START, noteEnd } from '../core/shape';
 
 /** A range to fold: the lines after `start`, up to and including `end`. */
 export interface Fold {
@@ -63,39 +63,17 @@ const SECTIONS: readonly { open: RegExp; close: RegExp }[] = [
   },
 ];
 
-/** Multi-line texts other than notes, whose lines are not read for sections. */
+/** Multi-line texts other than notes and legends, whose lines are not read for sections. */
 const TEXTS: readonly { open: RegExp; close: RegExp }[] = [
-  {
-    open: /^\s*legend(?:\s+(?:top|bottom))?(?:\s+(?:left|right|center))?\s*$/i,
-    close: /^\s*end\s?legend\s*$/i,
-  },
   { open: /^\s*(?:(?:left|right|center)\s*)?(?:header|footer)\s*$/i, close: /^\s*end\s?(?:header|footer)\s*$/i },
   { open: /^\s*title\s*$/i, close: /^\s*end\s?title\s*$/i },
   // The one-line form has a colon and text after the participants.
   { open: /^\s*ref(?:#\w+)?\s+over\s+[^:]*$/i, close: /^\s*end\s?(?:ref)?\s*$/i },
 ];
 
-const NOTE = /^\s*(?:&\s*)?\/?\s*(?:floating\s+)?[hr]?note\b(.*)$/i;
-const NOTE_END = /^\s*end\s?[hr]?note\s*$/i;
-const BRACE_END = /^\s*\}\s*$/;
-/** `note "text" as N1`, which is one line. */
-const FLOATING_TEXT = /^\s*"[^"]*"\s+as\s/i;
-/** A colon of its own, before a one-line note's text: `::` is part of a member's name. */
-const LABEL_COLON = /(?<!:):(?!:)/;
-/** Diagrams whose lines are data rather than PlantUML. */
-export const DATA = /^\s*[@\\]start(?:json|yaml)\b/;
-
 /** The line that ends the multi-line note or text `line` starts, or null. */
 export function textEnd(line: string): RegExp | null {
-  const note = NOTE.exec(line);
-  if (note !== null) {
-    const rest = note[1] ?? '';
-    if (FLOATING_TEXT.test(rest) || LABEL_COLON.test(rest)) {
-      return null;
-    }
-    return /\{\s*$/.test(rest) ? BRACE_END : NOTE_END;
-  }
-  return TEXTS.find((text) => text.open.test(line))?.close ?? null;
+  return noteEnd(line) ?? TEXTS.find((text) => text.open.test(line))?.close ?? null;
 }
 
 /** The column of the colon the text of the one-line note `line` follows, or null. */
