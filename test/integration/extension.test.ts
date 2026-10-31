@@ -697,6 +697,64 @@ describe('export (dist)', () => {
       expect(vscodeStub._test.diagnostics.has(uri)).toBe(false);
     });
 
+    it('reads start and end lines in a note or legend as its text, in a PlantUML file and in Markdown', async () => {
+      const file = 'file:///c/diag/notes.puml';
+      const fileText = [
+        '@startuml(id=noted)',
+        'Alice -> Bob',
+        'note over Alice',
+        'Write a diagram as',
+        '  @startuml',
+        '  A -> B',
+        '  @enduml',
+        'end note',
+        'legend right',
+        '@enduml',
+        'endlegend',
+        'Bob -> Alice',
+        '@enduml',
+        '',
+        '@startuml(id=bad)',
+        'this is not valid ;;; [[[',
+        '@enduml',
+      ].join('\n');
+      const markdown = 'file:///c/diag/notes.md';
+      const markdownText = [
+        '```plantuml noted',
+        '@startuml',
+        'Alice -> Bob',
+        'note over Alice',
+        '@startuml',
+        'end note',
+        '@enduml',
+        '```',
+        '',
+        '```plantuml bad',
+        '@startuml',
+        'this is not valid ;;; [[[',
+        '@enduml',
+        '```',
+      ].join('\n');
+      const fileDocument = makeEditor(file, fileText, 0, { languageId: 'plantuml' }).document;
+      const markdownDocument = makeEditor(markdown, markdownText, 0).document;
+      vscodeStub._test.openDocument(fileDocument);
+      vscodeStub._test.openDocument(markdownDocument);
+      try {
+        const ERROR = vscodeStub.DiagnosticSeverity.Error;
+        const inFile = await problemsOf(file, (items) => items.length >= 1);
+        const inMarkdown = await problemsOf(markdown, (items) => items.length >= 1);
+        // Only the diagram that is wrong: the one with the note is a diagram
+        // of its own, drawn whole.
+        expect({
+          file: inFile.map((p) => [p.line, p.code, p.severity]),
+          markdown: inMarkdown.map((p) => [p.line, p.code, p.severity]),
+        }).toEqual({ file: [[15, 'PLLOCAL-SYN001', ERROR]], markdown: [[11, 'PLLOCAL-SYN001', ERROR]] });
+      } finally {
+        vscodeStub._test.closeDocument(fileDocument);
+        vscodeStub._test.closeDocument(markdownDocument);
+      }
+    });
+
     it('leaves a PlantUML file with no start line alone: its lines are meant to be included', async () => {
       const uri = 'file:///c/diag/shared.iuml';
       const document = makeEditor(uri, '!procedure $greet($who)\n$who -> World : hello\n!endprocedure\n', 0, {

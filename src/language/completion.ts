@@ -11,10 +11,9 @@
  */
 
 import { splitLines } from '../core/lines';
-import { END, START, forEachCodeLine } from '../core/shape';
+import { DATA, END, START, forEachCodeLine } from '../core/shape';
 import { SUPPORTED_DIAGRAMS } from '../grammar/plantuml';
 import { diagramKind, inBodies, type DiagramKind } from './diagram-kind';
-import { DATA } from './folding';
 import { protect, protectedAt } from './protected';
 import { aliasesOf, wordAt, wordsOf } from './words';
 

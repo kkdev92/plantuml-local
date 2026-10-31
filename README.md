@@ -939,7 +939,10 @@ and would show the referenced image as a second copy.
   diagram using one shows an inline message instead
 - A block draws one diagram, on one page: a block holding a second
   `@startuml` … `@enduml`, or a diagram using `newpage`, shows a message
-  instead, since the engine would draw only the first diagram or page
+  instead, since the engine would draw only the first diagram or page. Those
+  lines in a multi-line note or legend are the note's text, as the engine
+  reads them, unless an `@enduml` line in the note is followed by a
+  `@startuml` line: that is read as a note left open, and the next diagram
 - Functions that read the machine return nothing: `%getenv()`, `%filename()`
   and `%dirpath()` are empty and `%file_exists()` is `0`
 - `!dump_memory` writes nothing with the bundled engine, and the text `!log`

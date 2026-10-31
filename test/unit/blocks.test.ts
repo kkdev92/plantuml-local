@@ -319,6 +319,72 @@ describe('findFileDiagrams', () => {
     expect(diagrams.map((d) => [d.name, d.openLine])).toEqual([['flows', 4]]);
   });
 
+  it('reads start and end lines in a multi-line note or legend as its text, as the engine does', () => {
+    const diagrams = findFileDiagrams(
+      md(
+        '@startuml(id=noted)',
+        'Alice -> Bob',
+        'note over Alice',
+        'Write a diagram as',
+        '  @startuml',
+        '  A -> B',
+        '  @enduml',
+        'end note',
+        'legend',
+        '@enduml',
+        'endlegend',
+        'Bob -> Alice',
+        '@enduml',
+        '@startuml(id=next)',
+        'C -> D',
+        '@enduml'
+      ),
+      'flows'
+    );
+
+    expect(diagrams.map((d) => [d.name, d.openLine, d.closeLine, d.closed])).toEqual([
+      ['noted', 0, 12, true],
+      ['next', 13, 15, true],
+    ]);
+  });
+
+  it('ends no diagram at an end line in a block comment or within a line', () => {
+    const diagrams = findFileDiagrams(
+      md('@startuml(id=one)', "/'", '@enduml', "'/", 'Alice -> Bob : "@enduml"', '@enduml', '@startuml(id=two)', '@enduml'),
+      'flows'
+    );
+
+    expect(diagrams.map((d) => [d.name, d.openLine, d.closeLine])).toEqual([
+      ['one', 0, 5],
+      ['two', 6, 7],
+    ]);
+  });
+
+  it('reads a note left open as any other line, so that it does not take in the diagram after it', () => {
+    const diagrams = findFileDiagrams(
+      md(
+        '@startuml(id=open)',
+        'Alice -> Bob',
+        'note over Alice',
+        'unfinished',
+        '@enduml',
+        '',
+        '@startuml(id=next)',
+        'Bob -> Alice',
+        'note over Bob',
+        'done',
+        'end note',
+        '@enduml'
+      ),
+      'flows'
+    );
+
+    expect(diagrams.map((d) => [d.name, d.openLine, d.closeLine, d.closed])).toEqual([
+      ['open', 0, 4, true],
+      ['next', 6, 11, true],
+    ]);
+  });
+
   it('runs a diagram without an end line up to the next start, or the end of the file', () => {
     const diagrams = findFileDiagrams(
       md('@startuml(id=one)', 'A -> B', '@startuml(id=two)', 'C -> D'),

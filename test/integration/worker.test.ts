@@ -190,6 +190,40 @@ describe('render worker (dist)', () => {
       expect(string).toContain('after');
     });
 
+    it('reads start, end and newpage lines in a multi-line note or legend as its text', async () => {
+      // What the extension reads as a note's text when it divides a source
+      // into diagrams (see forEachShapeLine).
+      const note = await render(
+        '@startuml\nAlice -> Bob : before\nnote over Alice\n  @startuml\n  @enduml\nnewpage\nend note\nlegend right\n@enduml\nendlegend\nCarol -> Dave : after\n@enduml'
+      );
+      expect(note).toContain('after');
+      expect(note).toContain('@startuml');
+      expect(note).not.toMatch(/Syntax Error/);
+      const braces = await render('@startuml\nclass Foo\nnote top of Foo {\n@enduml\n}\nclass After\n@enduml');
+      expect(braces).toContain('After');
+      expect(braces).not.toMatch(/Syntax Error/);
+      // A note of one line has no text below it.
+      const oneLine = await render('@startuml\nAlice -> Bob : first\nnote over Alice : hi\n@enduml\n@startuml\nCarol -> Dave : second\n@enduml');
+      expect(oneLine).toContain('first');
+      expect(oneLine).not.toContain('second');
+    });
+
+    it('ends a note only at an end line of its own, reading a note left open on into the next diagram', async () => {
+      const spaced = await render('@startuml\nAlice -> Bob : x\nnote over Alice\n@enduml\n   End Note  \nCarol -> Dave : after\n@enduml');
+      expect(spaced).toContain('after');
+      expect(spaced).not.toMatch(/Syntax Error/);
+      expect(await render('@startuml\nAlice -> Bob : x\nnote over Alice\n@enduml\nend  note\nCarol -> Dave : after\n@enduml')).toMatch(
+        /Syntax Error/
+      );
+      expect(await render('@startuml\nAlice -> Bob : x\nnote over Alice\nunfinished\n@enduml')).toMatch(/Syntax Error/);
+      // Which is why the extension reads such a note's lines as any others.
+      const open = await render(
+        '@startuml\nAlice -> Bob : first\nnote over Alice\nunfinished\n@enduml\n@startuml\nBob -> Alice : second\nnote over Bob\ndone\nend note\n@enduml'
+      );
+      expect(open).toContain('second');
+      expect(open).not.toMatch(/Syntax Error/);
+    });
+
     it('draws a source with a line before @startuml, without that line', async () => {
       const svg = await render('title Before\n@startuml\nAlice -> Bob : x\n@enduml');
       expect(svg).toContain('Alice');

@@ -16,7 +16,7 @@ import MarkdownIt from 'markdown-it';
 
 import { isDiagramFence } from '../core/constants';
 import { splitLines } from '../core/lines';
-import { END, START, forEachCodeLine } from '../core/shape';
+import { END, START, forEachShapeLine } from '../core/shape';
 
 /** A `plantuml` fenced block found in a document, or a diagram of a PlantUML file. */
 export interface PlantUmlBlock {
@@ -200,7 +200,8 @@ export const DECLARED_ID = /^\s*[@\\]start[A-Za-z0-9_]+\(id=([^)]*)\)/;
 /**
  * Returns the diagrams of a PlantUML file, in order, each from its
  * `@start…` line (`openLine`) to its `@end…` line (`closeLine`); the engine
- * reads nothing between diagrams. A diagram is named by the `(id=…)` right
+ * reads nothing between diagrams, and those lines in a note are the note's
+ * text (see forEachShapeLine). A diagram is named by the `(id=…)` right
  * after `@start…`, or, as the only diagram of the file, by `fileName`. A
  * file with no `@start…` line is one diagram.
  */
@@ -210,7 +211,7 @@ export function findFileDiagrams(text: string, fileName: string): PlantUmlBlock[
   let open: (typeof found)[number] | null = null;
   let code = false;
 
-  forEachCodeLine(text, (line, index) => {
+  forEachShapeLine(text, (line, index) => {
     code ||= line.trim() !== '';
     if (START.test(line)) {
       // A second start before an end: the first diagram runs up to it.
