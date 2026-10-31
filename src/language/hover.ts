@@ -11,10 +11,12 @@ import type { MacroDefinition } from './macro-help';
  * (DiagramType), the themes it ships and its OpenIconic icons — and the
  * Markdown that shows text of the documents as it is written.
  *
- * Nothing else gets help: not the keywords of a type of diagram, nor the
- * names of skinparam and style items, which would need a table kept by
- * hand; nor a directive in another case, such as `!Include`, which the
- * engine refuses. A theme or an icon gets help only as the engine finds
+ * The properties a few rules of a style sheet offer, and four skinparams,
+ * get help from src/language/style.ts, which takes the names from the
+ * engine and is held to what it draws. Nothing else gets help: not the
+ * keywords of a type of diagram, nor the other names of skinparam and
+ * style items; nor a directive in another case, such as `!Include`, which
+ * the engine refuses. A theme or an icon gets help only as the engine finds
  * it: in its own case, and with no word the text defines, as the engine
  * would put the word's value in its place.
  *

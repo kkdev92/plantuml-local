@@ -7,7 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Completion and hovers for the look of a diagram.** In a `<style>`
+  block, the rules `element`, `participant` and `arrow` of a sequence
+  diagram, and `class` of a class diagram, offer `FontName`, `FontSize`,
+  `FontColor`, `BackGroundColor`, `LineColor` and `LineThickness` — but no
+  background for an arrow, which the engine does not draw — and each
+  property its values: the generic fonts, a few sizes and widths, and the
+  colours the engine knows. After `skinparam`, the list offers
+  `defaultFontName`, `defaultFontSize`, `defaultFontColor` and
+  `backgroundColor`, and their values. Hovering a name shows what it sets,
+  what it takes, both ways of writing it and an example. The names are read
+  from the bundled engine when the extension is built, and the tests draw
+  every pair with it. Only the name or the value at the cursor is replaced,
+  and nothing is offered where the block cannot be read for sure.
+  `plantumlLocal.styleHelp.enabled` turns this off.
+- **The snippets of syntax say what they draw.** `alt`, `opt`, `loop`,
+  `par`, `ref` and `note`, and `if`, `while`, `repeat` and `fork`, show in
+  the details of the list what they draw and the lines they insert.
+
 ### Fixed
+
+- **A colour of a style written with a colon gets a swatch.** A colour
+  property of a `<style>` block written `FontColor: #E00;` — as PlantUML's
+  own examples of a style write it — or with other properties on its line,
+  had no swatch. It now has, and so does a colour name written without `#`,
+  as in `FontColor: green;`.
 
 - **A start or end line written in a note is part of the note.** A line
   beginning with `@startuml`, `@enduml` or `newpage` in a multi-line note or

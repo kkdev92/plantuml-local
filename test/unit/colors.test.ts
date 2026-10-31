@@ -69,6 +69,50 @@ describe('findColors', () => {
     expect(findColors(puml('<style>', '  LineColor #ABC;', '</style>'))[0]).toEqual({ line: 1, start: 12, end: 16, hex: '#AABBCC' });
   });
 
+  it('finds a style colour written with a colon, a name without #, and the colours of several properties on a line', () => {
+    expect(
+      hexes(
+        '<style>',
+        'sequenceDiagram {',
+        '  participant {',
+        '    FontColor: #FFFFCC;',
+        '    BackGroundColor: green;',
+        "    ' a comment line",
+        '    LineColor tomato; FontColor #ABC',
+        '  }',
+        '}',
+        '</style>',
+        'Alice -> Bob'
+      )
+    ).toEqual(['#FFFFCC', '#008000', '#FF6347', '#AABBCC']);
+    expect(findColors(puml('<style>', 'element { LineColor: #E00; }', '</style>'))[0]).toEqual({
+      line: 1,
+      start: 21,
+      end: 25,
+      hex: '#EE0000',
+    });
+    // A block left open goes on to the end, as the engine reads it.
+    expect(hexes('<style>', 'element {', '  FontColor: navy;')).toEqual(['#000080']);
+  });
+
+  it('leaves alone a style value the engine does not read as that colour alone', () => {
+    expect(
+      hexes(
+        '<style>',
+        'element {',
+        '  LineColor #E00 // a comment, which the engine reads as part of the value',
+        '  FontColor',
+        '  #E00',
+        '  BackGroundColor ABC',
+        '  LineColor nocolour',
+        '  FontColor "#E00"',
+        '  Padding: #12;',
+        '}',
+        '</style>'
+      )
+    ).toEqual([]);
+  });
+
   it('leaves alone gradients, modifiers, alphas, unknown names, comments, strings, URLs and sprite rows', () => {
     expect(
       hexes(

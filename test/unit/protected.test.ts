@@ -77,6 +77,23 @@ describe('protect', () => {
     expect(whole(lines)).toEqual([true, true, true, true, true, false]);
   });
 
+  it('marks the start line and the lines of a style sheet, which the help on style items reads, and no comment', () => {
+    const lines = ['<style>', 'element {', "' a comment", '  FontColor red', '}', '</style>', '<style>element { }</style>', 'A -> B'];
+
+    expect(protect(lines, false).map((line) => line.style)).toEqual([
+      'open',
+      'sheet',
+      undefined,
+      'sheet',
+      'sheet',
+      undefined,
+      undefined,
+      undefined,
+    ]);
+    // Still blanked out for the names.
+    expect(whole(lines).slice(0, 7)).toEqual([true, true, true, true, true, true, true]);
+  });
+
   it('blanks out the body of a JSON object in a class or object diagram, braces counted outside strings', () => {
     const lines = ['json J {', '  "a": { "b": "}" },', '  "q": "say \\"}\\"",', '  "list": [1, 2]', '}', 'class C {', '}'];
 
