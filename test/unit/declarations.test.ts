@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   columnIn,
+  conditionalLines,
   declarationsOf,
   readUntilCommaOrClose,
   withoutInnerComment,
@@ -212,6 +213,29 @@ describe('declarationsOf', () => {
       ['$nested', true],
       ['$done', false],
     ]);
+  });
+
+  it('tells of every line whether it lies under a condition, a line of a body by the blocks of its body', () => {
+    expect(
+      conditionalLines([
+        'participant A',
+        '!if %true()',
+        'participant B',
+        "' a comment",
+        '!endif',
+        'participant C',
+        '!procedure $p()',
+        'participant D',
+        '!if 1',
+        'participant E',
+        '!endif',
+        '!endprocedure',
+        '!while $i < 3',
+        'participant F',
+        '!endwhile',
+        'participant G',
+      ])
+    ).toEqual([false, false, true, true, true, false, false, false, false, true, true, false, false, true, true, false]);
   });
 
   it('reads the variable of a `!foreach` with what it runs through', () => {

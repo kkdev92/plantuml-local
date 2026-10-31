@@ -46,6 +46,7 @@
   "activationEvents": [
     "onLanguage:markdown",
     "onLanguage:plantuml",
+    "onStartupFinished",
     "onWebviewPanel:plantumlLocal.viewer"
   ],
   "capabilities": {
@@ -53,7 +54,9 @@
       "supported": "limited",
       "description": "%capability.untrustedWorkspaces.description%",
       "restrictedConfigurations": [
-        "plantumlLocal.includePaths"
+        "plantumlLocal.includePaths",
+        "plantumlLocal.workspaceSymbols.enabled",
+        "plantumlLocal.workspaceSymbols.exclude"
       ]
     },
     "virtualWorkspaces": {
@@ -525,6 +528,23 @@
           "default": [],
           "scope": "resource",
           "description": "%config.includePaths.description%"
+        },
+        "plantumlLocal.workspaceSymbols.enabled": {
+          "type": "boolean",
+          "default": true,
+          "scope": "resource",
+          "description": "%config.workspaceSymbols.enabled.description%"
+        },
+        "plantumlLocal.workspaceSymbols.exclude": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 256
+          },
+          "maxItems": 32,
+          "default": [],
+          "scope": "resource",
+          "description": "%config.workspaceSymbols.exclude.description%"
         }
       }
     }

@@ -609,6 +609,23 @@ interface OpenBody {
  * number `i`.
  */
 export function declarationsOf(lines: readonly string[], numbers?: readonly number[]): Declaration[] {
+  return read(lines, numbers, undefined);
+}
+
+/**
+ * For each of `lines`, whether running the text may leave it out, as
+ * {@link declarationsOf} tells it for a declaration: whether it lies in
+ * `!if`, `!ifdef`, `!ifndef`, `!while` or `!foreach`, which in a body are
+ * the body's own.
+ */
+export function conditionalLines(lines: readonly string[]): boolean[] {
+  const flags: boolean[] = [];
+  read(lines, undefined, flags);
+  return flags;
+}
+
+/** {@link declarationsOf}, with `flags`, when given, set for every line as {@link conditionalLines} tells it. */
+function read(lines: readonly string[], numbers: readonly number[] | undefined, flags?: boolean[]): Declaration[] {
   const declarations: Declaration[] = [];
   /** The `!if`, `!while` and `!foreach` open outside a body. */
   let depth = 0;
@@ -620,6 +637,9 @@ export function declarationsOf(lines: readonly string[], numbers?: readonly numb
 
   lines.forEach((raw, index) => {
     const number = numbers?.[index] ?? index;
+    if (flags !== undefined) {
+      flags[index] = (body === null ? depth : body.depth) > 0;
+    }
     if (blockComment) {
       blockComment = !endsBlockComment(raw);
       comments.push(commentText(raw));

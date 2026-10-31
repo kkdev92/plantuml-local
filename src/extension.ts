@@ -2,6 +2,7 @@ import {
   Commands,
   Localization,
   Log,
+  Notifications,
   Workspace,
   checkRelativePath,
   createWebviewHtml,
@@ -38,6 +39,7 @@ import {
   EXTENSION_ID,
   EXTENSION_NAME,
   INCLUDE_LIMITS,
+  MARKDOWN_EXTENSION,
   PACKAGE_ID,
   PNG_PANEL_TYPE,
   REFRESH_DEBOUNCE_MS,
@@ -150,6 +152,7 @@ import { diagramLenses, diagramTarget, targetBlock, type DiagramAction, type Dia
 import { listDiagrams } from './language/diagram-list';
 import { foldingRanges } from './language/folding';
 import { declarations, type Declaration } from './language/symbols';
+import { WorkspaceSymbolSearch } from './language/workspace-symbol-provider';
 import {
   checkSource,
   PROBLEM_CODES,
@@ -220,6 +223,12 @@ export const Settings = defineSettings({
     [CONFIG.CODE_LENS_ENABLED]: setting.boolean({ default: true, scope: 'resource' }),
     // Resource-scoped, so a folder can do without the help on style items: read per document.
     [CONFIG.STYLE_HELP_ENABLED]: setting.boolean({ default: true, scope: 'resource' }),
+    // Resource-scoped, so a folder can be left out of Go to Symbol in Workspace: read per folder.
+    [CONFIG.WORKSPACE_SYMBOLS_ENABLED]: setting.boolean({ default: true, scope: 'resource' }),
+    // Read as written for each folder (workspaceSymbolsExcludeOf), so that a
+    // value the search cannot read stops the search of the folder rather than
+    // widening it.
+    [CONFIG.WORKSPACE_SYMBOLS_EXCLUDE]: setting.stringArray({ default: [], scope: 'resource' }),
   },
 });
 
@@ -833,7 +842,7 @@ async function diagramAtCursor(context: OperationContext, document: ActiveDocume
 type SettingsReader = {
   read(scope?: { resource: vscode.Uri }): { values: Record<string, unknown> };
   inspect(
-    key: typeof CONFIG.INCLUDE_PATHS,
+    key: typeof CONFIG.INCLUDE_PATHS | typeof CONFIG.WORKSPACE_SYMBOLS_EXCLUDE,
     scope?: { resource: vscode.Uri }
   ): { globalValue?: unknown; workspaceValue?: unknown; workspaceFolderValue?: unknown } | undefined;
 };
@@ -848,6 +857,12 @@ type L10n = { t(message: string, ...args: string[]): string };
  */
 function includePathsOf(settings: SettingsReader, document: vscode.Uri): unknown {
   const tiers = settings.inspect(CONFIG.INCLUDE_PATHS, { resource: document });
+  return tiers?.workspaceFolderValue ?? tiers?.workspaceValue ?? tiers?.globalValue ?? [];
+}
+
+/** `plantumlLocal.workspaceSymbols.exclude` for a workspace folder as written, read as {@link includePathsOf} reads. */
+function workspaceSymbolsExcludeOf(settings: SettingsReader, folder: vscode.Uri): unknown {
+  const tiers = settings.inspect(CONFIG.WORKSPACE_SYMBOLS_EXCLUDE, { resource: folder });
   return tiers?.workspaceFolderValue ?? tiers?.workspaceValue ?? tiers?.globalValue ?? [];
 }
 
@@ -1765,6 +1780,13 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
     inject: { commands: Commands },
     create: ({ commands }) =>
       debounce(() => {
+        // The Markdown previews are VS Code's Markdown extension's. Not
+        // started, it shows none to refresh, and running its command would
+        // start it; in another extension host it is not known here, and is
+        // asked.
+        if (vscode.extensions.getExtension(MARKDOWN_EXTENSION)?.isActive === false) {
+          return;
+        }
         void commands.execute('markdown.preview.refresh');
       }, REFRESH_DEBOUNCE_MS),
   });
@@ -4402,6 +4424,51 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
               declarations(document.getText()).map((declared) => symbolOf(document, declared)),
           }
         )
+      );
+      return undefined;
+    },
+  });
+
+  module.raw.register({
+    id: 'plantuml.workspaceSymbols',
+    inject: { settings: Settings.token, l10n: Localization, notify: Notifications, commands: Commands },
+    bind: ({ registrations, logger }, { settings, l10n, notify, commands }): undefined => {
+      // Go to Symbol in Workspace over the diagrams and declarations of the
+      // Markdown and PlantUML files in the workspace folders
+      // (src/language/workspace-symbol-provider.ts): read when a query is
+      // first typed, and again when the folders, the settings or the trust
+      // change.
+      const search = new WorkspaceSymbolSearch({
+        l10n,
+        log: (message: string): void => {
+          logger.info(message);
+        },
+        warn: (message: string, buttons: readonly string[]): Promise<number | undefined> =>
+          notify.warn(message, { actions: buttons.map((title, value) => ({ title, value })) }),
+        openExcludeSetting: (): Promise<unknown> =>
+          commands.execute('workbench.action.openSettings', `@id:${EXTENSION_ID}.${CONFIG.WORKSPACE_SYMBOLS_EXCLUDE}`),
+        enabled: (folder: vscode.Uri): boolean =>
+          settings.read({ resource: folder }).values[CONFIG.WORKSPACE_SYMBOLS_ENABLED] !== false,
+        exclude: (folder: vscode.Uri): unknown => workspaceSymbolsExcludeOf(settings, folder),
+      });
+      registrations.own(search);
+      registrations.own(vscode.languages.registerWorkspaceSymbolProvider(search));
+      registrations.own(
+        vscode.workspace.onDidChangeWorkspaceFolders(() => {
+          search.reset();
+        })
+      );
+      registrations.own(
+        vscode.workspace.onDidGrantWorkspaceTrust(() => {
+          search.reset();
+        })
+      );
+      registrations.own(
+        vscode.workspace.onDidChangeConfiguration((event) => {
+          if (event.affectsConfiguration(`${EXTENSION_ID}.workspaceSymbols`)) {
+            search.reset();
+          }
+        })
       );
       return undefined;
     },

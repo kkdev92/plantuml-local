@@ -26,11 +26,12 @@ const FILE = 1;
 const DIRECTORY = 2;
 const SYMBOLIC_LINK = 64;
 
-const SKIPPED = new Set(['.git', '.hg', '.svn', 'node_modules', 'dist', 'build']);
+/** The folders a walk skips; Go to Symbol in Workspace skips them too (src/language/workspace-symbols.ts). */
+export const SKIPPED = new Set(['.git', '.hg', '.svn', 'node_modules', 'dist', 'build']);
 /** The extensions VS Code opens as Markdown. */
-const MARKDOWN = /\.(?:md|mkd|mkdn|mdwn|mdown|markdown|markdn|mdtxt|mdtext|litcoffee|ron|ronn|workbook)$/i;
+export const MARKDOWN = /\.(?:md|mkd|mkdn|mdwn|mdown|markdown|markdn|mdtxt|mdtext|litcoffee|ron|ronn|workbook)$/i;
 /** The extensions this extension opens as PlantUML. */
-const PLANTUML = /\.(?:puml|plantuml|pu|iuml|wsd)$/i;
+export const PLANTUML = /\.(?:puml|plantuml|pu|iuml|wsd)$/i;
 
 /** The most documents taken from one folder. */
 export const MAX_DOCUMENTS = 500;

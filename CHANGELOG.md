@@ -26,6 +26,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The snippets of syntax say what they draw.** `alt`, `opt`, `loop`,
   `par`, `ref` and `note`, and `if`, `while`, `repeat` and `fork`, show in
   the details of the list what they draw and the lines they insert.
+- **Go to Symbol in Workspace finds diagrams and declarations.** `Ctrl+T`
+  lists the named diagrams, the elements their lines declare, and the
+  procedures, functions and macros they define, from the Markdown and
+  PlantUML files of the workspace folders — each with the diagram it is in,
+  what declares it and its line, and marked when it lies under a condition
+  or its diagram has no end line. Nothing is read until a query is typed;
+  open documents are searched as edited, what changes on disk is searched
+  again, and a pick opens the file where the name is then. The search skips
+  the folders the export of a folder skips, follows no link, stops at limits
+  it reports in the status bar and the output, and reads nothing in
+  Restricted Mode. `plantumlLocal.workspaceSymbols.exclude` leaves out paths,
+  and `plantumlLocal.workspaceSymbols.enabled` turns it off for a folder.
+
+### Changed
+
+- **The extension starts once VS Code has started up**, as well as when a
+  Markdown or PlantUML file is opened, so that `Ctrl+T` finds the diagrams
+  of a window in which none has been opened yet: VS Code does not start an
+  extension for Go to Symbol in Workspace. Starting reads no file of the
+  workspace; the first query does.
 
 ### Fixed
 
