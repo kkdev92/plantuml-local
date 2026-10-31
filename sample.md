@@ -303,7 +303,7 @@ Alice -> Bob : styled by the included file
 
 ## Naming a block for export
 
-The word after the language names the block. *PlantUML Local: Export All Diagrams as SVG and Update Image Links* writes `images/checkout-flow.svg` beside this file and a reference to it below the block, for hosts such as GitHub that show PlantUML as source. On the opening line of a block without a name, the light bulb offers *Name this diagram for export…*.
+The word after the language names the block. *PlantUML Local: Export All Diagrams as SVG and Update Image Links* writes `images/checkout-flow.svg` beside this file and a reference to it below the block, for hosts such as GitHub that show PlantUML as source. On the opening line of a block without a name, the light bulb offers *Name this diagram for export…*. In a trusted workspace, *Go to Symbol in Workspace* (`Ctrl+T`) finds the block by its name — type `checkout` — as it finds the elements the diagrams of the workspace declare, such as `Shop` below.
 
 ```plantuml checkout-flow
 @startuml
@@ -319,12 +319,21 @@ stop
 
 In a block, suggestions open on `@` or `!` at the start of a line, on `$`, on `!theme ` and on `<&`. Outside a block, type `puml` and press `Ctrl+Space` for a whole block from one of sixteen templates, or run *PlantUML Local: Insert Diagram Template*.
 
-Elsewhere in a block, `Ctrl+Space` lists what that diagram holds: its aliases with the names they show — `Shop` with `Web shop` in the block below — its words, and what it defines, as the next section shows. On a line of its own, a sequence diagram such as this one also offers snippets of `alt`, `opt`, `loop`, `par`, `ref` and `note`, and an activity diagram of `if`, `while`, `repeat` and `fork`, with their parts to tab through.
+Elsewhere in a block, `Ctrl+Space` lists what that diagram holds: its aliases with the names they show — `Shop` with `Web shop` in the block below — its words, and what it defines, as the next section shows. On a line of its own, a sequence diagram such as this one also offers snippets of `alt`, `opt`, `loop`, `par`, `ref` and `note`, and an activity diagram of `if`, `while`, `repeat` and `fork`, with their parts to tab through and, in the details of the list, what each draws.
 
-A swatch sits beside each colour a diagram sets, such as the two below; clicking it opens VS Code's colour picker, and the pick is written back as `#RRGGBB`.
+In a `<style>` block, `Ctrl+Space` offers the properties of a few common rules, and each property its values: on a new line after `FontColor: #0D47A1;` in the block below, `FontName`, `FontSize`, `LineColor` and the other properties of `participant`. Hovering `FontColor` says what it sets there, what it takes and how it is written. After `skinparam`, `Ctrl+Space` offers `defaultFontName`, `defaultFontSize`, `defaultFontColor` and `backgroundColor`.
+
+A swatch sits beside each colour a diagram sets, such as the three below; clicking it opens VS Code's colour picker, and the pick is written back as `#RRGGBB`.
 
 ```plantuml
 @startuml
+<style>
+sequenceDiagram {
+  participant {
+    FontColor: #0D47A1;
+  }
+}
+</style>
 skinparam sequenceArrowColor #2E7D32
 participant "Web shop" as Shop #LightBlue
 Customer -> Shop : Place order
@@ -351,6 +360,20 @@ participant "Web shop" as Shop
 $ask("Place order", "Order number")
 $ask("Track order", $parcel)
 $ask("Cancel order")
+@enduml
+```
+
+## Renaming a participant
+
+`F2` on an alias that a declaration gives with `as` renames it in one edit, on each line of the diagram that names it. Renaming `Orders` below to `Desk` changes four lines, and leaves as they are the name the diagram shows, `Orders desk`, and the text of the note. A diagram with a line the rename cannot read for sure, such as the procedure in the block above, is left as it is, and VS Code says which line.
+
+```plantuml
+@startuml
+participant "Orders desk" as Orders
+participant Stock
+Orders -> Stock : reserve
+activate Orders
+note left of Orders : Orders waits for the stock
 @enduml
 ```
 
