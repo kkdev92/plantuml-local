@@ -44,7 +44,9 @@ src/
 │                    path completion and Go to Definition
 ├── language/        editing help: completion, templates, folding, symbols, the
 │                    actions above each diagram, quick fixes, Go to Diagram,
-│                    the hovers' built-in help and Markdown, and the
+│                    the hovers' built-in help and Markdown, the help on style
+│                    properties and skinparams, Go to Symbol in Workspace,
+│                    Rename Symbol on a participant's alias, and the
 │                    preprocessor's definitions (what a text declares, what
 │                    is defined where the cursor is, the call it is in) for
 │                    the completion, the parameter hints, the hovers, Go to
@@ -67,7 +69,7 @@ l10n/                Japanese strings of the extension; the manifest's are in
 scripts/
 ├── build.mjs        esbuild bundling + engine copy + `!theme` table rebuild +
 │                    stdlib and declarations copy + happy-dom stubs + licence
-│                    check + grammar JSON
+│                    check + grammar JSON + style names read from the engine
 ├── extract-grammar-checklist.mjs  lists what the bundled engine accepts, from
 │                    the upstream PlantUML sources (run by hand; the output is
 │                    committed)
