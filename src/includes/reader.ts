@@ -2,6 +2,7 @@ import type { Stats } from 'node:fs';
 import { lstat, readFile, realpath } from 'node:fs/promises';
 import { join, relative, sep } from 'node:path';
 
+import type { InputOrigin } from '../core/types';
 import { isWithin } from './resolver';
 
 /**
@@ -58,7 +59,7 @@ function isMissing(error: unknown): boolean {
   return code === 'ENOENT' || code === 'ENOTDIR';
 }
 
-const refused = (refusal: ReadRefusal): ReadOutcome => ({ kind: 'refused', refusal });
+const refused = (refusal: ReadRefusal): Extract<ReadOutcome, { kind: 'refused' }> => ({ kind: 'refused', refusal });
 
 /** What a path under the root is, or why it cannot be reached. */
 export type Reached =
@@ -118,34 +119,64 @@ export async function locateIncludeFile(root: string, candidate: string): Promis
 
 /** Reads `candidate`, a path under `root`, which is a real path. */
 export async function readIncludeFile(root: string, candidate: string, options: ReadOptions): Promise<ReadOutcome> {
+  return (await readMeasured(root, candidate, options)).outcome;
+}
+
+/**
+ * A read of a candidate, with what it went by: the bytes held against
+ * `maxBytes` — the file's size on disk, or its text's in UTF-8 when an
+ * editor has it open, absent when the file was not reached — and where the
+ * text of a file read came from.
+ */
+export type MeasuredRead =
+  | { outcome: Extract<ReadOutcome, { kind: 'file' }>; bytes: number; origin: InputOrigin }
+  | { outcome: Exclude<ReadOutcome, { kind: 'file' }>; bytes?: number };
+
+/** Whether `read` read a file. */
+export function isFileRead(read: MeasuredRead): read is Extract<MeasuredRead, { origin: InputOrigin }> {
+  return read.outcome.kind === 'file';
+}
+
+/**
+ * Reads `candidate` as {@link readIncludeFile} does, and says what the read
+ * went by, so that the same read can be held against fewer bytes later
+ * (src/includes/snapshot.ts) and say what it was.
+ */
+export async function readMeasured(root: string, candidate: string, options: ReadOptions): Promise<MeasuredRead> {
   const located = await locateIncludeFile(root, candidate);
   if (located.kind !== 'file') {
-    return located;
+    return { outcome: located };
   }
   const id = located.id;
 
   let text = options.openText(id);
   if (text === undefined) {
-    if (located.size > options.maxBytes) {
-      return refused('too-large');
+    const size = located.size;
+    if (size > options.maxBytes) {
+      return { outcome: refused('too-large'), bytes: size };
     }
     let bytes: Uint8Array;
     try {
       bytes = await readFile(id);
     } catch (error) {
-      return isMissing(error) ? { kind: 'missing' } : refused('unreadable');
+      return isMissing(error) ? { outcome: { kind: 'missing' } } : { outcome: refused('unreadable'), bytes: size };
     }
     try {
       // fatal rejects invalid UTF-8; a leading BOM is dropped, not refused.
       text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
     } catch {
-      return refused('encoding');
+      return { outcome: refused('encoding'), bytes: size };
     }
-  } else if (Buffer.byteLength(text, 'utf8') > options.maxBytes) {
-    return refused('too-large');
+    return withText(id, text, size, 'disk');
   }
-  if (text.includes('\u0000')) {
-    return refused('nul');
+  const size = Buffer.byteLength(text, 'utf8');
+  if (size > options.maxBytes) {
+    return { outcome: refused('too-large'), bytes: size };
   }
-  return { kind: 'file', id, text };
+  return withText(id, text, size, 'editor');
+}
+
+/** The read of a file whose text is `text`: refused if it holds a NUL. */
+function withText(id: string, text: string, bytes: number, origin: InputOrigin): MeasuredRead {
+  return text.includes('\u0000') ? { outcome: refused('nul'), bytes } : { outcome: { kind: 'file', id, text }, bytes, origin };
 }

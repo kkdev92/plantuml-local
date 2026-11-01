@@ -69,7 +69,8 @@ l10n/                Japanese strings of the extension; the manifest's are in
 scripts/
 ├── build.mjs        esbuild bundling + engine copy + `!theme` table rebuild +
 │                    stdlib and declarations copy + happy-dom stubs + licence
-│                    check + grammar JSON + style names read from the engine
+│                    check + grammar JSON + style names read from the engine +
+│                    audit of the bundled libraries and themes
 ├── extract-grammar-checklist.mjs  lists what the bundled engine accepts, from
 │                    the upstream PlantUML sources (run by hand; the output is
 │                    committed)
@@ -182,6 +183,12 @@ Use [Conventional Commits](https://www.conventionalcommits.org/): `feat:`, `fix:
   [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and `third-party/` to match.
   The build stops while the table misses an npm package that ships, lists one
   at other versions than those that ship, or lists one that no longer does.
+- If you upgrade `@plantuml/core` or regenerate `assets/stdlib/`, the build
+  stops while the bundled C4 and Azure libraries or the `!theme` library are
+  not as `src/export/audit.ts` lists them: the SHA-256 of each, and the `%`
+  functions they call. Read what changed for the functions it names — one
+  that reads the time, a random number or the environment draws a diagram
+  differently each time — then update that file.
 
 ## Reporting Issues
 

@@ -15,7 +15,7 @@
 import MarkdownIt from 'markdown-it';
 
 import { isDiagramFence } from '../core/constants';
-import { splitLines } from '../core/lines';
+import { lineBreaks, splitLines } from '../core/lines';
 import { END, START, forEachShapeLine } from '../core/shape';
 
 /**
@@ -41,6 +41,14 @@ export interface PlantUmlBlock {
   nameBasis: NameBasis | null;
   /** The block's contents, without the fence lines. */
   source: string;
+  /**
+   * The diagram as the document holds it: each line between the fences, or
+   * from the `@start…` line to the `@end…` line of a PlantUML file, with the
+   * line break that ends it and without the block quotes and list items
+   * that hold it, blank lines and spaces kept. Export records its SHA-256
+   * (src/export/manifest.ts).
+   */
+  raw: string;
   /**
    * Zero-based line of the document where `source` begins. Blank lines
    * right after the opening fence are trimmed from `source`, so this can
@@ -178,6 +186,7 @@ function closesFence(line: string | undefined, markup: string): boolean {
  */
 export function findPlantUmlBlocks(text: string): PlantUmlBlock[] {
   const lines = withoutFrontMatter(splitLines(text));
+  const breaks = lineBreaks(text);
   const blocks: PlantUmlBlock[] = [];
 
   for (const token of parser.parse(lines.join('\n'), {})) {
@@ -189,10 +198,14 @@ export function findPlantUmlBlocks(text: string): PlantUmlBlock[] {
     const name = token.info.trim().split(/\s+/)[1];
     const leadingBlank = token.content.split('\n').findIndex((line) => line.trim() !== '');
     const named = name !== undefined && name !== '';
+    // The parser gives the lines the fences hold, one after another from the
+    // line below the opening one, without their containers, each ended by LF.
+    const held = token.content === '' ? [] : token.content.replace(/\n$/, '').split('\n');
     blocks.push({
       name: named ? name : null,
       nameBasis: named ? 'fence' : null,
       source: token.content.trim(),
+      raw: held.map((line, index) => line + (breaks[openLine + 1 + index] ?? '')).join(''),
       sourceLine: openLine + 1 + Math.max(leadingBlank, 0),
       openLine,
       closeLine: end - 1,
@@ -222,6 +235,7 @@ export const DECLARED_ID = /^\s*[@\\]start[A-Za-z0-9_]+\(id=([^)]*)\)/;
  */
 export function findFileDiagrams(text: string, fileName: string): PlantUmlBlock[] {
   const lines = splitLines(text);
+  const breaks = lineBreaks(text);
   const found: { start: number; end: number; closed: boolean; id: string | null }[] = [];
   let open: (typeof found)[number] | null = null;
   let code = false;
@@ -250,6 +264,10 @@ export function findFileDiagrams(text: string, fileName: string): PlantUmlBlock[
     name: diagram.id ?? (found.length === 1 ? fileName : null),
     nameBasis: diagram.id !== null ? 'explicit-id' : found.length === 1 ? 'single-file-name' : null,
     source: lines.slice(diagram.start, diagram.end + 1).join('\n'),
+    raw: lines
+      .slice(diagram.start, diagram.end + 1)
+      .map((line, index) => line + (breaks[diagram.start + index] ?? ''))
+      .join(''),
     sourceLine: diagram.start,
     openLine: diagram.start,
     closeLine: diagram.end,

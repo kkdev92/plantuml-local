@@ -3,13 +3,24 @@ import { join, relative } from 'node:path';
 import * as vscode from 'vscode';
 
 import { INCLUDE_LIMITS } from '../core/constants';
-import type { DiagramRender, DrawnRequest, DrawnRequestState, IncludeLoader, LibraryRead } from '../core/types';
+import type {
+  DeliveredFile,
+  DiagramRender,
+  DrawnInputs,
+  DrawnRequest,
+  DrawnRequestState,
+  IncludeContext,
+  IncludeLoader,
+  InputRequest,
+  LibraryRead,
+} from '../core/types';
 import { RenderFailure, type Drawing } from '../render/client';
 import { includeAccess } from './access';
 import { describeIncludeFailure, describeIncludeFailures, hasLocalInclude, type IncludeLabels } from './describe';
 import { DrawingFailure } from './drawings';
 import { INCLUDE_EXTENSIONS } from './path-policy';
 import { IncludeSession, type IncludeAccess, type IncludeFailureReason } from './session';
+import type { ReadSnapshot } from './snapshot';
 import { pathKey } from './tracking';
 
 /**
@@ -34,7 +45,12 @@ export interface Renderer {
   draw(source: string, dark: boolean, load?: IncludeLoader): Promise<Drawing>;
 }
 
-export function drawInDocuments(renderer: Renderer, host: IncludeHost): DrawDiagram {
+/**
+ * Draws with the includes `host` says where to look for; with `snapshot`,
+ * the reads of an export, each drawing also says what it was drawn from
+ * (DiagramRender.inputs).
+ */
+export function drawInDocuments(renderer: Renderer, host: IncludeHost, snapshot?: ReadSnapshot): DrawDiagram {
   const describe = (reason: IncludeFailureReason): string =>
     describeIncludeFailure(reason, host.labels, INCLUDE_EXTENSIONS, INCLUDE_LIMITS);
 
@@ -62,9 +78,15 @@ export function drawInDocuments(renderer: Renderer, host: IncludeHost): DrawDiag
     // Without a local include the engine never asks for a file.
     if (document === undefined || !hasLocalInclude(source)) {
       const { svg, libraries } = await draw(source, dark, undefined, () => [], () => []);
-      return { svg, failedIncludes: new Map(), dependencies: [], log: { requests: [], libraries } };
+      return {
+        svg,
+        failedIncludes: new Map(),
+        dependencies: [],
+        log: { requests: [], libraries },
+        ...(snapshot === undefined ? {} : { inputs: { context: null, requests: [], files: [] } }),
+      };
     }
-    const { session, opened } = await openSession(vscode.Uri.parse(document), host);
+    const { session, opened, access } = await openSession(vscode.Uri.parse(document), host, snapshot);
     const requests = (): DrawnRequest[] => drawnRequests(session, opened, describe);
     const looked = (): string[] => [...session.dependencies].map((path) => pathKey(opened(path)));
     const { svg, libraries } = await draw(source, dark, session.load, requests, looked);
@@ -77,8 +99,52 @@ export function drawInDocuments(renderer: Renderer, host: IncludeHost): DrawDiag
       dependencies,
       ...(styled ? { includedStyle: { themes: [...session.themes], whitePageLibrary: session.whitePageLibrary } } : {}),
       log: { requests: requests(), libraries },
+      ...(snapshot === undefined ? {} : { inputs: drawnInputs(session, access, snapshot) }),
     };
   };
+}
+
+/** Where the files of `access` are looked for, or why none are. */
+function contextOf(access: IncludeAccess): IncludeContext {
+  return access.available
+    ? { root: access.scope.root, folder: access.scope.documentFolder, searchFolders: [...access.scope.searchFolders] }
+    : { unavailable: access.why };
+}
+
+/** How a request that failed for `reason` ended, in words that stay the same in every language. */
+function outcomeOf(reason: IncludeFailureReason): string {
+  switch (reason.kind) {
+    case 'unavailable':
+      return `unavailable:${reason.why}`;
+    case 'path':
+      return `path:${reason.refusal}`;
+    case 'outside':
+      return 'outside';
+    case 'missing':
+      return reason.searched ? 'missing:searched' : 'missing';
+    case 'read':
+      return `read:${reason.refusal}`;
+    case 'limit':
+      return `limit:${reason.limit}`;
+  }
+}
+
+/** What a drawing of `session` was drawn from: where it looked, what it asked for and the files `snapshot` delivered. */
+function drawnInputs(session: IncludeSession, access: IncludeAccess, snapshot: ReadSnapshot): DrawnInputs {
+  const requests = session.requests.map(({ path, from, kind, answer }): InputRequest => {
+    const asked = { path, from, kind: kind ?? null };
+    return 'delivered' in answer
+      ? { ...asked, outcome: 'read', file: answer.delivered, looked: [...answer.missing] }
+      : { ...asked, outcome: outcomeOf(answer.failed), file: null, looked: [...answer.looked] };
+  });
+  const files: DeliveredFile[] = [];
+  for (const id of new Set(requests.flatMap(({ file }) => (file === null ? [] : [file])))) {
+    const delivered = snapshot.delivered(id);
+    if (delivered !== undefined) {
+      files.push(delivered);
+    }
+  }
+  return { context: contextOf(access), requests, files };
 }
 
 /** How a request that failed for `reason` ended. */
@@ -109,17 +175,27 @@ function drawnRequests(
  * document as it is edited, as a render of them does; `opened` gives a
  * path it found as VS Code knows it ({@link asOpened}), and `root` the real
  * path of the workspace folder it reads in, undefined when it reads none.
+ * With `snapshot`, the session reads what the export it belongs to has read
+ * already, and looks where it first looked.
  */
 export async function openSession(
   document: vscode.Uri,
-  host: Pick<IncludeHost, 'includePaths'>
-): Promise<{ session: IncludeSession; opened: (path: string) => string; root: string | undefined }> {
-  const { access, folder } = await accessFor(document, host);
+  host: Pick<IncludeHost, 'includePaths'>,
+  snapshot?: ReadSnapshot
+): Promise<{ session: IncludeSession; opened: (path: string) => string; root: string | undefined; access: IncludeAccess }> {
+  const { access, folder } = await (snapshot === undefined
+    ? accessFor(document, host)
+    : snapshot.access(document.toString(), () => accessFor(document, host)));
   const opened = (path: string): string => asOpened(access, folder, path);
+  const editorText = (path: string): string | undefined => openText(opened(path)) ?? openText(path);
   return {
-    session: new IncludeSession(access, (path) => openText(opened(path)) ?? openText(path)),
+    session:
+      snapshot === undefined
+        ? new IncludeSession(access, editorText)
+        : new IncludeSession(access, editorText, INCLUDE_LIMITS, snapshot.reader(editorText)),
     opened,
     root: access.available ? access.scope.root : undefined,
+    access,
   };
 }
 

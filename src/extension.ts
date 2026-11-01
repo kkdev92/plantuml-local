@@ -78,6 +78,7 @@ import {
 } from './export/exporter';
 import { MAX_DOCUMENTS, findDocuments } from './export/folder';
 import { ExportLedger } from './export/history';
+import { shippedRenderer } from './export/manifest';
 import type { ExportRecords } from './export/ownership';
 import { findColors, hexOf, rgbOf } from './core/colors';
 import { splitLines } from './core/lines';
@@ -85,6 +86,7 @@ import { documentColumnOf, documentLineOf } from './core/positions';
 import { hasStartLine } from './core/shape';
 import { errorMessage, libraryNotBundled } from './core/messages';
 import { lineAfterEdits, planReferenceEdits, type ReferenceEdit } from './export/references';
+import { scanText } from './export/replay';
 import {
   diagramAt,
   expandSnippet,
@@ -145,6 +147,7 @@ import {
   definitionSections,
   escapeLines,
   escapeMarkdown,
+  HELP_ENGINE,
   helpFor,
   helpMarkdown,
   inlineCode,
@@ -175,6 +178,7 @@ import { includeCompletions, includeDefinitions } from './includes/editor';
 import { drawInDocuments, openSession, type DrawDiagram } from './includes/host';
 import { INCLUDE_EXTENSIONS } from './includes/path-policy';
 import type { IncludeFailure } from './includes/session';
+import { ReadSnapshot } from './includes/snapshot';
 import { changeTo } from './includes/tracking';
 import { IncludeWatcher } from './includes/watch';
 import { createPlantUmlPlugin, type PlantUmlPlugin, type UpdateMode } from './preview/plugin';
@@ -1045,19 +1049,30 @@ function viewDiagrams(document: vscode.TextDocument, labels: ProblemLabels, view
 /**
  * Draws diagrams with their local includes, the setting and the words for
  * failures read through `settings` and `l10n`; `watch`, when given, follows
- * the files they include.
+ * the files they include, and with `snapshot`, the reads of an export, each
+ * drawing says what it was drawn from.
  */
-function drawWith(renderer: RendererClient, settings: SettingsReader, l10n: L10n, watch?: IncludeWatcher): DrawDiagram {
-  return drawInDocuments(renderer, {
-    includePaths: (document) => includePathsOf(settings, document),
-    labels: includeLabels(l10n),
-    remember:
-      watch === undefined
-        ? undefined
-        : (key, paths): void => {
-            watch.remember(key, paths);
-          },
-  });
+function drawWith(
+  renderer: RendererClient,
+  settings: SettingsReader,
+  l10n: L10n,
+  watch?: IncludeWatcher,
+  snapshot?: ReadSnapshot
+): DrawDiagram {
+  return drawInDocuments(
+    renderer,
+    {
+      includePaths: (document) => includePathsOf(settings, document),
+      labels: includeLabels(l10n),
+      remember:
+        watch === undefined
+          ? undefined
+          : (key, paths): void => {
+              watch.remember(key, paths);
+            },
+    },
+    snapshot
+  );
 }
 
 /**
@@ -1362,7 +1377,9 @@ function drawingDeps(
 /**
  * Resolves a path against the document's own folder and writes through
  * `vscode.workspace.fs`, so exporting works on remote and virtual file
- * systems rather than only on local disk.
+ * systems rather than only on local disk. With `snapshot`, the reads of one
+ * export, the diagrams are drawn from what it read first, and each file
+ * written is recorded with what it was drawn from.
  */
 function exporterDeps(
   context: OperationContext,
@@ -1371,9 +1388,10 @@ function exporterDeps(
   settings: SettingsReader,
   exports: ExportLedger,
   workspace: WorkspaceService,
-  document: vscode.Uri
+  document: vscode.Uri,
+  snapshot?: ReadSnapshot
 ): ExporterDeps {
-  const draw = drawWith(renderer, settings, context.l10n);
+  const draw = drawWith(renderer, settings, context.l10n, undefined, snapshot);
   return {
     ...drawingDeps(context.l10n, (source, dark) => draw(source, dark, document.toString()), palettes, settings, document),
     invalidNameMessage: context.l10n.t(
@@ -1409,8 +1427,9 @@ function exporterDeps(
     wroteBefore: (path, source, existing) => exports.wroteBefore(path, source, existing),
     // Open with unsaved edits, it is someone's work, whoever wrote it last.
     isDirty: (path) => vscode.workspace.textDocuments.some((open) => open.isDirty && open.uri.toString() === path),
-    record: (key, path, content) =>
-      exports.record(key, path, content, (error) => {
+    rendererIdentity: () => shippedRenderer(__dirname, join(__dirname, '..', 'media', 'png', 'png.js'), HELP_ENGINE),
+    record: (key, path, content, input) =>
+      exports.record(key, path, content, input, (error) => {
         context.logger.warn(context.l10n.t(
           'Could not save export history for {0}. You may be asked before overwriting this file next time. Details: {1}',
           path,
@@ -1630,7 +1649,7 @@ async function runBulkExport(
   }
   return context.progress.run({ title: context.l10n.t('Exporting diagrams…') }, (report) =>
     exportAll(
-      exporterDeps(context, renderer, palettes, settings, exports, workspace, document.textDocument.uri),
+      exporterDeps(context, renderer, palettes, settings, exports, workspace, document.textDocument.uri, new ReadSnapshot(scanText)),
       document.path,
       directory,
       blocks,
@@ -2452,7 +2471,10 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         return;
       }
 
-      const deps = exporterDeps(context, renderer, palettes, settings, exports, workspace, document.textDocument.uri);
+      /** What an export of the diagram goes by, each export reading the files it includes afresh. */
+      const depsOf = (): ExporterDeps =>
+        exporterDeps(context, renderer, palettes, settings, exports, workspace, document.textDocument.uri, new ReadSnapshot(scanText));
+      const deps = depsOf();
       // The document's other diagrams, any of which headed for the same file fails the export.
       const blocks = diagramsOf(document.textDocument, document.text);
       // How the export went; a failure comes with the way on that suits it.
@@ -2498,7 +2520,7 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
           }
           actions.push({
             title: context.l10n.t('Export as SVG'),
-            run: async () => report(await exportOne(deps, document.path, directory, block, name, 'svg', blocks), 'svg'),
+            run: async () => report(await exportOne(depsOf(), document.path, directory, block, name, 'svg', blocks), 'svg'),
           });
         } else if (result.cause === 'file') {
           actions.push(explorerButton(context, vscode.Uri.parse(deps.resolve(document.path, `${directory}/${name}.${as}`)), true));
@@ -2977,7 +2999,9 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
       const outcome = await context.progress.run(
         { title: context.l10n.t('Exporting diagrams…'), cancellable: true },
         async (report, signal) => {
-          const deps = exporterDeps(context, renderer, palettes, settings, exports, workspace, folder);
+          // Every document of the folder is drawn from the same reads.
+          const snapshot = new ReadSnapshot(scanText);
+          const deps = exporterDeps(context, renderer, palettes, settings, exports, workspace, folder, snapshot);
           // Every document is planned before any diagram is drawn: diagrams
           // of different documents headed for one file are all refused.
           const plans = refuseSharedFiles(
@@ -3004,7 +3028,7 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
                   message: `${document} (${String(index + 1)}/${String(plans.length)})`,
                   increment: 100 / plans.length,
                 });
-                const documentDeps = exporterDeps(context, renderer, palettes, settings, exports, workspace, plan.uri);
+                const documentDeps = exporterDeps(context, renderer, palettes, settings, exports, workspace, plan.uri, snapshot);
                 const result = await drawDocument(
                   { ...documentDeps, toPng: (svg, width, height, background) => pngs.draw(svg, width, height, background) },
                   buffer,

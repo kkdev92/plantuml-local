@@ -14,6 +14,7 @@ import {
   type ArtifactRecord,
   type History,
 } from '../../src/export/history';
+import { inputManifest, type InputManifest } from '../../src/export/manifest';
 import { sha256 } from '../../src/export/ownership';
 
 const DOC = 'file:///repo/docs/design.md';
@@ -265,7 +266,9 @@ describe('ExportLedger', () => {
 
     expect(await new ExportLedger(full, () => ({})).record(key('orders'), record('orders').output, bytes('x'))).toBe('full');
     expect(full.set).not.toHaveBeenCalled();
-    expect(await new ExportLedger(refusing, () => ({})).record(key('orders'), record('orders').output, bytes('x'), heard)).toBe('not-saved');
+    expect(await new ExportLedger(refusing, () => ({})).record(key('orders'), record('orders').output, bytes('x'), undefined, heard)).toBe(
+      'not-saved'
+    );
     expect(heard).toHaveBeenCalledWith(new Error('disk full'));
   });
 
@@ -323,5 +326,83 @@ describe('ExportLedger', () => {
 
     await expect(failing).rejects.toThrow('EACCES');
     await expect(next).resolves.toBe('written');
+  });
+});
+
+describe('the inputs a record carries', () => {
+  /** What an image of the diagram `name` was drawn from: a file it included, holding `text`. */
+  const inputFor = (name: string, text = 'A -> B'): InputManifest => {
+    const manifest = inputManifest({
+      key: key(name),
+      source: '!include a.puml',
+      render: '!include a.puml',
+      drawn: {
+        svg: '<svg/>',
+        failedIncludes: new Map(),
+        dependencies: [],
+        inputs: {
+          context: { root: '/repo', folder: '/repo/docs', searchFolders: [] },
+          requests: [{ path: 'a.puml', from: null, kind: 'include', outcome: 'read', file: '/repo/docs/a.puml', looked: [] }],
+          files: [{ file: '/repo/docs/a.puml', sha256: sha256(new TextEncoder().encode(text)), origin: 'disk', findings: [] }],
+        },
+      },
+      dark: { asked: false, drawn: false },
+      format: 'svg',
+      pngScale: null,
+      renderer: { engine: '1.2026.9', build: 'b'.repeat(64), raster: 'c'.repeat(64) },
+      losses: 0,
+    });
+    if (manifest === null) {
+      throw new Error('expected a manifest');
+    }
+    return manifest;
+  };
+  /** As the state gives it back: stored as JSON. */
+  const readBack = (value: unknown): unknown => JSON.parse(JSON.stringify(value)) as unknown;
+
+  it('keeps a record with what its image was drawn from, as written, stored and read back', () => {
+    const drawn = record('orders', { input: inputFor('orders') });
+
+    expect(readHistory(readBack(stored(drawn))).records.get(drawn.output)).toEqual(drawn);
+  });
+
+  it('goes by no record whose inputs are not as this version writes them, or not those of its diagram', () => {
+    const tampered = readBack(inputFor('b')) as InputManifest;
+    tampered.resources.files[0]!.sha256 = sha256(new TextEncoder().encode('another text'));
+    const later = { ...inputFor('d'), schema: 'plantuml-local-input-v2' };
+
+    const history = readHistory(
+      readBack(
+        stored(
+          record('a', { input: inputFor('another') }),
+          { ...record('b'), input: tampered },
+          { ...record('c'), input: null },
+          { ...record('d'), input: later },
+          record('e', { input: inputFor('e') })
+        )
+      )
+    );
+
+    expect([...history.records.keys()]).toEqual([record('e').output]);
+  });
+
+  it('records again what a file was drawn from when only that changed, and gives back the same records when nothing did', () => {
+    const empty = readHistory(null);
+    const first = withRecord(empty, record('orders', { input: inputFor('orders') })) as History;
+
+    expect(withRecord(first, record('orders', { input: inputFor('orders') }))).toBe(first);
+    const changed = withRecord(first, record('orders', { input: inputFor('orders', 'C -> D') })) as History;
+    expect(changed).not.toBe(first);
+    expect(changed.records.get(record('orders').output)?.input).toEqual(inputFor('orders', 'C -> D'));
+    expect((withRecord(changed, record('orders')) as History).records.get(record('orders').output)).not.toHaveProperty('input');
+  });
+
+  it('stores what the file was drawn from with the record of what was written', async () => {
+    const store = memory();
+    const ledger = new ExportLedger(store, () => ({}));
+
+    expect(await ledger.record(key('orders'), record('orders').output, new TextEncoder().encode('<svg/>'), inputFor('orders'))).toBe('recorded');
+    expect(ledger.ownerOf(record('orders').output)?.input).toEqual(inputFor('orders'));
+    expect(readHistory(readBack(store.get())).records.get(record('orders').output)?.input).toEqual(inputFor('orders'));
   });
 });

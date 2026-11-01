@@ -13,3 +13,11 @@
 export function splitLines(text: string): string[] {
   return text.split(/\r\n|\r|\n/);
 }
+
+/**
+ * The line break that ends each line of `text`, line by line as
+ * {@link splitLines} splits it: CR LF, LF or CR, and none for the last.
+ */
+export function lineBreaks(text: string): string[] {
+  return [...text.matchAll(/\r\n|\r|\n/g)].map(([found]) => found).concat('');
+}

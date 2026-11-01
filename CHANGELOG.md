@@ -39,6 +39,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   asks about them. A document or a folder of more than 1,000 named diagrams
   is refused rather than exported in part; before, a folder of up to 2,000
   was exported, and a document had no limit.
+- **An export reads each included file once.** Every diagram of one export,
+  and of every document of a folder export, is drawn from the text a file had
+  when the export first read it, so a file saved while the export runs no
+  longer puts two versions of itself into one export. Each diagram is still
+  held to the include limits by itself.
+- **The record of an exported file also says what the image was drawn
+  from**: a SHA-256 of the diagram's text and of each file it included, the
+  paths of those files, the bundled library files it read, the renderer, the
+  format, the palette and the PNG scale, whether the image leaves out part of
+  the diagram, and whether the same text and files are known to draw the same
+  image again — not when the diagram reads the time, a random number or the
+  environment, nor when it runs the preprocessor beyond plain includes and
+  themes. Exporting a diagram again whose file holds its image already records
+  what it was drawn from then. No diagram source is recorded.
 
 ## [0.19.0] - 2026-11-01
 
