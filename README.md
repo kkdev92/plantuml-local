@@ -970,7 +970,8 @@ device name such as `CON`. The bulk commands report such a block as failed.
 Blocks headed for one file — of one name, or of names that differ only in
 case, which Windows and macOS take for one file — are all reported before
 anything is drawn, and none of them is written; nor is one of them exported
-alone.
+alone. A document of more than 1,000 named diagrams is refused rather than
+exported in part.
 
 With the cursor on the opening line of a block that has no usable name, the
 light bulb offers *Name this diagram for export…*: it asks for a name and
@@ -1006,7 +1007,13 @@ asked about once, saying why: those versions recorded the document, not the
 diagram. A file that changes while the export runs — while its question is
 open, say — is left as it is and reported, whatever the answer. Each file is
 written under a temporary name beside the target and then renamed over it, so
-an export that fails part way never leaves half an image behind.
+an export that fails part way never leaves half an image behind. The images an
+export has drawn wait in memory until it writes them, up to 64 MiB in all; past
+that, each waits in a temporary file beside its target, is written only if that
+file still holds it, and the file is deleted once the image is written or the
+export ends, whether it succeeds, fails or is cancelled. A temporary file that
+cannot be deleted then — another program has it open, say — is named in the
+Output panel as one you can delete.
 
 The `#plantuml-local` fragment on the inserted reference does two jobs. GitHub
 ignores it and renders the SVG, while this extension's preview hides marked
@@ -1064,7 +1071,7 @@ a PlantUML file without a start line, which only other files include. It asks
 before drawing, naming the documents, and then once for all the files it would
 replace. Diagrams headed for the same file — two documents beside each other
 naming a block alike — are all reported before anything is drawn, and none of
-them is written. A folder of more than 500 documents or 2,000 named diagrams is
+them is written. A folder of more than 500 documents or 1,000 named diagrams is
 refused rather than exported in part. Cancelling while it draws writes nothing;
 cancelling while it writes stops before the next file. *Export All
 Diagrams in Folder as PNG*, beside it in the menu, writes PNGs instead, as

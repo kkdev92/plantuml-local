@@ -520,6 +520,33 @@ describe('export (dist)', () => {
     expect(vscodeStub._test.notifications.warn.some((m) => m.includes('Unnamed'))).toBe(true);
   });
 
+  it('refuses a document of more than 1000 named diagrams before drawing any, and exports one of 1000 with an unnamed block besides', async () => {
+    // Each refused for its URL without being drawn, so that a thousand take no time.
+    const blocks = (count: number): string =>
+      Array.from({ length: count }, (_, index) =>
+        ['```plantuml d' + String(index), '@startuml', '!include https://example.com/x.puml', '@enduml', '```'].join('\n')
+      ).join('\n\n');
+    const warnings = vscodeStub._test.notifications.warn.length;
+
+    for (const command of ['plantumlLocal.exportAllSvg', 'plantumlLocal.exportAllAndUpdateRefs']) {
+      vscodeStub._test.setActiveEditor(makeEditor('file:///c/crowd/many.md', blocks(1001), 0));
+      await vscodeStub._test.registeredCommands.get(command)?.();
+    }
+    // The unnamed block is not one of those counted.
+    const unnamed = ['```plantuml', '@startuml', 'A -> B : unnamed', '@enduml', '```'].join('\n');
+    vscodeStub._test.setActiveEditor(makeEditor('file:///c/crowd/many.md', `${blocks(1000)}\n\n${unnamed}`, 0));
+    await vscodeStub._test.registeredCommands.get('plantumlLocal.exportAllSvg')?.();
+
+    const refused = 'crowd/many.md has more than 1000 named diagrams, too many to export at once. Export them one at a time instead.';
+    expect(vscodeStub._test.notifications.warn.slice(warnings)).toEqual([
+      refused,
+      refused,
+      'Diagrams that could not be exported: 1000. See the Output panel for the reasons. · ' +
+        'Unnamed code blocks were not exported: 1. Add a name after ```plantuml, for example: "```plantuml my-diagram".',
+    ]);
+    expect([...vscodeStub._test.writtenFiles.keys()].filter((key) => key.startsWith('file:///c/crowd/'))).toEqual([]);
+  });
+
   describe('diagnostics', () => {
     const DOCUMENT = [
       '# Doc',
@@ -1834,6 +1861,32 @@ describe('export (dist)', () => {
       );
     });
 
+    it('refuses a folder of more than 1000 named diagrams before drawing any, and asks about one of 1000', async () => {
+      const blocks = (from: number, count: number): string =>
+        Array.from({ length: count }, (_, index) => block(`d${String(from + index)}`, 'x')).join('\n\n');
+      const files = ['file:///c/many/a.md', 'file:///c/many/b.md', 'file:///c/many/c.md'];
+      const modals = vscodeStub._test.modals.length;
+      const warnings = vscodeStub._test.notifications.warn.length;
+      try {
+        vscodeStub._test.writtenFiles.set(files[0]!, blocks(0, 500));
+        vscodeStub._test.writtenFiles.set(files[1]!, blocks(500, 500));
+        // Asked, and dismissed as the stub answers by default.
+        await exportFolder('file:///c/many');
+        vscodeStub._test.writtenFiles.set(files[2]!, blocks(1000, 1));
+        await exportFolder('file:///c/many');
+      } finally {
+        for (const file of files) {
+          vscodeStub._test.writtenFiles.delete(file);
+        }
+      }
+
+      expect(vscodeStub._test.modals.slice(modals).map((modal) => modal.message)).toEqual(['Export 1000 named diagrams in many?']);
+      expect(vscodeStub._test.notifications.warn.slice(warnings)).toEqual([
+        'many has more than 1000 named diagrams, too many to export at once. Choose a smaller folder.',
+      ]);
+      expect([...vscodeStub._test.writtenFiles.keys()].filter((key) => key.startsWith('file:///c/many/'))).toEqual([]);
+    });
+
     it('exports the named diagrams of its documents once that is confirmed, beside each document', async () => {
       vscodeStub._test.writtenFiles.set('file:///c/tree/a.md', block('one', 'first'));
       vscodeStub._test.writtenFiles.set('file:///c/tree/sub/b.puml', '@startuml(id=two)\nC -> D : second\n@enduml');
@@ -2144,6 +2197,92 @@ describe('export (dist)', () => {
         'file:///c/pngtree/sub/images/two.png',
       ]);
       expect(vscodeStub._test.notifications.info.at(-1)).toBe('Diagrams exported: 2');
+    });
+
+    describe('past what an export holds in memory', () => {
+      /** A PNG of `width`×`height` pixels, 33 MiB long: two take the total past 64 MiB. */
+      const large = (width: number, height: number, fill: number): Uint8Array => {
+        const png = new Uint8Array(33 * 1024 * 1024).fill(fill);
+        png.set(pngOf(width, height));
+        return png;
+      };
+      const digest = (bytes: Uint8Array | undefined): string =>
+        createHash('sha256')
+          .update(bytes ?? new Uint8Array())
+          .digest('hex');
+      const block = (name: string): string => ['```plantuml ' + name, '@startuml', `A -> B : ${name}`, '@enduml', '```'].join('\n');
+      /** Exports a folder as PNG, answering each drawing with a large PNG: those sent, in order. */
+      const exportLarge = async (folder: string, count: number): Promise<Uint8Array[]> => {
+        const panels = vscodeStub._test.webviewPanels.length;
+        const sent: Uint8Array[] = [];
+        vscodeStub._test.messageReply = 'Export';
+        try {
+          const done = Promise.resolve(
+            vscodeStub._test.registeredCommands.get('plantumlLocal.exportFolderPng')?.(vscodeStub.Uri.parse(folder))
+          );
+          expect(await waitFor(() => vscodeStub._test.webviewPanels.length > panels, 30_000)).toBe(true);
+          const panel = vscodeStub._test.webviewPanels[panels]!;
+          panel.receive({ type: 'ready' });
+          for (let index = 0; index < count; index += 1) {
+            expect(await waitFor(() => panel.webview.posted.length > index, 30_000)).toBe(true);
+            const draw = panel.webview.posted[index] as { width: number; height: number };
+            sent.push(large(draw.width, draw.height, index + 1));
+            panel.receive({ type: 'png', data: sent[index] });
+          }
+          await done;
+        } finally {
+          vscodeStub._test.messageReply = null;
+        }
+        return sent;
+      };
+      /**
+       * Files written since `writes` under a temporary name, beside a target to
+       * be renamed over it or held until written: without the random part of the name.
+       */
+      const temporaries = (writes: number): string[] =>
+        vscodeStub._test.fileWrites
+          .slice(writes)
+          .filter((uri) => uri.endsWith('.tmp'))
+          .map((uri) => uri.replace(/\.[0-9a-f]{8}\.tmp$/, ''));
+
+      it('holds the PNG past 64 MiB in a temporary file beside its own, writes it from there, and deletes that file', async () => {
+        vscodeStub._test.writtenFiles.set('file:///c/bigpng/a.md', `${block('one')}\n\n${block('two')}`);
+        const writes = vscodeStub._test.fileWrites.length;
+
+        const sent = await exportLarge('file:///c/bigpng', 2);
+
+        // The second held in a file beside its own, then each written beside its file and renamed over it.
+        expect(temporaries(writes)).toEqual([
+          'file:///c/bigpng/images/.two.png',
+          'file:///c/bigpng/images/.one.png',
+          'file:///c/bigpng/images/.two.png',
+        ]);
+        expect(writtenUnder('file:///c/bigpng/').sort()).toEqual([
+          'file:///c/bigpng/a.md',
+          'file:///c/bigpng/images/one.png',
+          'file:///c/bigpng/images/two.png',
+        ]);
+        expect(digest(vscodeStub._test.writtenBytes.get('file:///c/bigpng/images/one.png'))).toBe(digest(sent[0]));
+        expect(digest(vscodeStub._test.writtenBytes.get('file:///c/bigpng/images/two.png'))).toBe(digest(sent[1]));
+        expect(vscodeStub._test.notifications.info.at(-1)).toBe('Diagrams exported: 2');
+      });
+
+      it('deletes the PNG it held in a file when replacing a file is declined, and writes none', async () => {
+        vscodeStub._test.writtenFiles.set('file:///c/bigkept/a.md', `${block('one')}\n\n${block('two')}`);
+        vscodeStub._test.writtenFiles.set('file:///c/bigkept/images/one.png', 'by hand');
+        const writes = vscodeStub._test.fileWrites.length;
+        const modals = vscodeStub._test.modals.length;
+
+        await exportLarge('file:///c/bigkept', 2);
+
+        expect(vscodeStub._test.modals.slice(modals).map((modal) => modal.message)).toEqual([
+          'Export 2 named diagrams in bigkept?',
+          'bigkept/images/one.png already exists and has different contents. Overwrite it?',
+        ]);
+        expect(temporaries(writes)).toEqual(['file:///c/bigkept/images/.two.png']);
+        expect(writtenUnder('file:///c/bigkept/').sort()).toEqual(['file:///c/bigkept/a.md', 'file:///c/bigkept/images/one.png']);
+        expect(vscodeStub._test.writtenFiles.get('file:///c/bigkept/images/one.png')).toBe('by hand');
+      });
     });
   });
 });

@@ -31,6 +31,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   at the file and its record again before writing it, leaving one that
   changed as it is. Cancelling a folder export while it writes stops before
   the next file.
+- **Exports hold at most 64 MiB of drawn images in memory.** Past that, an
+  image waits in a temporary file beside its target, is written only if that
+  file still holds it, and the file is deleted whether the export succeeds,
+  fails or is cancelled, or named in the Output panel if it cannot be. The
+  files already at the targets are no longer held in memory while the export
+  asks about them. A document or a folder of more than 1,000 named diagrams
+  is refused rather than exported in part; before, a folder of up to 2,000
+  was exported, and a document had no limit.
 
 ## [0.19.0] - 2026-11-01
 

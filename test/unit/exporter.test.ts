@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 
 import { findFileDiagrams, findPlantUmlBlocks } from '../../src/export/blocks';
+import { OUTPUT_BUFFER_LIMIT, OutputBuffer } from '../../src/export/buffer';
 import {
   addBackground,
   drawDocument,
@@ -58,10 +59,16 @@ function makeDeps(
   confirmReplace: ReturnType<typeof vi.fn>;
   toPng: ReturnType<typeof vi.fn>;
   record: ReturnType<typeof vi.fn>;
+  spool: ReturnType<typeof vi.fn>;
+  deleteSpool: ReturnType<typeof vi.fn>;
+  deleteFolder: ReturnType<typeof vi.fn>;
   ledger: ExportLedger;
+  disk: Map<string, string | Uint8Array>;
+  buffer: OutputBuffer;
 } {
   // The files already there, by path: read back before writing.
-  const disk = new Map(Object.entries(files ?? {}));
+  const disk = new Map<string, string | Uint8Array>(Object.entries(files ?? {}));
+  let spooled = 0;
   // What the export wrote, kept as the extension keeps it; and what an earlier version recorded.
   let stored: unknown = null;
   const ledger = new ExportLedger(
@@ -95,6 +102,23 @@ function makeDeps(
       disk.set(path, content);
       return Promise.resolve();
     }),
+    // A drawing past what is held in memory goes to a temporary file beside its own, named in turn.
+    spool: vi.fn((path: string, bytes: Uint8Array) => {
+      spooled += 1;
+      const file = `${path.slice(0, path.lastIndexOf('/'))}/.${path.slice(path.lastIndexOf('/') + 1)}.${String(spooled)}.tmp`;
+      disk.set(file, Uint8Array.from(bytes));
+      return Promise.resolve({ file, made: [] as string[] });
+    }),
+    readSpool: (file: string): Promise<Uint8Array | null> => {
+      const content = disk.get(file);
+      return Promise.resolve(content === undefined ? null : typeof content === 'string' ? new TextEncoder().encode(content) : content);
+    },
+    deleteSpool: vi.fn((file: string) => {
+      disk.delete(file);
+      return Promise.resolve();
+    }),
+    deleteFolder: vi.fn(() => Promise.resolve()),
+    disk,
     pngScale: (): number => 2,
     toPng: vi.fn((_svg: string, width: number, height: number) => Promise.resolve(pngOf(width, height))),
     // Mimics joining a document URI's folder with a relative path.
@@ -117,26 +141,42 @@ function makeDeps(
     sameFileMessage: 'same file',
     changedMessage: 'changed meanwhile',
     dirtyMessage: 'unsaved changes',
+    spoolChangedMessage: 'held copy changed',
     ...overrides,
   };
-  return deps as ExporterDeps & {
+  // What a test's draw and write calls share, as one export's.
+  return Object.assign(deps, { buffer: new OutputBuffer(deps as ExporterDeps) }) as ExporterDeps & {
     writeFile: ReturnType<typeof vi.fn>;
     render: ReturnType<typeof vi.fn>;
     confirmReplace: ReturnType<typeof vi.fn>;
     toPng: ReturnType<typeof vi.fn>;
     record: ReturnType<typeof vi.fn>;
+    spool: ReturnType<typeof vi.fn>;
+    deleteSpool: ReturnType<typeof vi.fn>;
+    deleteFolder: ReturnType<typeof vi.fn>;
     ledger: ExportLedger;
+    disk: Map<string, string | Uint8Array>;
+    buffer: OutputBuffer;
   };
 }
 
-/** What a document's named blocks are drawn as, planned as Export All plans them. */
+/** The temporary files drawings were held in, still there. */
+const heldFiles = (deps: { disk: Map<string, string | Uint8Array> }): string[] =>
+  [...deps.disk.keys()].filter((path) => path.endsWith('.tmp'));
+
+/** Text written as bytes, read back. */
+const textOf = (content: unknown): string =>
+  typeof content === 'string' ? content : new TextDecoder().decode(content as Uint8Array);
+
+/** What a document's named blocks are drawn as, planned as Export All plans them, held in `buffer`. */
 function drawMarkdown(
-  deps: ExporterDeps,
+  deps: ExporterDeps & { buffer: OutputBuffer },
   documentPath: string,
   text: string,
-  format: ExportFormat = 'svg'
+  format: ExportFormat = 'svg',
+  buffer: OutputBuffer = deps.buffer
 ): ReturnType<typeof drawDocument> {
-  return drawDocument(deps, planDocument(deps, documentPath, 'images', findPlantUmlBlocks(text), format));
+  return drawDocument(deps, buffer, planDocument(deps, documentPath, 'images', findPlantUmlBlocks(text), format));
 }
 
 const DOC = '/repo/docs/design.md';
@@ -262,6 +302,20 @@ describe('exportOne', () => {
     expect(deps.writeFile).toHaveBeenCalledOnce();
     const now = await deps.readExisting('/repo/docs/images/orders.svg');
     expect(new TextDecoder().decode(now!)).toBe('<svg>changed meanwhile</svg>');
+  });
+
+  it('leaves a file that changed to as many bytes while the question was open', async () => {
+    const deps = makeDeps({}, { '/repo/docs/images/orders.svg': '<svg>hand-made</svg>' });
+    deps.confirmReplace.mockImplementation(async () => {
+      await deps.writeFile('/repo/docs/images/orders.svg', '<svg>hand-mode</svg>', true);
+      return 'replace';
+    });
+    const [block] = findPlantUmlBlocks('```plantuml\nx\n```');
+
+    const result = await exportOne(deps, DOC, 'images', block!, 'orders');
+
+    expect(result).toEqual({ name: 'orders', path: null, error: 'changed meanwhile', cause: 'file' });
+    expect(textOf(deps.disk.get('/repo/docs/images/orders.svg'))).toBe('<svg>hand-mode</svg>');
   });
 
   it('writes a file that was removed while the question was open, as a new one', async () => {
@@ -915,7 +969,7 @@ describe('writeDocuments', () => {
       await drawMarkdown(deps, '/repo/b/doc.md', '```plantuml two\nb\n```'),
     ];
 
-    const outcome = await writeDocuments(deps, drawn);
+    const outcome = await writeDocuments(deps, deps.buffer, drawn);
 
     expect(deps.confirmReplace).toHaveBeenCalledOnce();
     expect(deps.confirmReplace).toHaveBeenCalledWith([asked('/repo/a/images/one.svg'), asked('/repo/b/images/two.svg')], true);
@@ -929,9 +983,9 @@ describe('writeDocuments', () => {
       planDocument(deps, '/repo/docs/a.md', 'images', findPlantUmlBlocks('```plantuml orders\na\n```\n\n```plantuml billing\nc\n```')),
       planDocument(deps, '/repo/docs/b.md', 'images', findPlantUmlBlocks('```plantuml Orders\nb\n```')),
     ]);
-    const drawn = [await drawDocument(deps, plans[0]!), await drawDocument(deps, plans[1]!)];
+    const drawn = [await drawDocument(deps, deps.buffer, plans[0]!), await drawDocument(deps, deps.buffer, plans[1]!)];
 
-    const outcome = await writeDocuments(deps, drawn);
+    const outcome = await writeDocuments(deps, deps.buffer, drawn);
 
     expect(outcome?.written.map((r) => r.path)).toEqual(['/repo/docs/images/billing.svg']);
     expect(outcome?.failed).toEqual([
@@ -947,7 +1001,7 @@ describe('writeDocuments', () => {
     const drawn = [await drawMarkdown(deps, DOC, '```plantuml one\na\n```\n\n```plantuml two\nb\n```\n\n```plantuml three\nc\n```')];
     let written = 0;
 
-    const outcome = await writeDocuments(deps, drawn, () => (written += 1) > 1);
+    const outcome = await writeDocuments(deps, deps.buffer, drawn, () => (written += 1) > 1);
 
     expect(outcome?.written.map((r) => r.name)).toEqual(['one']);
     expect(outcome?.stopped).toBe(2);
@@ -959,8 +1013,8 @@ describe('writeDocuments', () => {
     const unsaved = makeDeps({ record: vi.fn(() => Promise.resolve('not-saved' as const)) });
     const full = makeDeps({ record: vi.fn(() => Promise.resolve('full' as const)) });
 
-    const stopped = await writeDocuments(unsaved, [await drawMarkdown(unsaved, DOC, text)]);
-    const going = await writeDocuments(full, [await drawMarkdown(full, DOC, text)]);
+    const stopped = await writeDocuments(unsaved, unsaved.buffer, [await drawMarkdown(unsaved, DOC, text)]);
+    const going = await writeDocuments(full, full.buffer, [await drawMarkdown(full, DOC, text)]);
 
     expect(stopped?.untracked.map((r) => [r.name, r.untracked])).toEqual([['one', 'not-saved']]);
     expect(stopped?.written).toEqual([]);
@@ -979,12 +1033,148 @@ describe('writeDocuments', () => {
       await drawMarkdown(deps, '/repo/b/doc.md', '```plantuml two\nb\n```', 'png'),
     ];
 
-    const outcome = await writeDocuments(deps, drawn);
+    const outcome = await writeDocuments(deps, deps.buffer, drawn);
 
     expect(deps.toPng).toHaveBeenCalledTimes(2);
     expect(outcome?.written.map((r) => r.path)).toEqual(['/repo/a/images/one.png', '/repo/b/images/two.png']);
     expect(outcome?.unnamed).toBe(1);
     expect(deps.writeFile).toHaveBeenCalledWith('/repo/a/images/one.png', pngOf(60, 40), false);
+  });
+});
+
+describe('holding what is drawn', () => {
+  const THREE = '```plantuml one\na\n```\n\n```plantuml two\nb\n```\n\n```plantuml three\nc\n```';
+  /** What a block of `source` is written as. */
+  const svgOf = (source: string): string => `<svg><rect width="100%" height="100%" fill="#FFFFFF"/>${source}</svg>`;
+
+  it('holds drawings past the limit in files beside their own, writes them from there, and deletes those files', async () => {
+    const deps = makeDeps();
+    // Room for one drawing of the three.
+    const buffer = new OutputBuffer(deps, svgOf('a').length + 1);
+
+    const outcome = await writeDocuments(deps, buffer, [await drawMarkdown(deps, DOC, THREE, 'svg', buffer)]);
+
+    expect(deps.spool.mock.calls.map(([path]) => path as string)).toEqual(['/repo/docs/images/two.svg', '/repo/docs/images/three.svg']);
+    expect(outcome?.written.map((r) => r.name)).toEqual(['one', 'two', 'three']);
+    expect(deps.writeFile.mock.calls.map(([path, content]) => [path as string, textOf(content)])).toEqual([
+      ['/repo/docs/images/one.svg', svgOf('a')],
+      ['/repo/docs/images/two.svg', svgOf('b')],
+      ['/repo/docs/images/three.svg', svgOf('c')],
+    ]);
+    // Each recorded as what was written, wherever it waited.
+    expect(deps.ledger.ownerOf('/repo/docs/images/three.svg')?.sha256).toBe(sha256(new TextEncoder().encode(svgOf('c'))));
+    expect(deps.deleteSpool).toHaveBeenCalledTimes(2);
+    expect(heldFiles(deps)).toEqual([]);
+  });
+
+  it('writes nothing from a file changed or gone while it waited, and writes the rest', async () => {
+    const deps = makeDeps();
+    const buffer = new OutputBuffer(deps, svgOf('a').length + 1);
+    const drawn = await drawMarkdown(deps, DOC, THREE, 'svg', buffer);
+    const [two, three] = heldFiles(deps);
+    deps.disk.set(two!, new TextEncoder().encode(svgOf('B')));
+    deps.disk.delete(three!);
+
+    const outcome = await writeDocuments(deps, buffer, [drawn]);
+
+    expect(outcome?.written.map((r) => r.name)).toEqual(['one']);
+    expect(outcome?.failed).toEqual([
+      { name: 'two', path: null, error: 'held copy changed', cause: 'file' },
+      { name: 'three', path: null, error: 'held copy changed', cause: 'file' },
+    ]);
+    expect(deps.writeFile).toHaveBeenCalledOnce();
+    expect(deps.disk.has('/repo/docs/images/two.svg')).toBe(false);
+  });
+
+  it('deletes what it held in files when replacing is declined, and writes nothing', async () => {
+    const deps = makeDeps({}, { '/repo/docs/images/one.svg': 'by hand' });
+    const buffer = new OutputBuffer(deps, svgOf('a').length + 1);
+    const drawn = await drawMarkdown(deps, DOC, THREE, 'svg', buffer);
+    expect(heldFiles(deps)).toHaveLength(2);
+
+    const outcome = await writeDocuments(deps, buffer, [drawn]);
+    await buffer.dispose();
+
+    expect(outcome).toBeNull();
+    expect(deps.writeFile).not.toHaveBeenCalled();
+    expect(heldFiles(deps)).toEqual([]);
+    expect(deps.disk.get('/repo/docs/images/one.svg')).toBe('by hand');
+  });
+
+  it('deletes the file of each drawing it does not write as it goes: kept, up to date, refused or stopped', async () => {
+    const deps = makeDeps(
+      { confirmReplace: vi.fn(() => Promise.resolve('keep' as const)), isDirty: (path: string) => path.endsWith('/four.svg') },
+      { '/repo/docs/images/two.svg': 'by hand', '/repo/docs/images/three.svg': svgOf('c') }
+    );
+    const buffer = new OutputBuffer(deps, 0);
+    const drawn = await drawMarkdown(deps, DOC, `${THREE}\n\n\`\`\`plantuml four\nd\n\`\`\`\n\n\`\`\`plantuml five\ne\n\`\`\``, 'svg', buffer);
+    expect(heldFiles(deps)).toHaveLength(5);
+    let turns = 0;
+
+    const outcome = await writeDocuments(deps, buffer, [drawn], () => (turns += 1) > 1);
+
+    expect(outcome).toMatchObject({ kept: 1, stopped: 1 });
+    expect(outcome?.written.map((r) => r.name)).toEqual(['one']);
+    expect(outcome?.unchanged.map((r) => r.name)).toEqual(['three']);
+    expect(outcome?.failed.map((r) => [r.name, r.error])).toEqual([['four', 'unsaved changes']]);
+    // Before the export lets go of what is left.
+    expect(heldFiles(deps)).toEqual([]);
+  });
+
+  it('fails a drawing it cannot hold, and draws the rest', async () => {
+    const deps = makeDeps({
+      spool: vi.fn((path: string) =>
+        path.endsWith('/two.svg') ? Promise.reject(new Error('EACCES')) : Promise.resolve({ file: `${path}.held`, made: [] })
+      ),
+    });
+    const buffer = new OutputBuffer(deps, svgOf('a').length + 1);
+
+    const drawn = await drawMarkdown(deps, DOC, THREE, 'svg', buffer);
+
+    expect(drawn.drawings.map((drawing) => drawing.name)).toEqual(['one', 'three']);
+    expect(drawn.failed).toEqual([{ name: 'two', path: null, error: 'EACCES', cause: 'file' }]);
+  });
+
+  it('lets go of what it holds however Export All and Export Diagram end', async () => {
+    const dispose = vi.spyOn(OutputBuffer.prototype, 'dispose');
+    try {
+      const [block] = findPlantUmlBlocks('```plantuml one\na\n```');
+      // Declined.
+      const declined = makeDeps({}, { '/repo/docs/images/one.svg': 'by hand' });
+      expect(await exportMarkdown(declined, DOC, 'images', THREE)).toBeNull();
+      expect(await exportOne(declined, DOC, 'images', block!, 'one')).toBeNull();
+      // The question failing.
+      const failing = makeDeps({ confirmReplace: vi.fn(() => Promise.reject(new Error('gone'))) }, { '/repo/docs/images/one.svg': 'by hand' });
+      await expect(exportMarkdown(failing, DOC, 'images', THREE)).rejects.toThrow('gone');
+      await expect(exportOne(failing, DOC, 'images', block!, 'one')).rejects.toThrow('gone');
+
+      expect(dispose).toHaveBeenCalledTimes(4);
+    } finally {
+      dispose.mockRestore();
+    }
+  });
+
+  // Drawing past the limit takes seconds under coverage.
+  const LARGE = { timeout: 30_000 };
+
+  it(`holds at most ${String(OUTPUT_BUFFER_LIMIT / 1024 / 1024)} MiB of drawings in memory, and Export Diagram its one drawing`, LARGE, async () => {
+    // Four drawings of 17 MiB: the fourth would take the total past 64 MiB.
+    const large = (source: string): string => `<svg>${source.repeat(17 * 1024 * 1024)}</svg>`;
+    const deps = makeDeps({ render: vi.fn((source: string) => Promise.resolve(rendered(large(source)))) });
+    const document = ['a', 'b', 'c', 'd'].map((source, index) => `\`\`\`plantuml d${String(index)}\n${source}\n\`\`\``).join('\n\n');
+
+    const outcome = await exportMarkdown(deps, DOC, 'images', document);
+
+    expect(deps.spool.mock.calls.map(([path]) => path as string)).toEqual(['/repo/docs/images/d3.svg']);
+    expect(outcome?.written).toHaveLength(4);
+    expect(sha256(deps.disk.get('/repo/docs/images/d3.svg') as Uint8Array)).toBe(
+      sha256(new TextEncoder().encode(addBackground(large('d'), false)))
+    );
+    expect(heldFiles(deps)).toEqual([]);
+
+    const [block] = findPlantUmlBlocks('```plantuml one\ne\n```');
+    expect((await exportOne(deps, DOC, 'images', block!, 'one'))?.error).toBeNull();
+    expect(deps.spool).toHaveBeenCalledOnce();
   });
 });
 

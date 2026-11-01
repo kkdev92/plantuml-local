@@ -56,7 +56,9 @@ import {
   isValidBlockName,
   type PlantUmlBlock,
 } from './export/blocks';
+import { OutputBuffer } from './export/buffer';
 import {
+  MAX_BULK_DIAGRAMS,
   PNG_SCALES,
   drawDocument,
   exportAll,
@@ -1380,6 +1382,7 @@ function exporterDeps(
     sameFileMessage: context.l10n.t('Multiple diagrams would be saved to the same file. Give each diagram a unique name or use separate export folders.'),
     changedMessage: context.l10n.t('The image file changed during export, so it was not overwritten. Check it, then export again.'),
     dirtyMessage: context.l10n.t('The image file is open with unsaved changes, so it was not overwritten. Save or revert it, then export again.'),
+    spoolChangedMessage: context.l10n.t('The temporary copy of the image changed during export, so it was not written. Export again.'),
     toPng: (svg, width, height, background) => drawPng(context.l10n, svg, width, height, background),
     resolve: (documentPath, relative) =>
       vscode.Uri.joinPath(vscode.Uri.parse(documentPath), '..', relative).toString(),
@@ -1434,7 +1437,92 @@ function exporterDeps(
         throw error;
       }
     },
+    // Past what an export holds in memory (src/export/buffer.ts), a drawing
+    // waits in a temporary file in the folder its file goes to, made when
+    // there is none, as writing the file would make it.
+    spool: async (path, bytes): Promise<{ file: string; made: string[] }> => {
+      const target = vscode.Uri.parse(path);
+      const folder = vscode.Uri.joinPath(target, '..');
+      const name = target.path.slice(target.path.lastIndexOf('/') + 1);
+      const file = vscode.Uri.joinPath(folder, `.${name}.${randomBytes(4).toString('hex')}.tmp`);
+      const made = await foldersMissing(folder);
+      try {
+        await vscode.workspace.fs.createDirectory(folder);
+        await vscode.workspace.fs.writeFile(file, bytes);
+      } catch (error: unknown) {
+        await Promise.resolve(vscode.workspace.fs.delete(file)).catch(() => undefined);
+        for (const madeFolder of [...made].reverse()) {
+          await deleteEmptyFolder(madeFolder);
+        }
+        throw error;
+      }
+      return { file: file.toString(), made: made.map((uri) => uri.toString()) };
+    },
+    readSpool: async (file): Promise<Uint8Array | null> => {
+      try {
+        return await vscode.workspace.fs.readFile(vscode.Uri.parse(file));
+      } catch (error: unknown) {
+        if (error instanceof vscode.FileSystemError && error.code === 'FileNotFound') {
+          return null;
+        }
+        throw error;
+      }
+    },
+    deleteSpool: async (file): Promise<void> => {
+      const uri = vscode.Uri.parse(file);
+      try {
+        await vscode.workspace.fs.delete(uri, { recursive: false });
+      } catch (error: unknown) {
+        if (!(error instanceof vscode.FileSystemError && error.code === 'FileNotFound')) {
+          context.logger.warn(
+            context.l10n.t(
+              'Could not delete {0}, a temporary file of the export. You can delete it. Details: {1}',
+              workspace.relativePath(uri),
+              error instanceof Error ? error.message : String(error)
+            )
+          );
+        }
+      }
+    },
+    deleteFolder: (folder) => deleteEmptyFolder(vscode.Uri.parse(folder)),
   };
+}
+
+/**
+ * The folders to make for `folder` to be there, outermost first: none when
+ * it is there already.
+ */
+async function foldersMissing(folder: vscode.Uri): Promise<vscode.Uri[]> {
+  const missing: vscode.Uri[] = [];
+  let at = folder;
+  for (;;) {
+    try {
+      await vscode.workspace.fs.stat(at);
+      return missing;
+    } catch (error: unknown) {
+      if (!(error instanceof vscode.FileSystemError && error.code === 'FileNotFound')) {
+        throw error;
+      }
+    }
+    missing.unshift(at);
+    const parent = vscode.Uri.joinPath(at, '..');
+    if (parent.toString() === at.toString()) {
+      return missing;
+    }
+    at = parent;
+  }
+}
+
+/** Deletes `folder` when it is empty, and leaves it otherwise. Never rejects. */
+async function deleteEmptyFolder(folder: vscode.Uri): Promise<void> {
+  try {
+    if ((await vscode.workspace.fs.readDirectory(folder)).length === 0) {
+      // VS Code refuses to delete a folder that is not empty without `recursive`.
+      await vscode.workspace.fs.delete(folder, { recursive: false });
+    }
+  } catch {
+    // Gone already, or filled meanwhile: either way, not this export's to delete.
+  }
 }
 
 /**
@@ -1515,9 +1603,10 @@ function untrackedMessage(l10n: L10n, result: ExportResult): string {
 
 /**
  * The bulk export with progress, shared by both Export All commands. Null
- * when replacing existing files is declined.
+ * when replacing existing files is declined, and after saying so when the
+ * document has more named diagrams than are exported at once.
  */
-function runBulkExport(
+async function runBulkExport(
   context: OperationContext,
   renderer: RendererClient,
   palettes: ThemePalettes,
@@ -1527,12 +1616,24 @@ function runBulkExport(
   document: ActiveDocument,
   directory: string
 ): Promise<ExportOutcome | null> {
+  const blocks = diagramsOf(document.textDocument, document.text);
+  // Part of a document is never exported as if it were the whole.
+  if (blocks.filter((block) => block.name !== null).length > MAX_BULK_DIAGRAMS) {
+    void context.notify.warn(
+      context.l10n.t(
+        '{0} has more than {1} named diagrams, too many to export at once. Export them one at a time instead.',
+        workspace.relativePath(document.textDocument.uri),
+        String(MAX_BULK_DIAGRAMS)
+      )
+    );
+    return null;
+  }
   return context.progress.run({ title: context.l10n.t('Exporting diagrams…') }, (report) =>
     exportAll(
       exporterDeps(context, renderer, palettes, settings, exports, workspace, document.textDocument.uri),
       document.path,
       directory,
-      diagramsOf(document.textDocument, document.text),
+      blocks,
       (done, total, name) => {
         report.report({
           message: `${name} (${String(done + 1)}/${String(total)})`,
@@ -1705,9 +1806,6 @@ async function showOutput(context: OperationContext): Promise<void> {
     await context.commands.execute('workbench.action.showOutputChannels');
   }
 }
-
-/** The most named diagrams exported from one folder. */
-const MAX_FOLDER_DIAGRAMS = 2000;
 
 /** A document of a folder export, and its diagrams. */
 interface FolderSource {
@@ -2820,14 +2918,14 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         return;
       }
       const named = sources.reduce((sum, source) => sum + source.blocks.filter((block) => block.name !== null).length, 0);
-      if (named > MAX_FOLDER_DIAGRAMS) {
+      if (named > MAX_BULK_DIAGRAMS) {
         void notifyWith(
           context,
           'warn',
           context.l10n.t(
             '{0} has more than {1} named diagrams, too many to export at once. Choose a smaller folder.',
             where,
-            String(MAX_FOLDER_DIAGRAMS)
+            String(MAX_BULK_DIAGRAMS)
           ),
           [chooseFolder]
         );
@@ -2890,37 +2988,45 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
             }))
           );
           const drawn: DrawnDocument[] = [];
-          // One panel draws every PNG: opened at the first, closed after the last.
-          const pngs = lazyPngPanel(context.l10n, context.l10n.t('Creating PNG images…'));
+          // What is drawn waits here until it is written, and what is not
+          // written is let go of however the export ends.
+          const buffer = new OutputBuffer(deps);
           try {
-            for (const [index, plan] of plans.entries()) {
-              if (signal.aborted) {
-                return undefined;
+            // One panel draws every PNG: opened at the first, closed after the last.
+            const pngs = lazyPngPanel(context.l10n, context.l10n.t('Creating PNG images…'));
+            try {
+              for (const [index, plan] of plans.entries()) {
+                if (signal.aborted) {
+                  return undefined;
+                }
+                const document = workspace.relativePath(plan.uri);
+                report.report({
+                  message: `${document} (${String(index + 1)}/${String(plans.length)})`,
+                  increment: 100 / plans.length,
+                });
+                const documentDeps = exporterDeps(context, renderer, palettes, settings, exports, workspace, plan.uri);
+                const result = await drawDocument(
+                  { ...documentDeps, toPng: (svg, width, height, background) => pngs.draw(svg, width, height, background) },
+                  buffer,
+                  plan
+                );
+                // Several documents are exported, so each failure names its own.
+                drawn.push({
+                  ...result,
+                  failed: result.failed.map((failure) => ({ ...failure, name: `${document}: ${failure.name}` })),
+                });
               }
-              const document = workspace.relativePath(plan.uri);
-              report.report({
-                message: `${document} (${String(index + 1)}/${String(plans.length)})`,
-                increment: 100 / plans.length,
-              });
-              const documentDeps = exporterDeps(context, renderer, palettes, settings, exports, workspace, plan.uri);
-              const result = await drawDocument(
-                { ...documentDeps, toPng: (svg, width, height, background) => pngs.draw(svg, width, height, background) },
-                plan
-              );
-              // Several documents are exported, so each failure names its own.
-              drawn.push({
-                ...result,
-                failed: result.failed.map((failure) => ({ ...failure, name: `${document}: ${failure.name}` })),
-              });
+            } finally {
+              pngs.dispose();
             }
+            // Nothing is written once cancelled before writing, and nothing more once cancelled during it.
+            if (signal.aborted) {
+              return undefined;
+            }
+            return await writeDocuments(deps, buffer, drawn, () => signal.aborted);
           } finally {
-            pngs.dispose();
+            await buffer.dispose();
           }
-          // Nothing is written once cancelled before writing, and nothing more once cancelled during it.
-          if (signal.aborted) {
-            return undefined;
-          }
-          return writeDocuments(deps, drawn, () => signal.aborted);
         }
       );
       if (outcome === undefined || outcome === null) {

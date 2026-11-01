@@ -6,8 +6,8 @@ import { withIncludeReason } from '../includes/describe';
 import { recognizeEngineError } from '../render/engine-error';
 import { drawReadable } from '../render/palette';
 import { isValidBlockName, type PlantUmlBlock } from './blocks';
+import { digestOf, OutputBuffer, sameDigest, type Digest, type Held, type SpoolDeps } from './buffer';
 import { artifactKey, sameKey, type ArtifactKey, type ArtifactRecord, type RecordResult } from './history';
-import { sha256 } from './ownership';
 
 /**
  * Renders diagrams to SVG files next to the document, or one to a PNG.
@@ -24,7 +24,7 @@ import { sha256 } from './ownership';
  * {@link ExporterDeps} — so the whole flow is unit-testable.
  */
 
-export interface ExporterDeps {
+export interface ExporterDeps extends SpoolDeps {
   errorMessage(message: string): string;
   /**
    * Renders PlantUML source to sanitised SVG (the worker round-trip), its
@@ -130,6 +130,8 @@ export interface ExporterDeps {
   changedMessage: string;
   /** Localised reason given for a file open with unsaved changes. */
   dirtyMessage: string;
+  /** Localised reason given for a drawing whose file, held until its turn, changed meanwhile (src/export/buffer.ts). */
+  spoolChangedMessage: string;
 }
 
 /** A file the export asks before replacing. */
@@ -182,6 +184,9 @@ export const PNG_SCALES = [1, 2, 4] as const;
 
 /** The most SVG text that is copied to the clipboard, in UTF-8 bytes. */
 export const SVG_TEXT_LIMIT = 32 * 1024 * 1024;
+
+/** The most named diagrams exported at once, from a document or a folder. */
+export const MAX_BULK_DIAGRAMS = 1000;
 
 /** One diagram's outcome. */
 export interface ExportResult {
@@ -237,8 +242,8 @@ export interface ExportOutcome {
   stopped: number;
 }
 
-/** A diagram rendered and ready to write: the SVG's text, or a PNG. */
-export interface Drawing {
+/** A diagram rendered: the SVG's text, or a PNG. */
+interface Drawn {
   name: string;
   path: string;
   /** The document the diagram is exported from. */
@@ -248,6 +253,11 @@ export interface Drawing {
   content: string | Uint8Array;
   /** Notation the engine drew the diagram without, said in the export's report. */
   notes?: string[];
+}
+
+/** A diagram rendered and ready to write, its content held by the export's {@link OutputBuffer}. */
+export interface Drawing extends Omit<Drawn, 'content'> {
+  content: Held;
 }
 
 /** A diagram planned for export, before anything is drawn: the file it goes to, and what it is recorded as. */
@@ -302,12 +312,6 @@ export function isPngOfSize(png: Uint8Array, width: number, height: number): boo
 /** The content as it would be written: text as UTF-8. */
 function bytesOf(content: string | Uint8Array): Uint8Array {
   return typeof content === 'string' ? new TextEncoder().encode(content) : content;
-}
-
-/** Whether a file holds `content` already. */
-function holds(existing: Uint8Array, content: string | Uint8Array): boolean {
-  const bytes = bytesOf(content);
-  return existing.byteLength === bytes.byteLength && existing.every((byte, index) => byte === bytes[index]);
 }
 
 /**
@@ -469,17 +473,37 @@ function planDiagram(
 }
 
 /**
- * Renders one planned diagram, or says why it cannot be exported.
+ * Renders one planned diagram, and holds what it drew in `buffer` until it
+ * is written; or says why it cannot be exported.
  *
  * Renders are serialised inside the worker, so calling this in a loop is
  * already sequential; there is nothing to gain from firing them at once.
  */
 async function drawBlock(
   deps: ExporterDeps,
+  buffer: OutputBuffer,
+  documentPath: string,
+  planned: PlannedDiagram,
+  format: ExportFormat
+): Promise<Drawing | ExportResult> {
+  const drawn = await renderPlanned(deps, documentPath, planned, format);
+  if (!('content' in drawn)) {
+    return drawn;
+  }
+  try {
+    return { ...drawn, content: await buffer.hold(drawn.path, drawn.content) };
+  } catch (error: unknown) {
+    return { name: drawn.name, path: null, error: messageOf(error), cause: 'file' };
+  }
+}
+
+/** Renders one planned diagram, or says why it cannot be exported. */
+async function renderPlanned(
+  deps: ExporterDeps,
   documentPath: string,
   { block, name, path, key }: PlannedDiagram,
   format: ExportFormat
-): Promise<Drawing | ExportResult> {
+): Promise<Drawn | ExportResult> {
   if (!isValidBlockName(name)) {
     return { name, path: null, error: deps.invalidNameMessage, cause: 'source' };
   }
@@ -543,8 +567,8 @@ export async function prepareSvg(deps: DrawingDeps, block: PlantUmlBlock): Promi
 /** A file a drawing goes to, looked at before any is written. */
 interface Checked {
   drawing: Drawing;
-  /** The file's bytes, or null when there was none. */
-  existing: Uint8Array | null;
+  /** The digest of the file's bytes, or null when there was none: the bytes themselves are not kept. */
+  existing: Digest | null;
   /** The file's record. */
   owner: ArtifactRecord | null;
   /**
@@ -558,8 +582,8 @@ interface Checked {
 }
 
 /** Whether `existing` is the drawing's diagram's own export, as `owner` records it, unchanged since. */
-function isOwn(drawing: Drawing, owner: ArtifactRecord | null, existing: Uint8Array): boolean {
-  return drawing.key !== null && owner !== null && sameKey(owner.key, drawing.key) && owner.sha256 === sha256(existing);
+function isOwn(drawing: Drawing, owner: ArtifactRecord | null, existing: Digest): boolean {
+  return drawing.key !== null && owner !== null && sameKey(owner.key, drawing.key) && owner.sha256 === existing.sha256;
 }
 
 /** Whether two records, or the lack of one, say the same. */
@@ -573,18 +597,22 @@ async function check(deps: ExporterDeps, drawing: Drawing): Promise<Checked | Ex
     if (deps.isDirty(drawing.path)) {
       return { name: drawing.name, path: null, error: deps.dirtyMessage, cause: 'file' };
     }
-    const existing = await deps.readExisting(drawing.path);
+    const bytes = await deps.readExisting(drawing.path);
     const owner = deps.ownerOf(drawing.path);
+    if (bytes === null) {
+      return { drawing, existing: null, owner, action: 'write', byEarlierVersion: false };
+    }
+    const existing = digestOf(bytes);
     const looked = { drawing, existing, owner, byEarlierVersion: false };
-    if (existing !== null && holds(existing, drawing.content)) {
+    if (sameDigest(existing, drawing.content)) {
       return { ...looked, action: 'unchanged' };
     }
-    if (existing === null || isOwn(drawing, owner, existing)) {
+    if (isOwn(drawing, owner, existing)) {
       return { ...looked, action: 'write' };
     }
     // A file recorded as another diagram's export is that diagram's,
     // whatever an earlier version recorded.
-    return { ...looked, action: 'ask', byEarlierVersion: owner === null && deps.wroteBefore(drawing.path, drawing.document, existing) };
+    return { ...looked, action: 'ask', byEarlierVersion: owner === null && deps.wroteBefore(drawing.path, drawing.document, bytes) };
   } catch (error: unknown) {
     return { name: drawing.name, path: null, error: messageOf(error), cause: 'file' };
   }
@@ -598,20 +626,25 @@ type Committed = { written: true; recorded: RecordResult | null } | { written: f
  * file, if the file is as it was looked at: the same bytes, the same
  * record, no unsaved changes. A file that changed since, while a question
  * was open say, is no longer the one the answer was about, and is left as
- * it is. A file removed since is written as a new one.
+ * it is. A file removed since is written as a new one. A drawing held in a
+ * file of its own until now is written only if that file still holds it.
  */
-function commit(deps: ExporterDeps, { drawing, existing, owner }: Checked): Promise<Committed> {
+function commit(deps: ExporterDeps, buffer: OutputBuffer, { drawing, existing, owner }: Checked): Promise<Committed> {
   return deps.lock(drawing.path, async (): Promise<Committed> => {
     if (deps.isDirty(drawing.path)) {
       return { written: false, error: deps.dirtyMessage };
     }
     const now = await deps.readExisting(drawing.path);
-    const changed = existing === null ? now !== null : now !== null && !holds(now, existing);
+    const changed = existing === null ? now !== null : now !== null && !sameDigest(digestOf(now), existing);
     if (changed || !sameRecord(deps.ownerOf(drawing.path), owner)) {
       return { written: false, error: deps.changedMessage };
     }
-    await deps.writeFile(drawing.path, drawing.content, now !== null);
-    const recorded = drawing.key === null ? null : await deps.record(drawing.key, drawing.path, bytesOf(drawing.content));
+    const content = await buffer.read(drawing.content);
+    if (content === null) {
+      return { written: false, error: deps.spoolChangedMessage };
+    }
+    await deps.writeFile(drawing.path, content, now !== null);
+    const recorded = drawing.key === null ? null : await deps.record(drawing.key, drawing.path, bytesOf(content));
     return { written: true, recorded };
   });
 }
@@ -625,10 +658,12 @@ function commit(deps: ExporterDeps, { drawing, existing, owner }: Checked): Prom
  * one exported for another diagram — the export asks once for all of them.
  * A file open with unsaved changes is not written at all. Writing stops
  * part way once `stop` says so, or once what was written cannot be
- * recorded. Null when the replacement is declined outright.
+ * recorded. Each drawing is let go of from `buffer` once its turn is over.
+ * Null when the replacement is declined outright.
  */
 async function writeDrawings(
   deps: ExporterDeps,
+  buffer: OutputBuffer,
   drawings: readonly Drawing[],
   stop?: () => boolean
 ): Promise<Omit<ExportOutcome, 'unnamed'> | null> {
@@ -640,6 +675,7 @@ async function writeDrawings(
       checked.push(looked);
     } else {
       failed.push(looked);
+      await buffer.release(drawing.content);
     }
   }
 
@@ -674,7 +710,7 @@ async function writeDrawings(
       outcome.stopped += 1;
     } else {
       try {
-        const committed = await commit(deps, entry);
+        const committed = await commit(deps, buffer, entry);
         if (!committed.written) {
           failed.push({ name: drawing.name, path: null, error: committed.error, cause: 'file' });
         } else if (committed.recorded === null || committed.recorded === 'recorded') {
@@ -688,6 +724,7 @@ async function writeDrawings(
         failed.push({ name: drawing.name, path: null, error: messageOf(error), cause: 'file' });
       }
     }
+    await buffer.release(drawing.content);
   }
   return outcome;
 }
@@ -722,15 +759,20 @@ export async function exportOne(
   if (shared) {
     return { name, path: null, error: deps.sameFileMessage, cause: 'source' };
   }
-  const drawing = await drawBlock(deps, documentPath, planned, format);
-  if (!('content' in drawing)) {
-    return drawing;
+  const buffer = new OutputBuffer(deps);
+  try {
+    const drawing = await drawBlock(deps, buffer, documentPath, planned, format);
+    if (!('content' in drawing)) {
+      return drawing;
+    }
+    const outcome = await writeDrawings(deps, buffer, [drawing]);
+    if (outcome === null || outcome.kept > 0) {
+      return null;
+    }
+    return outcome.written[0] ?? outcome.unchanged[0] ?? outcome.untracked[0] ?? outcome.failed[0] ?? null;
+  } finally {
+    await buffer.dispose();
   }
-  const outcome = await writeDrawings(deps, [drawing]);
-  if (outcome === null || outcome.kept > 0) {
-    return null;
-  }
-  return outcome.written[0] ?? outcome.unchanged[0] ?? outcome.untracked[0] ?? outcome.failed[0] ?? null;
 }
 
 /** A document's named blocks, planned for export before anything is drawn. */
@@ -816,9 +858,13 @@ export interface DrawnDocument {
   unnamed: number;
 }
 
-/** Draws what {@link planDocument} planned for a document. */
+/**
+ * Draws what {@link planDocument} planned for a document, holding the
+ * drawings in `buffer`, which the export lets go of once it ends.
+ */
 export async function drawDocument(
   deps: ExporterDeps,
+  buffer: OutputBuffer,
   plan: PlannedDocument,
   onProgress?: (done: number, total: number, name: string) => void
 ): Promise<DrawnDocument> {
@@ -826,7 +872,7 @@ export async function drawDocument(
   const failed: ExportResult[] = [...plan.failed];
   for (const [index, diagram] of plan.diagrams.entries()) {
     onProgress?.(index, plan.diagrams.length, diagram.name);
-    const drawing = await drawBlock(deps, plan.document, diagram, plan.format);
+    const drawing = await drawBlock(deps, buffer, plan.document, diagram, plan.format);
     if ('content' in drawing) {
       drawings.push(drawing);
     } else {
@@ -837,18 +883,20 @@ export async function drawDocument(
 }
 
 /**
- * Writes what {@link drawDocument} drew, of one document or several, asking
- * once before replacing files. `stop` is asked before each file is written,
- * and ends the export part way. Null when replacing the files already there
- * is declined, in which case nothing is written.
+ * Writes what {@link drawDocument} drew into `buffer`, of one document or
+ * several, asking once before replacing files. `stop` is asked before each
+ * file is written, and ends the export part way. Null when replacing the
+ * files already there is declined, in which case nothing is written.
  */
 export async function writeDocuments(
   deps: ExporterDeps,
+  buffer: OutputBuffer,
   documents: readonly DrawnDocument[],
   stop?: () => boolean
 ): Promise<ExportOutcome | null> {
   const outcome = await writeDrawings(
     deps,
+    buffer,
     documents.flatMap((document) => document.drawings),
     stop
   );
@@ -874,9 +922,14 @@ export async function exportAll(
   blocks: readonly PlantUmlBlock[],
   onProgress?: (done: number, total: number, name: string) => void
 ): Promise<ExportOutcome | null> {
-  const drawn: DrawnDocument[] = [];
-  for (const plan of refuseSharedFiles(deps, [planDocument(deps, documentPath, directory, blocks)])) {
-    drawn.push(await drawDocument(deps, plan, onProgress));
+  const buffer = new OutputBuffer(deps);
+  try {
+    const drawn: DrawnDocument[] = [];
+    for (const plan of refuseSharedFiles(deps, [planDocument(deps, documentPath, directory, blocks)])) {
+      drawn.push(await drawDocument(deps, buffer, plan, onProgress));
+    }
+    return await writeDocuments(deps, buffer, drawn);
+  } finally {
+    await buffer.dispose();
   }
-  return writeDocuments(deps, drawn);
 }
