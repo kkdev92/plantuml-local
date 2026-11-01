@@ -8,6 +8,7 @@ import { drawReadable } from '../render/palette';
 import { isValidBlockName, type PlantUmlBlock } from './blocks';
 import { digestOf, OutputBuffer, sameDigest, type Digest, type Held, type SpoolDeps } from './buffer';
 import { artifactKey, sameKey, type ArtifactKey, type ArtifactRecord, type RecordResult } from './history';
+import { canonicalJson, inputManifest, type InputManifest, type RendererIdentity } from './manifest';
 
 /**
  * Renders diagrams to SVG files next to the document, or one to a PNG.
@@ -60,10 +61,17 @@ export interface ExporterDeps extends SpoolDeps {
   isDirty(path: string): boolean;
   /**
    * Records that `content` was written to `path` for the diagram `key`
-   * names, so that exporting it again replaces the file without asking.
-   * Never rejects: what became of the record is the answer.
+   * names, drawn from `input` when that is known, so that exporting it
+   * again replaces the file without asking. Never rejects: what became of
+   * the record is the answer.
    */
-  record(key: ArtifactKey, path: string, content: Uint8Array): Promise<RecordResult>;
+  record(key: ArtifactKey, path: string, content: Uint8Array, input?: InputManifest): Promise<RecordResult>;
+  /**
+   * The renderer as it ships, for the record of what an image was drawn
+   * from (src/export/manifest.ts); null when it cannot be told, and the
+   * image is recorded without.
+   */
+  rendererIdentity(): Promise<RendererIdentity | null>;
   /** Runs `task` once no other export in this window is writing the file at `path`. */
   lock<T>(path: string, task: () => Promise<T>): Promise<T>;
   /**
@@ -253,6 +261,8 @@ interface Drawn {
   content: string | Uint8Array;
   /** Notation the engine drew the diagram without, said in the export's report. */
   notes?: string[];
+  /** What it was drawn from, recorded with the file. */
+  input?: InputManifest;
 }
 
 /** A diagram rendered and ready to write, its content held by the export's {@link OutputBuffer}. */
@@ -348,15 +358,25 @@ function notationNotes(deps: DrawingDeps, source: string): string[] {
   return unsupportedKinds(source).map((kind) => notationLabel(kind, labels));
 }
 
+/** A block drawn as it is exported. */
+interface Rendered {
+  /** The SVG, its background baked in. */
+  svg: string;
+  /** Whether it is drawn in the dark palette. */
+  dark: boolean;
+  /** Whether the dark palette was asked for. */
+  asked: boolean;
+  /** The drawing the SVG was made from. */
+  drawing: DiagramRender;
+  /** What the engine was given. */
+  render: string;
+}
+
 /**
  * Renders a block as it is exported, in the export palette with its
  * background baked in, or says why it cannot be exported.
  */
-async function renderBlock(
-  deps: DrawingDeps,
-  block: PlantUmlBlock,
-  name: string
-): Promise<{ svg: string; dark: boolean } | ExportResult> {
+async function renderBlock(deps: DrawingDeps, block: PlantUmlBlock, name: string): Promise<Rendered | ExportResult> {
   // The preview refuses these before the engine sees them; export has to
   // refuse them too, or the same block that shows an explanation on screen
   // would write out the engine's "cannot include" error diagram instead.
@@ -376,9 +396,10 @@ async function renderBlock(
   }
 
   try {
+    const asked = deps.isDark();
     const drawn = await drawReadable(
       shape.source,
-      deps.isDark(),
+      asked,
       (source, palette, included) => deps.resolvePalette(source, palette, included),
       (palette) => deps.render(shape.source, palette)
     );
@@ -404,7 +425,7 @@ async function renderBlock(
       };
     }
 
-    return { svg: addBackground(rendered, dark), dark };
+    return { svg: addBackground(rendered, dark), dark, asked, drawing: drawn.result, render: shape.source };
   } catch (error: unknown) {
     const message = messageOf(error);
     return {
@@ -417,16 +438,15 @@ async function renderBlock(
 }
 
 /**
- * What a PNG of `svg` is drawn from: the scale asked for, without the
- * screen's own pixel ratio, refused rather than shrunk or cut when it
- * would be too large.
+ * What a PNG of `svg` is drawn from at `scale`, without the screen's own
+ * pixel ratio, refused rather than shrunk or cut when it would be too
+ * large.
  */
-function pngSource(deps: DrawingDeps, name: string, svg: string, dark: boolean): PngSource | ExportResult {
+function pngSource(deps: DrawingDeps, name: string, svg: string, dark: boolean, scale: number): PngSource | ExportResult {
   const size = svgSize(svg);
   if (size === null) {
     return { name, path: null, error: deps.pngFailedMessage, cause: 'png' };
   }
-  const scale = deps.pngScale();
   const width = Math.ceil(size.width * scale);
   const height = Math.ceil(size.height * scale);
   if (!fitsPng(width, height)) {
@@ -514,10 +534,12 @@ async function renderPlanned(
   }
   const notes = notationNotes(deps, block.source);
   if (format === 'svg') {
-    return { name, path, document: documentPath, key, content: rendered.svg, notes };
+    const input = await inputOf(deps, key, block, rendered, 'svg', null, notes);
+    return { name, path, document: documentPath, key, content: rendered.svg, notes, ...input };
   }
 
-  const source = pngSource(deps, name, rendered.svg, rendered.dark);
+  const scale = deps.pngScale();
+  const source = pngSource(deps, name, rendered.svg, rendered.dark, scale);
   if (!('svg' in source)) {
     return source;
   }
@@ -530,7 +552,43 @@ async function renderPlanned(
   if (!isPngOfSize(png, source.width, source.height) || png.byteLength > PNG_LIMITS.bytes) {
     return { name, path: null, error: deps.pngFailedMessage, cause: 'png' };
   }
-  return { name, path, document: documentPath, key, content: png, notes };
+  const input = await inputOf(deps, key, block, rendered, 'png', scale, notes);
+  return { name, path, document: documentPath, key, content: png, notes, ...input };
+}
+
+/**
+ * What a diagram exported under `key` was drawn from, when its drawing
+ * says (src/export/manifest.ts): nothing for one exported under a name
+ * asked for, which is not recorded.
+ */
+async function inputOf(
+  deps: ExporterDeps,
+  key: ArtifactKey | null,
+  block: PlantUmlBlock,
+  rendered: Rendered,
+  format: ExportFormat,
+  pngScale: number | null,
+  notes: readonly string[]
+): Promise<{ input?: InputManifest }> {
+  if (key === null || rendered.drawing.inputs === undefined) {
+    return {};
+  }
+  const renderer = await deps.rendererIdentity();
+  const input =
+    renderer === null
+      ? null
+      : inputManifest({
+          key,
+          source: block.raw,
+          render: rendered.render,
+          drawn: rendered.drawing,
+          dark: { asked: rendered.asked, drawn: rendered.dark },
+          format,
+          pngScale,
+          renderer,
+          losses: notes.length,
+        });
+  return input === null ? {} : { input };
 }
 
 /**
@@ -541,7 +599,7 @@ async function renderPlanned(
 export async function preparePng(deps: DrawingDeps, block: PlantUmlBlock): Promise<PngSource | ExportResult> {
   const name = block.name ?? '';
   const rendered = await renderBlock(deps, block, name);
-  return 'svg' in rendered ? pngSource(deps, name, rendered.svg, rendered.dark) : rendered;
+  return 'svg' in rendered ? pngSource(deps, name, rendered.svg, rendered.dark, deps.pngScale()) : rendered;
 }
 
 /**
@@ -644,22 +702,49 @@ function commit(deps: ExporterDeps, buffer: OutputBuffer, { drawing, existing, o
       return { written: false, error: deps.spoolChangedMessage };
     }
     await deps.writeFile(drawing.path, content, now !== null);
-    const recorded = drawing.key === null ? null : await deps.record(drawing.key, drawing.path, bytesOf(content));
+    const recorded = drawing.key === null ? null : await deps.record(drawing.key, drawing.path, bytesOf(content), drawing.input);
     return { written: true, recorded };
+  });
+}
+
+/**
+ * Records what a drawing was drawn from when the diagram's own export
+ * holds it already: the file is the export of those inputs too. Nothing is
+ * written to the file. Left as it is when the file or its record changed
+ * since they were looked at; a record the state does not take leaves the
+ * one before, and `deps.record` says why.
+ */
+function refresh(deps: ExporterDeps, { drawing, existing, owner }: Checked): Promise<void> {
+  const { key, input } = drawing;
+  if (
+    key === null ||
+    input === undefined ||
+    existing === null ||
+    !isOwn(drawing, owner, existing) ||
+    canonicalJson(owner?.input ?? null) === canonicalJson(input)
+  ) {
+    return Promise.resolve();
+  }
+  return deps.lock(drawing.path, async () => {
+    const now = await deps.readExisting(drawing.path);
+    if (now !== null && sameDigest(digestOf(now), existing) && sameRecord(deps.ownerOf(drawing.path), owner)) {
+      await deps.record(key, drawing.path, now, input);
+    }
   });
 }
 
 /**
  * Writes the drawings. A file that already holds its drawing is left
  * alone, since writing it again would change nothing, and is not taken
- * for the export of the diagram either. A file the diagram's own export is
- * recorded in, unchanged since, is replaced without asking. Before
- * replacing any other — a file someone put there by hand, or changed, or
- * one exported for another diagram — the export asks once for all of them.
- * A file open with unsaved changes is not written at all. Writing stops
- * part way once `stop` says so, or once what was written cannot be
- * recorded. Each drawing is let go of from `buffer` once its turn is over.
- * Null when the replacement is declined outright.
+ * for the export of the diagram either; when it is the diagram's own
+ * export already, its record takes what it was drawn from this time. A
+ * file the diagram's own export is recorded in, unchanged since, is
+ * replaced without asking. Before replacing any other — a file someone put
+ * there by hand, or changed, or one exported for another diagram — the
+ * export asks once for all of them. A file open with unsaved changes is not
+ * written at all. Writing stops part way once `stop` says so, or once what
+ * was written cannot be recorded. Each drawing is let go of from `buffer`
+ * once its turn is over. Null when the replacement is declined outright.
  */
 async function writeDrawings(
   deps: ExporterDeps,
@@ -703,7 +788,14 @@ async function writeDrawings(
       ...(drawing.notes !== undefined && drawing.notes.length > 0 ? { notes: drawing.notes } : {}),
     };
     if (entry.action === 'unchanged') {
-      outcome.unchanged.push({ ...result, unchanged: true });
+      try {
+        if (!halted && stop?.() !== true) {
+          await refresh(deps, entry);
+        }
+        outcome.unchanged.push({ ...result, unchanged: true });
+      } catch (error: unknown) {
+        failed.push({ name: drawing.name, path: null, error: messageOf(error), cause: 'file' });
+      }
     } else if (entry.action === 'ask' && !replace) {
       outcome.kept += 1;
     } else if (halted || stop?.() === true) {

@@ -285,6 +285,7 @@ describe('findFileDiagrams', () => {
         name: 'orders',
         nameBasis: 'single-file-name',
         source: '@startuml\nA -> B\n@enduml',
+        raw: '@startuml\nA -> B\n@enduml\n',
         sourceLine: 1,
         openLine: 1,
         closeLine: 3,
@@ -447,5 +448,43 @@ describe('findFileDiagrams', () => {
       ['loose', 'Alice -> Bob\n'],
     ]);
     expect(findFileDiagrams(md('', "' only a comment", ''), 'empty')).toEqual([]);
+  });
+});
+
+describe('the diagram as the document holds it (raw)', () => {
+  it('keeps the lines between the fences with their own line breaks, blank lines and spaces', () => {
+    const [block] = findPlantUmlBlocks('# Title\r\n\r\n```plantuml a\r\n\r\n  @startuml\r\nA -> B  \r\n@enduml\r\n\r\n```\r\n');
+
+    expect(block?.raw).toBe('\r\n  @startuml\r\nA -> B  \r\n@enduml\r\n\r\n');
+    // What is drawn leaves out the blank lines and spaces around the diagram, and its CRs.
+    expect(block?.source).toBe('@startuml\nA -> B  \n@enduml');
+  });
+
+  it('leaves out the block quotes and list items that hold the block, and only those', () => {
+    const [quoted] = findPlantUmlBlocks(md('> ```plantuml q', '>   A -> B', '>', '> ```', ''));
+    const [listed] = findPlantUmlBlocks(md('- item', '', '  ```plantuml l', '  A -> B', '    C -> D', '  ```', ''));
+
+    expect(quoted?.raw).toBe('  A -> B\n\n');
+    expect(listed?.raw).toBe('A -> B\n  C -> D\n');
+  });
+
+  it('runs to the end of a block left open, which may end without a line break, and is empty for an empty block', () => {
+    expect(findPlantUmlBlocks('```plantuml open\nA -> B')[0]?.raw).toBe('A -> B');
+    expect(findPlantUmlBlocks('```plantuml open\nA -> B\n')[0]?.raw).toBe('A -> B\n');
+    expect(findPlantUmlBlocks('```plantuml empty\n```\n')[0]?.raw).toBe('');
+    expect(findPlantUmlBlocks('```plantuml cr\rA -> B\r```\r')[0]?.raw).toBe('A -> B\r');
+  });
+
+  it('is the same with text added above the block, or around it', () => {
+    const block = md('```plantuml a', 'A -> B', '```');
+
+    expect(findPlantUmlBlocks(md('# Added', '', 'Some prose.', '', block, '', 'More.'))[0]?.raw).toBe(findPlantUmlBlocks(block)[0]?.raw);
+  });
+
+  it('takes each diagram of a PlantUML file from its start line to its end line, as the file holds them', () => {
+    const diagrams = findFileDiagrams("' header\r\n@startuml(id=a)\r\nA -> B\r\n@enduml\r\n\r\n@startuml(id=b)\nC -> D\n@enduml", 'flows');
+
+    expect(diagrams.map((diagram) => diagram.raw)).toEqual(['@startuml(id=a)\r\nA -> B\r\n@enduml\r\n', '@startuml(id=b)\nC -> D\n@enduml']);
+    expect(findFileDiagrams('A -> B\r\n', 'loose')[0]?.raw).toBe('A -> B\r\n');
   });
 });

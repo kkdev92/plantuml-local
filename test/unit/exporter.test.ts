@@ -23,11 +23,15 @@ import {
   type ReplaceTarget,
 } from '../../src/export/exporter';
 import { ExportLedger, type RecordResult } from '../../src/export/history';
+import { isInputManifest, type RendererIdentity } from '../../src/export/manifest';
 import { sha256, type ExportRecords } from '../../src/export/ownership';
 import type { DiagramRender } from '../../src/core/types';
 
 /** What the renderer hands the exporter for `svg`: no local include failed. */
 const rendered = (svg: string): DiagramRender => ({ svg, failedIncludes: new Map(), dependencies: [] });
+
+/** The renderer the tests' images are drawn by. */
+const RENDERER: RendererIdentity = { engine: '1.2026.9', build: 'b'.repeat(64), raster: 'c'.repeat(64) };
 
 /** The start of a PNG of `width`×`height` pixels: its signature and IHDR chunk. */
 function pngOf(width: number, height: number): Uint8Array {
@@ -94,6 +98,7 @@ function makeDeps(
     wroteBefore: (path: string, document: string, existing: Uint8Array): boolean => ledger.wroteBefore(path, document, existing),
     isDirty: (): boolean => false,
     record: vi.fn((...args: Parameters<ExporterDeps['record']>): Promise<RecordResult> => ledger.record(...args)),
+    rendererIdentity: (): Promise<RendererIdentity | null> => Promise.resolve(RENDERER),
     lock: <T>(path: string, task: () => Promise<T>): Promise<T> => ledger.lock(path, task),
     ledger,
     // Declines, so a question no test expected writes nothing.
@@ -1516,5 +1521,179 @@ describe('exportAll', () => {
       ['broken', 'engine: Syntax Error? (Assumed diagram type: sequence) @ 7'],
     ]);
     expect(outcome?.written.map((r) => r.name)).toEqual(['first']);
+  });
+});
+
+describe('the record of what an image was drawn from', () => {
+  /** A drawing taken with the reads of an export, which says what it was drawn from: no local include. */
+  const withInputs = (svg: string): DiagramRender => ({
+    ...rendered(svg),
+    log: { requests: [], libraries: [] },
+    inputs: { context: null, requests: [], files: [] },
+  });
+  const drawing = (): Partial<ExporterDeps> => ({
+    render: vi.fn((source: string) => Promise.resolve(withInputs(`<svg width="40" height="20" viewBox="0 0 40 20">${source}</svg>`))),
+  });
+  const hashed = (text: string): string => sha256(new TextEncoder().encode(text));
+
+  it('records with each file written what it was drawn from, as recorded for its diagram', async () => {
+    const deps = makeDeps(drawing());
+    const text = '# Guide\r\n\r\n```plantuml orders\r\nAlice -> Bob\r\n```\r\n';
+    const [block] = findPlantUmlBlocks(text);
+
+    await exportOne(deps, DOC, 'images', block!, 'orders');
+
+    const input = deps.ledger.ownerOf('/repo/docs/images/orders.svg')?.input;
+    expect(input).toMatchObject({
+      schema: 'plantuml-local-input-v1',
+      // The diagram as the document holds it, and as the engine was given it.
+      input: { source: hashed('Alice -> Bob\r\n'), render: hashed('Alice -> Bob') },
+      context: null,
+      resources: { requests: [], files: [], libraries: [] },
+      renderer: { ...RENDERER, raster: null, contract: 1 },
+      options: { format: 'svg', palette: { asked: 'light', drawn: 'light' }, pngScale: null },
+      completeness: 'complete',
+      replay: { class: 'stable-inputs', rules: 1, reasons: [] },
+    });
+    expect(deps.record).toHaveBeenCalledWith(expect.objectContaining({ name: 'orders' }), '/repo/docs/images/orders.svg', expect.anything(), input);
+    expect(isInputManifest(JSON.parse(JSON.stringify(input)), deps.ledger.ownerOf('/repo/docs/images/orders.svg')!.key)).toBe(true);
+  });
+
+  it('records the palette asked for and the one drawn in, and for a PNG its scale and what drew it', async () => {
+    const deps = makeDeps({ ...drawing(), isDark: () => true, resolvePalette: () => Promise.resolve(false) });
+    const [block] = findPlantUmlBlocks('```plantuml orders\nAlice -> Bob : <math>x^2</math>\n```');
+
+    await exportOne(deps, DOC, 'images', block!, 'orders', 'png');
+
+    expect(deps.ledger.ownerOf('/repo/docs/images/orders.png')?.input).toMatchObject({
+      renderer: { raster: RENDERER.raster },
+      options: { format: 'png', palette: { asked: 'dark', drawn: 'light' }, pngScale: 2 },
+      // Drawn without its formula.
+      completeness: 'known-loss',
+    });
+  });
+
+  it('records none for a name asked for, a drawing that does not say what it was drawn from, or a renderer that cannot be told', async () => {
+    const asked = makeDeps(drawing());
+    const silent = makeDeps();
+    const untold = makeDeps({ ...drawing(), rendererIdentity: () => Promise.resolve(null) });
+    const [named] = findPlantUmlBlocks('```plantuml orders\nAlice -> Bob\n```');
+    const [unnamed] = findPlantUmlBlocks('```plantuml\nAlice -> Bob\n```');
+
+    await exportOne(asked, DOC, 'images', unnamed!, 'billing');
+    await exportOne(silent, DOC, 'images', named!, 'orders');
+    await exportOne(untold, DOC, 'images', named!, 'orders');
+
+    expect(asked.record).not.toHaveBeenCalled();
+    for (const deps of [silent, untold]) {
+      expect(deps.ledger.ownerOf('/repo/docs/images/orders.svg')).not.toBeNull();
+      expect(deps.ledger.ownerOf('/repo/docs/images/orders.svg')).not.toHaveProperty('input');
+    }
+  });
+
+  it('records again what a diagram was drawn from when its file is written again', async () => {
+    const deps = makeDeps(drawing());
+    const [first] = findPlantUmlBlocks('```plantuml orders\nAlice -> Bob\n```');
+    const [second] = findPlantUmlBlocks('```plantuml orders\nAlice -> Carol\n```');
+
+    await exportOne(deps, DOC, 'images', first!, 'orders');
+    const before = deps.ledger.ownerOf('/repo/docs/images/orders.svg')?.input?.fingerprint;
+    await exportOne(deps, DOC, 'images', second!, 'orders');
+
+    expect(deps.ledger.ownerOf('/repo/docs/images/orders.svg')?.input?.input.source).toBe(hashed('Alice -> Carol\n'));
+    expect(deps.ledger.ownerOf('/repo/docs/images/orders.svg')?.input?.fingerprint).not.toBe(before);
+  });
+
+  describe('a file that holds its image already', () => {
+    const target = '/repo/docs/images/orders.svg';
+    const [block] = findPlantUmlBlocks('```plantuml orders\nAlice -> Bob\n```');
+    /** The same image each time, drawn from the text the included file has then, by its SHA-256. */
+    const including = (): { deps: ReturnType<typeof makeDeps>; edit: (sha256: string) => void; included: () => string | undefined } => {
+      let part = 'a'.repeat(64);
+      const deps = makeDeps({
+        render: vi.fn(() =>
+          Promise.resolve({
+            ...withInputs('<svg width="40" height="20" viewBox="0 0 40 20">same</svg>'),
+            inputs: { context: null, requests: [], files: [{ file: '/repo/docs/part.iuml', sha256: part, origin: 'disk' as const, findings: [] }] },
+          })
+        ),
+      });
+      return {
+        deps,
+        edit: (sha256) => {
+          part = sha256;
+        },
+        included: () => deps.ledger.ownerOf(target)?.input?.resources.files[0]?.sha256,
+      };
+    };
+
+    it('records what it was drawn from this time when it is the diagram\'s own export, and writes nothing', async () => {
+      const { deps, edit, included } = including();
+      await exportOne(deps, DOC, 'images', block!, 'orders');
+      // A comment changed in the included file: the image is the same.
+      edit('b'.repeat(64));
+
+      expect(await exportOne(deps, DOC, 'images', block!, 'orders')).toMatchObject({ unchanged: true });
+      expect(included()).toBe('b'.repeat(64));
+      expect(deps.writeFile).toHaveBeenCalledTimes(1);
+      // Drawn from the same again, the record is not touched.
+      deps.record.mockClear();
+      await exportOne(deps, DOC, 'images', block!, 'orders');
+      expect(deps.record).not.toHaveBeenCalled();
+    });
+
+    it('takes no file for the diagram\'s own that it did not export', async () => {
+      const exported = including().deps;
+      await exportOne(exported, DOC, 'images', block!, 'orders');
+      const { deps } = including();
+      // The same image, put there by another workspace's export, say.
+      deps.disk.set(target, exported.disk.get(target)!);
+
+      expect(await exportOne(deps, DOC, 'images', block!, 'orders')).toMatchObject({ unchanged: true });
+      expect(deps.record).not.toHaveBeenCalled();
+      expect(deps.ledger.ownerOf(target)).toBeNull();
+    });
+
+    it('records nothing when the file changed after it was looked at, and says why it could not be read', async () => {
+      const { deps, edit, included } = including();
+      await exportOne(deps, DOC, 'images', block!, 'orders');
+      const image = deps.disk.get(target)!;
+      edit('b'.repeat(64));
+      const lock = deps.lock;
+      deps.lock = (path, task) => {
+        deps.disk.set(path, 'edited by hand meanwhile');
+        return lock(path, task);
+      };
+
+      expect(await exportOne(deps, DOC, 'images', block!, 'orders')).toMatchObject({ unchanged: true });
+      expect(included()).toBe('a'.repeat(64));
+
+      deps.disk.set(target, image);
+      deps.lock = (path, task) => {
+        deps.readExisting = () => Promise.reject(new Error('the file is locked'));
+        return lock(path, task);
+      };
+      expect(await exportOne(deps, DOC, 'images', block!, 'orders')).toMatchObject({ error: 'the file is locked' });
+      expect(included()).toBe('a'.repeat(64));
+    });
+
+    it('records nothing once the export stops, told to or as the state took no record', async () => {
+      const { deps, edit, included } = including();
+      await exportOne(deps, DOC, 'images', block!, 'orders');
+      edit('b'.repeat(64));
+      const text = '```plantuml orders\nAlice -> Bob\n```';
+
+      const told = await writeDocuments(deps, deps.buffer, [await drawMarkdown(deps, DOC, text)], () => true);
+      expect(told?.unchanged.map((r) => r.name)).toEqual(['orders']);
+      expect(included()).toBe('a'.repeat(64));
+
+      // A new file first, whose record is not taken.
+      deps.record.mockClear();
+      deps.record.mockImplementation(() => Promise.resolve('not-saved' as const));
+      const halted = await writeDocuments(deps, deps.buffer, [await drawMarkdown(deps, DOC, `\`\`\`plantuml first\nA\n\`\`\`\n\n${text}`)]);
+      expect(halted?.untracked.map((r) => r.name)).toEqual(['first']);
+      expect(halted?.unchanged.map((r) => r.name)).toEqual(['orders']);
+      expect(deps.record).toHaveBeenCalledOnce();
+    });
   });
 });

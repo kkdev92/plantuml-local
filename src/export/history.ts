@@ -4,10 +4,11 @@
  * hand, exported for another diagram or changed since is still asked about.
  *
  * Each file is recorded by its URI, with the diagram it was written for (an
- * {@link ArtifactKey}) and a SHA-256 of the bytes written: no diagram source
- * and no image. The records live in the workspace's state, which stays on
- * this machine; elsewhere, or once they are gone, the export asks as it
- * would about any other file.
+ * {@link ArtifactKey}), a SHA-256 of the bytes written and, for a drawing
+ * that says what it was drawn from, the manifest of its inputs
+ * (src/export/manifest.ts): no diagram source and no image. The records
+ * live in the workspace's state, which stays on this machine; elsewhere, or
+ * once they are gone, the export asks as it would about any other file.
  *
  * Earlier versions recorded each file with the document it was exported
  * from instead (src/export/ownership.ts). Those records are read and never
@@ -19,6 +20,7 @@
  */
 
 import type { NameBasis, PlantUmlBlock } from './blocks';
+import { canonicalJson, isInputManifest, type InputManifest } from './manifest';
 import { isLastExport, sha256, type ExportRecords } from './ownership';
 
 /** Which diagram an exported file was written for. */
@@ -43,6 +45,8 @@ export interface ArtifactRecord {
   readonly output: string;
   /** The SHA-256 of the bytes written, in hex. */
   readonly sha256: string;
+  /** What the image was drawn from, when its drawing said. */
+  readonly input?: InputManifest;
 }
 
 /** The version of the shape the records are stored in. */
@@ -136,14 +140,20 @@ function isArtifactKey(value: unknown): value is ArtifactKey {
   );
 }
 
-/** Whether `value` is a record as this version writes one. */
+/**
+ * Whether `value` is a record as this version writes one. A manifest of
+ * inputs it carries has to be one this version writes, for the diagram the
+ * record is of, down to its fingerprint: a record with any other is no
+ * record at all, rather than one whose inputs are taken on trust.
+ */
 function isArtifactRecord(value: unknown): value is ArtifactRecord {
   return (
     isObject(value) &&
     isArtifactKey(value['key']) &&
     typeof value['output'] === 'string' &&
     typeof value['sha256'] === 'string' &&
-    SHA256.test(value['sha256'])
+    SHA256.test(value['sha256']) &&
+    (!Object.hasOwn(value, 'input') || isInputManifest(value['input'], value['key']))
   );
 }
 
@@ -193,6 +203,16 @@ export function readHistory(stored: unknown): History {
   return { writable: true, records, bytes };
 }
 
+/** Whether two records say the same of the same file: the diagram, the bytes and what they were drawn from. */
+function sameRecord(a: ArtifactRecord, b: ArtifactRecord): boolean {
+  return (
+    a.output === b.output &&
+    sameKey(a.key, b.key) &&
+    a.sha256 === b.sha256 &&
+    canonicalJson(a.input ?? null) === canonicalJson(b.input ?? null)
+  );
+}
+
 /**
  * The records with `record` in place of any for the same file, or 'full'
  * when there is no room for it: the limits are never made room for by
@@ -200,7 +220,7 @@ export function readHistory(stored: unknown): History {
  */
 export function withRecord(history: History, record: ArtifactRecord): History | 'full' {
   const before = history.records.get(record.output);
-  if (before !== undefined && sameKey(before.key, record.key) && before.sha256 === record.sha256) {
+  if (before !== undefined && sameRecord(before, record)) {
     return history;
   }
   if (before === undefined && history.records.size >= HISTORY_LIMITS.artifacts) {
@@ -263,12 +283,14 @@ export class ExportLedger {
 
   /**
    * Records that `content` was written to `output` for the diagram `key`
-   * names. Never rejects: `onError` hears why the state did not take it.
+   * names, drawn from `input` when that is known. Never rejects: `onError`
+   * hears why the state did not take it.
    */
   record(
     key: ArtifactKey,
     output: string,
     content: Uint8Array,
+    input?: InputManifest,
     onError?: (error: unknown) => void
   ): Promise<RecordResult> {
     const update = async (): Promise<RecordResult> => {
@@ -277,7 +299,7 @@ export class ExportLedger {
         if (!history.writable) {
           return 'later-version';
         }
-        const next = withRecord(history, { key, output, sha256: sha256(content) });
+        const next = withRecord(history, { key, output, sha256: sha256(content), ...(input === undefined ? {} : { input }) });
         if (next === 'full') {
           return 'full';
         }

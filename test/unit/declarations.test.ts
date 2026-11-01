@@ -4,6 +4,8 @@ import {
   columnIn,
   conditionalLines,
   declarationsOf,
+  engineLineType,
+  lineType,
   readUntilCommaOrClose,
   withoutInnerComment,
   type Declaration,
@@ -455,5 +457,65 @@ describe('withoutInnerComment', () => {
 
   it('keeps a line with a comment in its middle', () => {
     expect(withoutInnerComment("a /' b '/ c")).toEqual({ text: "a /' b '/ c", removed: [] });
+  });
+});
+
+describe('engineLineType and lineType', () => {
+  const lines = [
+    '!log hello',
+    '!dump_memory',
+    '!option handwritten true',
+    '!ifdef SHOW',
+    '!ifndef SHOW',
+    '!elseif 1',
+    '!return 1',
+    '!theme cerulean',
+    '!includedef parts/a.puml',
+    '!import lib.zip',
+    '!assert 1',
+    '!include a.puml',
+    'A -> B',
+    "' a comment",
+    "/' a comment",
+  ];
+
+  it('tells apart every type the engine reads a line as', () => {
+    expect(lines.map(engineLineType)).toEqual([
+      'log',
+      'dump-memory',
+      'option',
+      'ifdef',
+      'ifndef',
+      'elseif',
+      'return',
+      'theme',
+      'includedef',
+      'import',
+      'assert',
+      'include',
+      'plain',
+      'comment',
+      'comment-start',
+    ]);
+  });
+
+  it('reads the finer types as the coarser ones, and a log, a memory dump and an option as plain lines', () => {
+    expect(lines.map(lineType)).toEqual([
+      'plain',
+      'plain',
+      'plain',
+      'if',
+      'if',
+      'else',
+      'other',
+      'other',
+      'other',
+      'other',
+      'other',
+      'include',
+      'plain',
+      'comment',
+      'comment-start',
+    ]);
   });
 });

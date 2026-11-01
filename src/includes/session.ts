@@ -4,8 +4,15 @@ import { forEachCodeLine } from '../core/shape';
 import type { IncludedFile, IncludeKind, IncludeLoader } from '../core/types';
 import { includesWhitePageLibrary, themeLines } from '../render/palette';
 import { parseIncludePath, type PathRefusal } from './path-policy';
-import { readIncludeFile, type ReadRefusal } from './reader';
+import { readMeasured, type MeasuredRead, type ReadRefusal } from './reader';
 import { includeCandidates, isWithin, type IncludeScope, type SearchFoldersProblem } from './resolver';
+
+/**
+ * Reads `candidate`, a path under `root`, as readMeasured does with at most
+ * `maxBytes` bytes left to read: what a session reads its files with. An
+ * export's reads give each file as it was first read (src/includes/snapshot.ts).
+ */
+export type CandidateReader = (root: string, candidate: string, maxBytes: number) => Promise<MeasuredRead>;
 
 /**
  * Answers the local includes of one render.
@@ -102,8 +109,9 @@ export class IncludeSession {
 
   constructor(
     private readonly access: IncludeAccess,
-    private readonly openText: (path: string) => string | undefined,
-    private readonly limits: typeof INCLUDE_LIMITS = INCLUDE_LIMITS
+    openText: (path: string) => string | undefined,
+    private readonly limits: typeof INCLUDE_LIMITS = INCLUDE_LIMITS,
+    private readonly read: CandidateReader = (root, candidate, maxBytes) => readMeasured(root, candidate, { openText, maxBytes })
   ) {}
 
   readonly load: IncludeLoader = async (path, from, kind) => {
@@ -148,10 +156,9 @@ export class IncludeSession {
         return fail({ kind: 'outside' });
       }
       this.dependencies.add(candidate);
-      const outcome = await readIncludeFile(scope.root, candidate, {
-        openText: this.openText,
-        maxBytes: this.limits.bytes - this.bytes,
-      });
+      // Every file delivered counts against the limits below, one an export
+      // read before (src/includes/snapshot.ts) as much as one read now.
+      const { outcome } = await this.read(scope.root, candidate, this.limits.bytes - this.bytes);
       if (outcome.kind === 'missing') {
         looked.push(candidate);
         continue;

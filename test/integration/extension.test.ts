@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import Module from 'node:module';
 import { createRequire } from 'node:module';
@@ -34,11 +34,14 @@ import {
   type WorkspaceSymbolRegistrationStub,
 } from './helpers/vscode-stub';
 import { englishMessages } from '../../src/core/messages';
+import type { ArtifactRecord } from '../../src/export/history';
+import { isInputManifest, shippedRenderer } from '../../src/export/manifest';
 import { expandSnippet, SNIPPETS } from '../../src/language/completion';
 import {
   codeBlock,
   escapeLines,
   escapeMarkdown,
+  HELP_ENGINE,
   helpFor,
   helpMarkdown,
   inlineCode,
@@ -453,6 +456,12 @@ const NAMED_BLOCK = ['```plantuml orders', '@startuml', 'Alice -> Bob : hi', '@e
   '\n'
 );
 
+/** The record the export history holds of the file at `output`. */
+function recordOf(output: string): ArtifactRecord | undefined {
+  const stored = context.workspaceState.get('exportHistory') as { value: { artifacts: ArtifactRecord[] } } | undefined;
+  return stored?.value.artifacts.find((record) => record.output === output);
+}
+
 describe('export (dist)', () => {
   it('tracks the context keys behind the editor menu as the cursor moves', () => {
     const editor = makeEditor('file:///c/docs/design.md', `intro\n\n${NAMED_BLOCK}\n\nafter`, 3);
@@ -518,6 +527,11 @@ describe('export (dist)', () => {
     // The unnamed block is skipped, not guessed at, and the summary says so.
     expect(vscodeStub._test.writtenFiles.size).toBe(3); // orders.svg + these two
     expect(vscodeStub._test.notifications.warn.some((m) => m.includes('Unnamed'))).toBe(true);
+    // Each recorded with what it was drawn from.
+    for (const output of ['file:///c/notes/images/first.svg', 'file:///c/notes/images/second.svg']) {
+      const record = recordOf(output);
+      expect(isInputManifest(record?.input, record!.key), output).toBe(true);
+    }
   });
 
   it('refuses a document of more than 1000 named diagrams before drawing any, and exports one of 1000 with an unnamed block besides', async () => {
@@ -1912,6 +1926,11 @@ describe('export (dist)', () => {
       expect(vscodeStub._test.writtenFiles.get('file:///c/tree/sub/images/two.svg')).toContain('second');
       expect([...vscodeStub._test.writtenFiles.keys()].filter((key) => key.includes('three'))).toEqual([]);
       expect(vscodeStub._test.notifications.info.at(-1)).toBe('Diagrams exported: 2');
+      // Each recorded with what it was drawn from.
+      for (const output of ['file:///c/tree/images/one.svg', 'file:///c/tree/sub/images/two.svg']) {
+        const record = recordOf(output);
+        expect(isInputManifest(record?.input, record!.key), output).toBe(true);
+      }
     });
 
     it('writes nothing when the export is not confirmed, or no folder is picked', async () => {
@@ -2048,6 +2067,47 @@ describe('export (dist)', () => {
       expect(vscodeStub._test.writtenBytes.get('file:///c/png/images/orders.png')).toEqual(png);
       // Named as the Explorer names it, not by its URI.
       expect(vscodeStub._test.notifications.info.at(-1)).toBe('Exported to png/images/orders.png');
+    });
+
+    it('records with each file what it was drawn from, and the renderer the extension ships', async () => {
+      vscodeStub._test.setActiveEditor(makeEditor('file:///c/inputs/doc.md', NAMED_BLOCK, 1));
+      await vscodeStub._test.registeredCommands.get('plantumlLocal.exportSvg')?.();
+      const { panel, done } = await start('file:///c/inputs/doc.md');
+      panel.receive({ type: 'ready' });
+      const draw = panel.webview.posted[0] as { width: number; height: number };
+      panel.receive({ type: 'png', data: pngOf(draw.width, draw.height) });
+      await done;
+
+      const svg = recordOf('file:///c/inputs/images/orders.svg');
+      const png = recordOf('file:///c/inputs/images/orders.png');
+      const shipped = await shippedRenderer(
+        join(__dirname, '../../dist'),
+        join(__dirname, '../../media/png/png.js'),
+        HELP_ENGINE
+      );
+      expect(shipped).not.toBeNull();
+      const hashed = (text: string): string => createHash('sha256').update(text).digest('hex');
+      const drawn = {
+        schema: 'plantuml-local-input-v1',
+        // The block as the document holds it between its fences, and as the engine was given it.
+        input: { source: hashed('@startuml\nAlice -> Bob : hi\n@enduml\n'), render: hashed('@startuml\nAlice -> Bob : hi\n@enduml') },
+        context: null,
+        resources: { requests: [], files: [], libraries: [] },
+        completeness: 'complete',
+        replay: { class: 'stable-inputs', rules: 1, reasons: [] },
+      };
+      expect(svg?.input).toMatchObject({
+        ...drawn,
+        renderer: { engine: HELP_ENGINE, build: shipped?.build, raster: null, contract: 1 },
+        options: { format: 'svg', palette: { asked: 'light', drawn: 'light' }, pngScale: null },
+      });
+      expect(png?.input).toMatchObject({
+        ...drawn,
+        renderer: { engine: HELP_ENGINE, build: shipped?.build, raster: shipped?.raster, contract: 1 },
+        options: { format: 'png', palette: { asked: 'light', drawn: 'light' }, pngScale: 2 },
+      });
+      expect(isInputManifest(svg?.input, svg!.key)).toBe(true);
+      expect(isInputManifest(png?.input, png!.key)).toBe(true);
     });
 
     it('writes nothing when the page cannot draw it, or sends back another size', async () => {
@@ -5507,6 +5567,53 @@ describe('diagram dependencies (dist)', () => {
       vscodeStub._test.setActiveEditor(undefined);
       vscodeStub._test.closeDocument(editor.document);
     }
+  });
+
+  it('draws every document of a folder export from the same read of a file they include', async () => {
+    const block = (name: string): string => ['```plantuml ' + name, '@startuml', '!include part.iuml', '@enduml', '```'].join('\n');
+    await mkdir(pathOf('docs/together'), { recursive: true });
+    await writeFile(pathOf('docs/together/part.iuml'), 'Alice -> Bob : before\n');
+    const documents = [uriOf('docs/together/a.md'), uriOf('docs/together/b.md')];
+    vscodeStub._test.writtenFiles.set(documents[0]!, block('first'));
+    vscodeStub._test.writtenFiles.set(documents[1]!, block('second'));
+    // The file is saved as the second document is about to be drawn.
+    const withProgress = vscodeStub.window.withProgress;
+    vscodeStub.window.withProgress = (options, task) =>
+      withProgress(options, (progress, token) =>
+        task(
+          {
+            report: (value) => {
+              if (JSON.stringify(value).includes('(2/2)')) {
+                writeFileSync(pathOf('docs/together/part.iuml'), 'Alice -> Bob : after\n');
+              }
+              progress.report(value);
+            },
+          },
+          token
+        )
+      );
+    vscodeStub._test.messageReply = 'Export';
+    try {
+      await vscodeStub._test.registeredCommands.get('plantumlLocal.exportFolderSvg')?.(vscodeStub.Uri.parse(uriOf('docs/together')));
+    } finally {
+      vscodeStub._test.messageReply = null;
+      vscodeStub.window.withProgress = withProgress;
+      for (const document of documents) {
+        vscodeStub._test.writtenFiles.delete(document);
+      }
+    }
+
+    const outputs = [uriOf('docs/together/images/first.svg'), uriOf('docs/together/images/second.svg')];
+    for (const output of outputs) {
+      expect(vscodeStub._test.writtenFiles.get(output), output).toContain('before');
+    }
+    expect(readFileSync(pathOf('docs/together/part.iuml'), 'utf8')).toBe('Alice -> Bob : after\n');
+    // Recorded as read: once, by the same SHA-256.
+    const files = outputs.map((output) => recordOf(output)?.input?.resources.files);
+    expect(files[0]).toEqual([
+      { file: pathOf('docs/together/part.iuml'), sha256: createHash('sha256').update('Alice -> Bob : before\n').digest('hex'), origin: 'disk' },
+    ]);
+    expect(files[1]).toEqual(files[0]);
   });
 });
 

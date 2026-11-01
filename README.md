@@ -997,15 +997,22 @@ file changed since — the command asks about first, once for all the files it
 would replace, and the bulk commands can keep those files and write the rest;
 a file replaced is then its diagram's own. A file open with unsaved edits is
 not written at all. What the export wrote is kept in the workspace's state on
-this machine: each file, the diagram it was written for and a SHA-256 of the
-contents, no diagram source, for up to 2,000 files. A file that cannot be
+this machine, for up to 2,000 files: each file, the diagram it was written for,
+a SHA-256 of the contents and what the image was drawn from — a SHA-256 of the
+diagram's text and of each file it included, with their paths, the bundled
+library files it read, the renderer and the options — but no diagram source.
+Exporting a diagram again whose file holds its image already records what it
+was drawn from this time. A file that cannot be
 recorded — past that, or when the state does not take the record — is still
 written, and the message says so; the next export asks about it, as it asks
 each time about the file of a diagram exported under a name you type. On
 another machine, the first export asks. A file an earlier version exported is
 asked about once, saying why: those versions recorded the document, not the
 diagram. A file that changes while the export runs — while its question is
-open, say — is left as it is and reported, whatever the answer. Each file is
+open, say — is left as it is and reported, whatever the answer. A file a
+diagram includes is read once per export, so every image of one export, or of
+a folder, is drawn from the same text of it, even when it is saved while the
+export runs. Each file is
 written under a temporary name beside the target and then renamed over it, so
 an export that fails part way never leaves half an image behind. The images an
 export has drawn wait in memory until it writes them, up to 64 MiB in all; past

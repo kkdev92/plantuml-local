@@ -169,38 +169,78 @@ export type LineType =
   | 'includesub'
   | 'other';
 
+/** Every type the engine's line patterns tell a line apart as (TLineType). */
+export type EngineLineType =
+  | 'comment'
+  | 'comment-start'
+  | 'plain'
+  | 'legacy-define'
+  | 'legacy-definelong'
+  | 'affectation-define'
+  | 'affectation'
+  | 'ifdef'
+  | 'undef'
+  | 'ifndef'
+  | 'assert'
+  | 'if'
+  | 'function'
+  | 'procedure'
+  | 'else'
+  | 'elseif'
+  | 'endif'
+  | 'while'
+  | 'endwhile'
+  | 'foreach'
+  | 'endforeach'
+  | 'end-function'
+  | 'return'
+  | 'theme'
+  | 'include'
+  | 'includedef'
+  | 'import'
+  | 'startsub'
+  | 'endsub'
+  | 'includesub'
+  | 'log'
+  | 'dump-memory'
+  | 'option';
+
 /** TLineType.getFromLineInternal, in its order. */
-const ORDER: readonly (readonly [RegExp, LineType])[] = [
+const ORDER: readonly (readonly [RegExp, EngineLineType])[] = [
   [LEGACY_DEFINE, 'legacy-define'],
   [LEGACY_DEFINELONG, 'legacy-definelong'],
   [AFFECTATION_DEFINE, 'affectation-define'],
   [AFFECTATION, 'affectation'],
-  [keyword('ifdef'), 'if'],
+  [keyword('ifdef'), 'ifdef'],
   [keyword('undef'), 'undef'],
-  [keyword('ifndef'), 'if'],
-  [keyword('assert'), 'other'],
+  [keyword('ifndef'), 'ifndef'],
+  [keyword('assert'), 'assert'],
   [keyword('if'), 'if'],
   [DECLARE_FUNCTION, 'function'],
   [DECLARE_PROCEDURE, 'procedure'],
   [keyword('else'), 'else'],
-  [keyword('elseif'), 'else'],
+  [keyword('elseif'), 'elseif'],
   [keyword('endif'), 'endif'],
   [keyword('while'), 'while'],
   [keyword('endwhile'), 'endwhile'],
   [keyword('foreach'), 'foreach'],
   [keyword('endfor'), 'endforeach'],
   [END_FUNCTION, 'end-function'],
-  [keyword('return'), 'other'],
-  [keyword('theme'), 'other'],
+  [keyword('return'), 'return'],
+  [keyword('theme'), 'theme'],
   [INCLUDE, 'include'],
-  [keyword('includedef'), 'other'],
-  [keyword('import'), 'other'],
+  [keyword('includedef'), 'includedef'],
+  [keyword('import'), 'import'],
   [keyword('startsub'), 'startsub'],
   [keyword('endsub'), 'endsub'],
   [keyword('includesub'), 'includesub'],
+  [keyword('log'), 'log'],
+  [keyword('dump_memory'), 'dump-memory'],
+  [keyword('option'), 'option'],
 ];
 
-export function lineType(line: string): LineType {
+/** What the engine reads `line` as, of every type it tells apart. */
+export function engineLineType(line: string): EngineLineType {
   if (COMMENT.test(line) || COMMENT_ON_LINE.test(line)) {
     return 'comment';
   }
@@ -211,6 +251,48 @@ export function lineType(line: string): LineType {
     return 'plain';
   }
   return ORDER.find(([test]) => test.test(line))?.[1] ?? 'plain';
+}
+
+/** Each type as this file and the call reader act on it. */
+const READ_AS: Readonly<Record<EngineLineType, LineType>> = {
+  comment: 'comment',
+  'comment-start': 'comment-start',
+  plain: 'plain',
+  'legacy-define': 'legacy-define',
+  'legacy-definelong': 'legacy-definelong',
+  'affectation-define': 'affectation-define',
+  affectation: 'affectation',
+  ifdef: 'if',
+  undef: 'undef',
+  ifndef: 'if',
+  assert: 'other',
+  if: 'if',
+  function: 'function',
+  procedure: 'procedure',
+  else: 'else',
+  elseif: 'else',
+  endif: 'endif',
+  while: 'while',
+  endwhile: 'endwhile',
+  foreach: 'foreach',
+  endforeach: 'endforeach',
+  'end-function': 'end-function',
+  return: 'other',
+  theme: 'other',
+  include: 'include',
+  includedef: 'other',
+  import: 'other',
+  startsub: 'startsub',
+  endsub: 'endsub',
+  includesub: 'includesub',
+  // Read for calls like any plain line; what they print or set is not read here.
+  log: 'plain',
+  'dump-memory': 'plain',
+  option: 'plain',
+};
+
+export function lineType(line: string): LineType {
+  return READ_AS[engineLineType(line)];
 }
 
 const LETTER = /^\p{L}$/u;

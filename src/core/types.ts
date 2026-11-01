@@ -86,6 +86,74 @@ export interface DiagramRender {
   includedStyle?: IncludedStyle;
   /** What it asked for, when drawn for a document (src/includes/host.ts). */
   log?: DrawingLog;
+  /**
+   * What it was drawn from, when drawn for an export, which records it
+   * (src/export/manifest.ts): the reads of the export, each file as it was
+   * delivered (src/includes/snapshot.ts).
+   */
+  inputs?: DrawnInputs;
+}
+
+/**
+ * Where a drawing's local includes were looked for: the workspace folder,
+ * the folder of the document and the search folders, as real paths, in
+ * order; or why none were read. Null for a diagram without a local include,
+ * for which none of it is looked at.
+ */
+export type IncludeContext =
+  | { root: string; folder: string; searchFolders: readonly string[] }
+  | { unavailable: 'untrusted' | 'untitled' | 'not-on-disk' | 'outside-workspace' | 'setting' }
+  | null;
+
+/** How a request for a local file ended, in words that do not change with the language: `read`, `missing` or a refusal (`read:link`, `limit:bytes`…). */
+export type RequestOutcome = string;
+
+/** A request for a local file, as answered, by real paths. */
+export interface InputRequest {
+  /** The file the directive names, as the engine handed it over. */
+  path: string;
+  /** The file it was asked from, or null for the diagram. */
+  from: string | null;
+  kind: IncludeKind | null;
+  outcome: RequestOutcome;
+  /** The file delivered, or null when none was. */
+  file: string | null;
+  /** The places looked at first and found empty, and last the one refused, in the order looked at. */
+  looked: readonly string[];
+}
+
+/** Where the text of a file delivered came from: the file on disk, or an editor that has it open. */
+export type InputOrigin = 'disk' | 'editor';
+
+/**
+ * Something in a text that may draw the diagram differently another time
+ * from the same text (`volatile`: the time, a random number, the
+ * environment), or that this extension does not tell apart from that
+ * (`unclassified`): src/export/replay.ts.
+ */
+export interface ReplayFinding {
+  replay: 'volatile' | 'unclassified';
+  /** What it is: a directive (`!procedure`), a function (`%date`), a theme. */
+  what: string;
+  /** The line, counting from 0. */
+  line: number;
+}
+
+/** A file delivered for a local include: what was delivered, by its SHA-256, and what its text holds. */
+export interface DeliveredFile {
+  /** Its real path. */
+  file: string;
+  /** The SHA-256 of the text delivered, as UTF-8, in hex. */
+  sha256: string;
+  origin: InputOrigin;
+  findings: readonly ReplayFinding[];
+}
+
+/** What a drawing for an export read: where, what it asked for, and the files delivered, each once. */
+export interface DrawnInputs {
+  context: IncludeContext;
+  requests: readonly InputRequest[];
+  files: readonly DeliveredFile[];
 }
 
 /**

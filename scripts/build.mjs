@@ -320,6 +320,37 @@ const writeGrammars = {
   },
 };
 
+/**
+ * What the engine runs that no diagram's author wrote — the bundled
+ * libraries and the `!theme` library — is held to what was read for an
+ * export's record of whether an image is drawn from its inputs alone
+ * (src/export/audit.ts). That module is bundled and run on what was copied
+ * to dist/: a library or a theme that changed, or calls a `%` function the
+ * audit does not list, stops the build until it is read again.
+ */
+async function auditShipped() {
+  const bundled = await esbuild.build({
+    entryPoints: [join(root, 'src/export/audit.ts')],
+    bundle: true,
+    platform: 'node',
+    format: 'esm',
+    write: false,
+    logLevel: 'warning',
+  });
+  const { auditProblems } = await import(`data:text/javascript;base64,${Buffer.from(bundled.outputFiles[0].text).toString('base64')}`);
+  const sandbox = {};
+  runInNewContext(readFileSync(join(engineDir, 'themes.cjs'), 'utf8'), sandbox);
+  const libraries = Object.fromEntries(
+    readdirSync(stdlibDir)
+      .filter((name) => name.endsWith('.json'))
+      .map((name) => [name.slice(0, -'.json'.length), readFileSync(join(stdlibDir, name))])
+  );
+  const problems = auditProblems({ libraries, themes: { ...sandbox.PLANTUML_THEMES } });
+  if (problems.length > 0) {
+    throw new Error(`${problems.join('\n')}\nRead what changed for the % functions it calls, then update src/export/audit.ts.`);
+  }
+}
+
 /** @type {esbuild.BuildOptions} */
 const shared = {
   bundle: true,
@@ -339,6 +370,7 @@ const shared = {
 
 copyEngine();
 copyStdlib();
+await auditShipped();
 
 const builds = [
   { ...shared, entryPoints: [join(root, 'src/extension.ts')], outfile: join(outDir, 'extension.js') },
