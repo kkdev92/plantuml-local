@@ -53,6 +53,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   environment, nor when it runs the preprocessor beyond plain includes and
   themes. Exporting a diagram again whose file holds its image already records
   what it was drawn from then. No diagram source is recorded.
+- **An export writes no image whose diagram or included files changed while
+  it ran.** Just before writing each file, it looks again at what the image
+  was drawn from — the diagram's text, the files it included, where it looked
+  for them and the include settings — and leaves the file as it is when any
+  of them changed since the image was drawn, an included file saved while the
+  export asked about overwriting, say. The message names what changed, and
+  exporting again draws the diagram as it is. Of a diagram exported under a
+  name you type, only the files it included are looked at again.
 
 ## [0.19.0] - 2026-11-01
 

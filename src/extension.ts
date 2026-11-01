@@ -80,6 +80,7 @@ import { MAX_DOCUMENTS, findDocuments } from './export/folder';
 import { ExportLedger } from './export/history';
 import { shippedRenderer } from './export/manifest';
 import type { ExportRecords } from './export/ownership';
+import { recheckInputs, type InputChange } from './export/recheck';
 import { findColors, hexOf, rgbOf } from './core/colors';
 import { splitLines } from './core/lines';
 import { documentColumnOf, documentLineOf } from './core/positions';
@@ -175,7 +176,7 @@ import { describeIncludeFailure, type IncludeLabels } from './includes/describe'
 import { asWritten, definedWords, includeDirectives } from './includes/directives';
 import { DrawingRecords } from './includes/drawings';
 import { includeCompletions, includeDefinitions } from './includes/editor';
-import { drawInDocuments, openSession, type DrawDiagram } from './includes/host';
+import { drawInDocuments, openSession, readingNow, type DrawDiagram } from './includes/host';
 import { INCLUDE_EXTENSIONS } from './includes/path-policy';
 import type { IncludeFailure } from './includes/session';
 import { ReadSnapshot } from './includes/snapshot';
@@ -1375,6 +1376,60 @@ function drawingDeps(
 }
 
 /**
+ * The diagrams of the document at `uri` as it is now: as an editor has it
+ * open, unsaved changes and all, else as it is on disk; none once it cannot
+ * be read. `container` says what kind of document it is.
+ */
+async function diagramsNow(uri: vscode.Uri, container: 'markdown' | 'plantuml-file'): Promise<PlantUmlBlock[]> {
+  const open = vscode.workspace.textDocuments.find((document) => document.uri.toString() === uri.toString());
+  let text: string;
+  try {
+    text = open?.getText() ?? new TextDecoder().decode(await vscode.workspace.fs.readFile(uri));
+  } catch {
+    return [];
+  }
+  return container === 'markdown'
+    ? findPlantUmlBlocks(text)
+    : findFileDiagrams(text, withoutExtension(uri.path.slice(uri.path.lastIndexOf('/') + 1)));
+}
+
+/** How many of the things that changed the reason a drawing was not written names; past that, it ends in an ellipsis. */
+const STALE_NAMED = 5;
+
+/**
+ * Why a drawing was not written: what it was drawn from changed once it
+ * was drawn — the diagram itself, where its includes are looked for, a file
+ * it asked for found elsewhere or not at all, a file's text — each named
+ * once, a file by its path in the workspace (`opened` gives it as VS Code
+ * knows it).
+ */
+function staleInputsMessage(
+  l10n: L10n,
+  workspace: WorkspaceService,
+  changes: readonly InputChange[],
+  opened: (path: string) => string
+): string {
+  const named = [
+    ...new Set(
+      changes.map((change): string => {
+        switch (change.change) {
+          case 'diagram':
+            return l10n.t('the diagram itself');
+          case 'context':
+            return l10n.t('where its included files are looked for');
+          case 'answer':
+            return change.path;
+          case 'file':
+            return workspace.relativePath(vscode.Uri.file(opened(change.file)));
+        }
+      })
+    ),
+  ];
+  const listed = named.slice(0, STALE_NAMED).join(', ') + (named.length > STALE_NAMED ? ', …' : '');
+  return l10n.t('What the diagram was drawn from changed during export, so it was not written: {0}. Export again.', listed);
+}
+
+/**
  * Resolves a path against the document's own folder and writes through
  * `vscode.workspace.fs`, so exporting works on remote and virtual file
  * systems rather than only on local disk. With `snapshot`, the reads of one
@@ -1428,6 +1483,20 @@ function exporterDeps(
     // Open with unsaved edits, it is someone's work, whoever wrote it last.
     isDirty: (path) => vscode.workspace.textDocuments.some((open) => open.isDirty && open.uri.toString() === path),
     rendererIdentity: () => shippedRenderer(__dirname, join(__dirname, '..', 'media', 'png', 'png.js'), HELP_ENGINE),
+    staleInputs: async ({ document, key, drawnFrom }): Promise<string | null> => {
+      if (drawnFrom === undefined) {
+        return null;
+      }
+      const uri = vscode.Uri.parse(document);
+      const reading = await readingNow(uri, { includePaths: (each) => includePathsOf(settings, each) });
+      // One without a name of its own is not found again: its text is the one asked for.
+      const block =
+        key === null
+          ? undefined
+          : (await diagramsNow(uri, key.container)).find((each) => each.nameBasis === key.nameBasis && each.name === key.name);
+      const changes = await recheckInputs(drawnFrom, block?.raw ?? null, reading.access, reading.openText);
+      return changes.length === 0 ? null : staleInputsMessage(context.l10n, workspace, changes, reading.opened);
+    },
     record: (key, path, content, input) =>
       exports.record(key, path, content, input, (error) => {
         context.logger.warn(context.l10n.t(

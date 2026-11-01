@@ -9,6 +9,7 @@ import { isValidBlockName, type PlantUmlBlock } from './blocks';
 import { digestOf, OutputBuffer, sameDigest, type Digest, type Held, type SpoolDeps } from './buffer';
 import { artifactKey, sameKey, type ArtifactKey, type ArtifactRecord, type RecordResult } from './history';
 import { canonicalJson, inputManifest, type InputManifest, type RendererIdentity } from './manifest';
+import type { DrawnFrom } from './recheck';
 
 /**
  * Renders diagrams to SVG files next to the document, or one to a PNG.
@@ -72,6 +73,14 @@ export interface ExporterDeps extends SpoolDeps {
    * image is recorded without.
    */
   rendererIdentity(): Promise<RendererIdentity | null>;
+  /**
+   * Why `drawing` is not to be written after all: what it was drawn from
+   * (`drawnFrom`), looked at again as it is now (src/export/recheck.ts) —
+   * the diagram's text, the files it included, where they are looked for —
+   * has changed since. Null when nothing has, or the drawing does not say
+   * what it was drawn from.
+   */
+  staleInputs(drawing: Drawing): Promise<string | null>;
   /** Runs `task` once no other export in this window is writing the file at `path`. */
   lock<T>(path: string, task: () => Promise<T>): Promise<T>;
   /**
@@ -215,9 +224,10 @@ export interface ExportResult {
    * What a failure is about, so that a caller can offer the way out: the
    * diagram's source, whose problems the Problems panel lists too; the PNG
    * drawn from it, where an SVG may still do; the SVG text, too long for
-   * the clipboard, where a file may still do; or the file written.
+   * the clipboard, where a file may still do; the file written; or what it
+   * was drawn from, which changed before it was written.
    */
-  cause?: 'source' | 'png' | 'text' | 'file';
+  cause?: 'source' | 'png' | 'text' | 'file' | 'inputs';
   /** For a PNG too large at the scale set, the largest scale it fits at. */
   fitsAt?: number;
   /** What a written diagram was drawn without: notation the engine does not draw, for the report. */
@@ -263,6 +273,12 @@ interface Drawn {
   notes?: string[];
   /** What it was drawn from, recorded with the file. */
   input?: InputManifest;
+  /**
+   * What it was drawn from, looked at again before it is written, when its
+   * drawing says: a diagram without a name of its own, which is not
+   * recorded, by its local includes alone.
+   */
+  drawnFrom?: DrawnFrom;
 }
 
 /** A diagram rendered and ready to write, its content held by the export's {@link OutputBuffer}. */
@@ -533,9 +549,10 @@ async function renderPlanned(
     return rendered;
   }
   const notes = notationNotes(deps, block.source);
+  const drawnFrom = drawnFromOf(key, block, rendered.drawing);
   if (format === 'svg') {
     const input = await inputOf(deps, key, block, rendered, 'svg', null, notes);
-    return { name, path, document: documentPath, key, content: rendered.svg, notes, ...input };
+    return { name, path, document: documentPath, key, content: rendered.svg, notes, ...input, ...drawnFrom };
   }
 
   const scale = deps.pngScale();
@@ -553,7 +570,29 @@ async function renderPlanned(
     return { name, path: null, error: deps.pngFailedMessage, cause: 'png' };
   }
   const input = await inputOf(deps, key, block, rendered, 'png', scale, notes);
-  return { name, path, document: documentPath, key, content: png, notes, ...input };
+  return { name, path, document: documentPath, key, content: png, notes, ...input, ...drawnFrom };
+}
+
+/**
+ * What a diagram exported under `key` was drawn from, to be looked at again
+ * before its file is written (src/export/recheck.ts), when `drawing` says:
+ * the diagram's text, by which one with a name of its own is found again,
+ * and its local includes. One exported under a name asked for has no
+ * name to be found again by; its text is the one the export was asked for.
+ */
+function drawnFromOf(key: ArtifactKey | null, block: PlantUmlBlock, drawing: DiagramRender): { drawnFrom?: DrawnFrom } {
+  const inputs = drawing.inputs;
+  if (inputs === undefined) {
+    return {};
+  }
+  return {
+    drawnFrom: {
+      source: key === null ? null : digestOf(block.raw).sha256,
+      context: inputs.context,
+      requests: inputs.requests,
+      files: inputs.files.map(({ file, sha256 }) => ({ file, sha256 })),
+    },
+  };
 }
 
 /**
@@ -676,30 +715,43 @@ async function check(deps: ExporterDeps, drawing: Drawing): Promise<Checked | Ex
   }
 }
 
-/** What became of a drawing given its turn: written, and the record of it if it has a name of its own; or why not. */
-type Committed = { written: true; recorded: RecordResult | null } | { written: false; error: string };
+/**
+ * What became of a drawing given its turn: written, and the record of it if
+ * it has a name of its own; or why not, and what that is about — the file,
+ * or what the drawing was drawn from.
+ */
+type Committed =
+  | { written: true; recorded: RecordResult | null }
+  | { written: false; error: string; cause: 'file' | 'inputs' };
 
 /**
  * Writes a drawing once no other export in this window is writing its
  * file, if the file is as it was looked at: the same bytes, the same
  * record, no unsaved changes. A file that changed since, while a question
  * was open say, is no longer the one the answer was about, and is left as
- * it is. A file removed since is written as a new one. A drawing held in a
- * file of its own until now is written only if that file still holds it.
+ * it is. A file removed since is written as a new one. A drawing whose
+ * diagram, included files or include settings changed since it was drawn
+ * is not written either: it is an image of what is there no longer. A
+ * drawing held in a file of its own until now is written only if that file
+ * still holds it.
  */
 function commit(deps: ExporterDeps, buffer: OutputBuffer, { drawing, existing, owner }: Checked): Promise<Committed> {
   return deps.lock(drawing.path, async (): Promise<Committed> => {
     if (deps.isDirty(drawing.path)) {
-      return { written: false, error: deps.dirtyMessage };
+      return { written: false, error: deps.dirtyMessage, cause: 'file' };
     }
     const now = await deps.readExisting(drawing.path);
     const changed = existing === null ? now !== null : now !== null && !sameDigest(digestOf(now), existing);
     if (changed || !sameRecord(deps.ownerOf(drawing.path), owner)) {
-      return { written: false, error: deps.changedMessage };
+      return { written: false, error: deps.changedMessage, cause: 'file' };
+    }
+    const stale = await deps.staleInputs(drawing);
+    if (stale !== null) {
+      return { written: false, error: stale, cause: 'inputs' };
     }
     const content = await buffer.read(drawing.content);
     if (content === null) {
-      return { written: false, error: deps.spoolChangedMessage };
+      return { written: false, error: deps.spoolChangedMessage, cause: 'file' };
     }
     await deps.writeFile(drawing.path, content, now !== null);
     const recorded = drawing.key === null ? null : await deps.record(drawing.key, drawing.path, bytesOf(content), drawing.input);
@@ -711,8 +763,9 @@ function commit(deps: ExporterDeps, buffer: OutputBuffer, { drawing, existing, o
  * Records what a drawing was drawn from when the diagram's own export
  * holds it already: the file is the export of those inputs too. Nothing is
  * written to the file. Left as it is when the file or its record changed
- * since they were looked at; a record the state does not take leaves the
- * one before, and `deps.record` says why.
+ * since they were looked at, or what the drawing was drawn from has; a
+ * record the state does not take leaves the one before, and `deps.record`
+ * says why.
  */
 function refresh(deps: ExporterDeps, { drawing, existing, owner }: Checked): Promise<void> {
   const { key, input } = drawing;
@@ -727,7 +780,12 @@ function refresh(deps: ExporterDeps, { drawing, existing, owner }: Checked): Pro
   }
   return deps.lock(drawing.path, async () => {
     const now = await deps.readExisting(drawing.path);
-    if (now !== null && sameDigest(digestOf(now), existing) && sameRecord(deps.ownerOf(drawing.path), owner)) {
+    if (
+      now !== null &&
+      sameDigest(digestOf(now), existing) &&
+      sameRecord(deps.ownerOf(drawing.path), owner) &&
+      (await deps.staleInputs(drawing)) === null
+    ) {
       await deps.record(key, drawing.path, now, input);
     }
   });
@@ -742,7 +800,8 @@ function refresh(deps: ExporterDeps, { drawing, existing, owner }: Checked): Pro
  * replaced without asking. Before replacing any other — a file someone put
  * there by hand, or changed, or one exported for another diagram — the
  * export asks once for all of them. A file open with unsaved changes is not
- * written at all. Writing stops part way once `stop` says so, or once what
+ * written at all, nor is a drawing whose diagram or included files changed
+ * once it was drawn. Writing stops part way once `stop` says so, or once what
  * was written cannot be recorded. Each drawing is let go of from `buffer`
  * once its turn is over. Null when the replacement is declined outright.
  */
@@ -804,7 +863,7 @@ async function writeDrawings(
       try {
         const committed = await commit(deps, buffer, entry);
         if (!committed.written) {
-          failed.push({ name: drawing.name, path: null, error: committed.error, cause: 'file' });
+          failed.push({ name: drawing.name, path: null, error: committed.error, cause: committed.cause });
         } else if (committed.recorded === null || committed.recorded === 'recorded') {
           outcome.written.push(result);
         } else {

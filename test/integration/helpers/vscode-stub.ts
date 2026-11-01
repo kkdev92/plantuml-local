@@ -915,7 +915,10 @@ export interface VscodeStub {
     treeViews: Map<string, TreeViewHandle>;
     /** Documents `window.showTextDocument` showed, with the line selected. */
     shownDocuments: { uri: string; line: number | undefined }[];
-    /** What `workspace.textDocuments` returns; empty unless a test fills it. */
+    /**
+     * Documents open besides those of the editors shown: `workspace.textDocuments`
+     * lists both, as VS Code does. Empty unless a test fills it.
+     */
     openDocuments: TextEditorStub['document'][];
     /** Editors reported visible besides the active one. */
     visibleEditors: TextEditorStub[];
@@ -1871,7 +1874,9 @@ export function createVscodeStub(): VscodeStub {
       isTrusted: true,
       workspaceFolders: undefined,
       get textDocuments() {
-        return [...hooks.openDocuments];
+        // The document of an editor shown is open, whether or not a test opened it.
+        const shown = [activeEditor, ...hooks.visibleEditors].flatMap((editor) => (editor === undefined ? [] : [editor.document]));
+        return [...new Set([...hooks.openDocuments, ...shown])];
       },
       openTextDocument: async (uri) => {
         const document = hooks.openDocuments.find((candidate) => candidate.uri.toString() === uri.toString());
