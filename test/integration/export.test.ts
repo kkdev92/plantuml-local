@@ -67,6 +67,12 @@ const deps: ExporterDeps = {
   sameFileMessage: 'Multiple diagrams would be saved to the same file. Give each diagram a unique name or use separate export folders.',
   changedMessage: 'The destination file changed during export and was not overwritten. Check its contents before exporting again.',
   dirtyMessage: 'The image file is open with unsaved changes, so it was not overwritten.',
+  spoolChangedMessage: 'The temporary copy of the image changed during export, so it was not written. Export again.',
+  // These tests draw far less than is held in memory.
+  spool: () => Promise.reject(new Error('unexpected: more drawn than is held in memory')),
+  readSpool: () => Promise.resolve(null),
+  deleteSpool: () => Promise.resolve(),
+  deleteFolder: () => Promise.resolve(),
   pngScale: () => 2,
   // No canvas here: these tests export SVG.
   toPng: () => Promise.reject(new Error('no canvas')),
