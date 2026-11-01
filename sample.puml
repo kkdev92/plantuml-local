@@ -9,9 +9,10 @@
 ' act on that diagram, and an error in any of them is listed in the Problems
 ' panel. Export All Diagrams in File as SVG writes one file per diagram,
 ' named by its id: images/checkout.svg and so on, beside this file. Export
-' Diagram as PNG writes the one under the cursor. Go to Symbol in Workspace
-' (Ctrl+T) finds the three by their ids, and what they declare, from any
-' file of the workspace.
+' Diagram as PNG writes the one under the cursor, and Check Export
+' Freshness lists whether each image is still what an export would write.
+' Go to Symbol in Workspace (Ctrl+T) finds the three by their ids, and what
+' they declare, from any file of the workspace.
 
 @startuml(id=checkout)
 actor Customer

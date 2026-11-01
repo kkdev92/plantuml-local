@@ -35,7 +35,9 @@ src/
 ├── export/          finds the diagram blocks of a Markdown or PlantUML file and
 │                    writes them as SVG or PNG files — one, a file's or a
 │                    folder's — with the image links and the record of the
-│                    files written
+│                    files written and what each was drawn from, and checks
+│                    whether the images exported are still what an export
+│                    would write
 ├── grammar/         syntax highlighting for PlantUML files and ```plantuml
 │                    fences: TextMate grammars written as TypeScript, built
 │                    into dist/syntaxes/

@@ -303,7 +303,7 @@ Alice -> Bob : styled by the included file
 
 ## Naming a block for export
 
-The word after the language names the block. *PlantUML Local: Export All Diagrams as SVG and Update Image Links* writes `images/checkout-flow.svg` beside this file and a reference to it below the block, for hosts such as GitHub that show PlantUML as source. On the opening line of a block without a name, the light bulb offers *Name this diagram for export…*. In a trusted workspace, *Go to Symbol in Workspace* (`Ctrl+T`) finds the block by its name — type `checkout` — as it finds the elements the diagrams of the workspace declare, such as `Shop` below.
+The word after the language names the block. *PlantUML Local: Export All Diagrams as SVG and Update Image Links* writes `images/checkout-flow.svg` beside this file and a reference to it below the block, for hosts such as GitHub that show PlantUML as source. On the opening line of a block without a name, the light bulb offers *Name this diagram for export…*. In a trusted workspace, *Go to Symbol in Workspace* (`Ctrl+T`) finds the block by its name — type `checkout` — as it finds the elements the diagrams of the workspace declare, such as `Shop` below. Once the image is written, change a step and run *PlantUML Local: Check Export Freshness*: without drawing or writing anything, it lists the image as out of date because the diagram changed, and picking the image exports it again.
 
 ```plantuml checkout-flow
 @startuml
