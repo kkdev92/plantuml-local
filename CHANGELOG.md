@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Exported files are recorded per diagram.** An export replaces a file
+  without asking only when the same diagram — the same document, the same
+  name taken from the same place, the same format — wrote it and it has not
+  changed since; before, any export from the same document could. A file that
+  already holds the diagram is left as it is and no longer taken as the
+  diagram's own, a file an earlier version exported is asked about once,
+  saying why, and a file open with unsaved edits is not written at all. The
+  file of a diagram exported under a name you type is not recorded, so it is
+  asked about each time. Up to 2,000 files are recorded; a file past that,
+  or one whose record the workspace state does not take, is still written,
+  and the message says so. The message of a bulk export also counts the files
+  already up to date, and the diagrams left unwritten when the export stopped
+  part way.
+- **Diagrams headed for the same file are all refused.** Two blocks of one
+  name, or of names that differ only in case, and two documents of a folder
+  export naming a block alike, are reported before anything is drawn, and
+  none of them is written; before, the first was. Exporting one of two such
+  blocks alone is refused too.
+- **Two exports in one window write a file one at a time**, and each looks
+  at the file and its record again before writing it, leaving one that
+  changed as it is. Cancelling a folder export while it writes stops before
+  the next file.
+
 ## [0.19.0] - 2026-11-01
 
 ### Added

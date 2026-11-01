@@ -66,6 +66,7 @@ const deps: ExporterDeps = {
   pngFailedMessage: 'Could not create a valid PNG image. Try exporting as SVG.',
   sameFileMessage: 'Multiple diagrams would be saved to the same file. Give each diagram a unique name or use separate export folders.',
   changedMessage: 'The destination file changed during export and was not overwritten. Check its contents before exporting again.',
+  dirtyMessage: 'The image file is open with unsaved changes, so it was not overwritten.',
   pngScale: () => 2,
   // No canvas here: these tests export SVG.
   toPng: () => Promise.reject(new Error('no canvas')),
@@ -80,8 +81,11 @@ const deps: ExporterDeps = {
       })
     ),
   // Every test writes under a name of its own.
-  wroteLast: () => false,
-  noteWritten: () => Promise.resolve(),
+  ownerOf: () => null,
+  wroteBefore: () => false,
+  isDirty: () => false,
+  record: () => Promise.resolve('recorded'),
+  lock: (_path, task) => task(),
   confirmReplace: () => Promise.reject(new Error('unexpected question: a file already exists')),
   writeFile: (path, content) =>
     import('node:fs/promises').then(async (fs) => {

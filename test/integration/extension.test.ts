@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import Module from 'node:module';
@@ -5,7 +6,7 @@ import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import MarkdownIt from 'markdown-it';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { createContextStub, type ContextStub } from './helpers/context-stub';
 import {
@@ -1437,7 +1438,8 @@ describe('export (dist)', () => {
       expect(vscodeStub._test.modals.slice(modalsBefore)).toEqual([
         {
           message: 'handmade/images/orders.svg already exists and has different contents. Overwrite it?',
-          detail: undefined,
+          detail:
+            "Once overwritten, the file is recorded as this diagram's export, and exporting the diagram again overwrites it without asking.",
           buttons: ['Overwrite'],
         },
       ]);
@@ -1457,6 +1459,9 @@ describe('export (dist)', () => {
       await exportSvg();
       expect(vscodeStub._test.modals.length).toBe(modalsAfter);
       expect(vscodeStub._test.fileWrites.length).toBe(writesAfter);
+      expect(vscodeStub._test.notifications.info.at(-1)).toBe(
+        'handmade/images/orders.svg already holds this diagram, so it was left as it is.'
+      );
     });
 
     it('replaces a file it exported as the diagram changes, until the file is edited or open with edits', async () => {
@@ -1480,8 +1485,9 @@ describe('export (dist)', () => {
       await exportLabel('third');
       expect(vscodeStub._test.writtenFiles.get(target)).toBe('<svg>edited</svg>');
 
-      // Replaced once told to, it is the export's again; open with unsaved
-      // edits, it is asked about all the same.
+      // Replaced once told to, it is the export's again: open with unsaved
+      // edits, it is not written at all, and once closed it is replaced
+      // without a question.
       vscodeStub._test.messageReply = 'Overwrite';
       try {
         await exportLabel('fourth');
@@ -1498,10 +1504,14 @@ describe('export (dist)', () => {
         vscodeStub._test.openDocuments.splice(vscodeStub._test.openDocuments.indexOf(open), 1);
       }
       expect(vscodeStub._test.writtenFiles.get(target)).toContain('fourth');
+      expect(vscodeStub._test.notifications.error.at(-1)).toBe(
+        'Could not export the diagram: The image file is open with unsaved changes, so it was not overwritten. Save or revert it, then export again.'
+      );
+      await exportLabel('sixth');
+      expect(vscodeStub._test.writtenFiles.get(target)).toContain('sixth');
 
       const asked = 'owned/images/orders.svg already exists and has different contents. Overwrite it?';
       expect(vscodeStub._test.modals.slice(modalsBefore).map((modal) => modal.message)).toEqual([
-        asked,
         asked,
         asked,
       ]);
@@ -1542,7 +1552,8 @@ describe('export (dist)', () => {
       expect(vscodeStub._test.modals.slice(modalsBefore)).toEqual([
         {
           message: '2 files already exist and have different contents. Overwrite them?',
-          detail: 'bulk/images/kept-a.svg\nbulk/images/kept-b.svg',
+          detail:
+            "bulk/images/kept-a.svg\nbulk/images/kept-b.svg\n\nOnce overwritten, each file is recorded as its diagram's export, and exporting the diagrams again overwrites them without asking.",
           buttons: ['Overwrite', 'Keep Existing Files'],
         },
       ]);
@@ -1552,6 +1563,144 @@ describe('export (dist)', () => {
       expect(vscodeStub._test.notifications.info.at(-1)).toBe(
         'Diagrams exported: 1 · Existing files kept: 2'
       );
+    });
+
+    describe('exported by an earlier version', () => {
+      const exported = '<svg>exported by an earlier version</svg>';
+      // What earlier versions kept: the document each file was exported from.
+      const recordEarlier = async (files: readonly string[], document: string): Promise<void> => {
+        const sha256 = createHash('sha256').update(exported).digest('hex');
+        await context.workspaceState.update('exportedFiles', {
+          v: 1,
+          value: Object.fromEntries(files.map((file) => [file, { document, sha256 }])),
+        });
+      };
+
+      it('says why it asks about such a file, and asks about it once', async () => {
+        const target = 'file:///c/earlier/images/orders.svg';
+        vscodeStub._test.writtenFiles.set(target, exported);
+        await recordEarlier([target], 'file:///c/earlier/doc.md');
+        const modalsBefore = vscodeStub._test.modals.length;
+        try {
+          vscodeStub._test.setActiveEditor(makeEditor('file:///c/earlier/doc.md', NAMED_BLOCK, 1));
+          vscodeStub._test.messageReply = 'Overwrite';
+          try {
+            await exportSvg();
+          } finally {
+            vscodeStub._test.messageReply = null;
+          }
+          // Recorded per diagram from then on: the diagram changed is written without a question.
+          vscodeStub._test.setActiveEditor(
+            makeEditor('file:///c/earlier/doc.md', NAMED_BLOCK.replace('hi', 'again'), 1)
+          );
+          await exportSvg();
+        } finally {
+          await context.workspaceState.update('exportedFiles', undefined);
+        }
+
+        expect(vscodeStub._test.modals.slice(modalsBefore)).toEqual([
+          {
+            message: 'earlier/images/orders.svg already exists and has different contents. Overwrite it?',
+            detail:
+              'An earlier version of PlantUML Local exported this file. Exports are now recorded per diagram, so it asks once before overwriting such a file.\n\n' +
+              "Once overwritten, the file is recorded as this diagram's export, and exporting the diagram again overwrites it without asking.",
+            buttons: ['Overwrite'],
+          },
+        ]);
+        expect(vscodeStub._test.writtenFiles.get(target)).toContain('again');
+      });
+
+      it('marks such files among those export-all would replace', async () => {
+        const text = ['kept-a', 'kept-b']
+          .map((name) => ['```plantuml ' + name, '@startuml', `A -> B : ${name}`, '@enduml', '```'].join('\n'))
+          .join('\n\n');
+        vscodeStub._test.writtenFiles.set('file:///c/earlier-all/images/kept-a.svg', exported);
+        vscodeStub._test.writtenFiles.set('file:///c/earlier-all/images/kept-b.svg', 'drawn by hand');
+        await recordEarlier(['file:///c/earlier-all/images/kept-a.svg'], 'file:///c/earlier-all/doc.md');
+        vscodeStub._test.setActiveEditor(makeEditor('file:///c/earlier-all/doc.md', text, 0));
+        const modalsBefore = vscodeStub._test.modals.length;
+
+        vscodeStub._test.messageReply = 'Keep Existing Files';
+        try {
+          await vscodeStub._test.registeredCommands.get('plantumlLocal.exportAllSvg')?.();
+        } finally {
+          vscodeStub._test.messageReply = null;
+          await context.workspaceState.update('exportedFiles', undefined);
+        }
+
+        expect(vscodeStub._test.modals.slice(modalsBefore)).toEqual([
+          {
+            message: '2 files already exist and have different contents. Overwrite them?',
+            detail:
+              'earlier-all/images/kept-a.svg (exported by an earlier version)\nearlier-all/images/kept-b.svg\n\n' +
+              'Files exported by an earlier version of PlantUML Local are asked about once, as exports are now recorded per diagram.\n\n' +
+              "Once overwritten, each file is recorded as its diagram's export, and exporting the diagrams again overwrites them without asking.",
+            buttons: ['Overwrite', 'Keep Existing Files'],
+          },
+        ]);
+        expect(vscodeStub._test.writtenFiles.get('file:///c/earlier-all/images/kept-a.svg')).toBe(exported);
+      });
+    });
+
+    it('writes none of the diagrams headed for one file, in bulk or alone', async () => {
+      const text = [
+        ['orders', 'one'],
+        ['Orders', 'two'],
+        ['billing', 'three'],
+      ]
+        .map(([name, label]) => ['```plantuml ' + name, '@startuml', `A -> B : ${label}`, '@enduml', '```'].join('\n'))
+        .join('\n\n');
+      vscodeStub._test.setActiveEditor(makeEditor('file:///c/alike/doc.md', text, 1));
+
+      await vscodeStub._test.registeredCommands.get('plantumlLocal.exportAllSvg')?.();
+      expect(vscodeStub._test.notifications.warn.at(-1)).toBe(
+        'Diagrams exported: 1 · Diagrams that could not be exported: 2. See the Output panel for the reasons.'
+      );
+      // Alone, the one under the cursor is refused all the same.
+      await exportSvg();
+      expect(vscodeStub._test.notifications.error.at(-1)).toBe(
+        'Could not export the diagram: Multiple diagrams would be saved to the same file. Give each diagram a unique name or use separate export folders.'
+      );
+
+      expect(
+        [...vscodeStub._test.writtenFiles.keys()].filter((key) => key.startsWith('file:///c/alike/images/'))
+      ).toEqual(['file:///c/alike/images/billing.svg']);
+    });
+
+    it('counts the files that already hold their diagrams, and writes none of them', async () => {
+      vscodeStub._test.setActiveEditor(makeEditor('file:///c/current/doc.md', NAMED_BLOCK, 1));
+      await vscodeStub._test.registeredCommands.get('plantumlLocal.exportAllSvg')?.();
+      const writes = vscodeStub._test.fileWrites.length;
+
+      await vscodeStub._test.registeredCommands.get('plantumlLocal.exportAllSvg')?.();
+
+      expect(vscodeStub._test.fileWrites.length).toBe(writes);
+      expect(vscodeStub._test.notifications.info.at(-1)).toBe('Image files already up to date: 1');
+    });
+
+    it('writes a file whose record the workspace state does not take, and asks about it the next time', async () => {
+      const failing = vi
+        .spyOn(context.workspaceState, 'update')
+        .mockRejectedValue(new Error('The state could not be saved.'));
+      try {
+        vscodeStub._test.setActiveEditor(makeEditor('file:///c/unrecorded/doc.md', NAMED_BLOCK, 1));
+        await exportSvg();
+      } finally {
+        failing.mockRestore();
+      }
+      expect(vscodeStub._test.writtenFiles.get('file:///c/unrecorded/images/orders.svg')).toContain('hi');
+      expect(vscodeStub._test.notifications.warn.at(-1)).toBe(
+        "Exported to unrecorded/images/orders.svg, but not recorded as this diagram's export, so exporting it again asks before overwriting the file. See the Output panel for why."
+      );
+
+      const modalsBefore = vscodeStub._test.modals.length;
+      vscodeStub._test.setActiveEditor(
+        makeEditor('file:///c/unrecorded/doc.md', NAMED_BLOCK.replace('hi', 'changed'), 1)
+      );
+      await exportSvg();
+      expect(vscodeStub._test.modals.slice(modalsBefore).map((modal) => modal.message)).toEqual([
+        'unrecorded/images/orders.svg already exists and has different contents. Overwrite it?',
+      ]);
     });
 
     it('never writes over a folder of the same name', async () => {
@@ -1755,6 +1904,26 @@ describe('export (dist)', () => {
           ' · Unnamed diagrams were not exported: 2. Add a name to the start line, for example: "@startuml(id=my-diagram)".',
         'Unnamed diagrams were not exported: 2. Add a name to the start line, for example: "@startuml(id=my-diagram)".',
       ]);
+    });
+
+    it('writes none of the diagrams that documents beside each other head for one file', async () => {
+      vscodeStub._test.writtenFiles.set('file:///c/beside/a.md', block('shared', 'from a'));
+      vscodeStub._test.writtenFiles.set('file:///c/beside/b.md', block('Shared', 'from b'));
+      vscodeStub._test.writtenFiles.set('file:///c/beside/c.md', block('own', 'from c'));
+
+      vscodeStub._test.messageReply = 'Export';
+      try {
+        await exportFolder('file:///c/beside');
+      } finally {
+        vscodeStub._test.messageReply = null;
+      }
+
+      expect(
+        [...vscodeStub._test.writtenFiles.keys()].filter((key) => key.startsWith('file:///c/beside/images/'))
+      ).toEqual(['file:///c/beside/images/own.svg']);
+      expect(vscodeStub._test.notifications.warn.at(-1)).toBe(
+        'Diagrams exported: 1 · Diagrams that could not be exported: 2. See the Output panel for the reasons.'
+      );
     });
   });
 

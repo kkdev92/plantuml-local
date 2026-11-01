@@ -258,6 +258,24 @@ describe('isValidBlockName', () => {
   });
 });
 
+describe('nameBasis', () => {
+  it('says where the name of each diagram comes from', () => {
+    const fenced = findPlantUmlBlocks(md('```plantuml orders', 'A -> B', '```', '', '```plantuml', 'C -> D', '```'));
+    const declared = findFileDiagrams(md('@startuml(id=orders)', 'A -> B', '@enduml', '@startuml', 'C -> D', '@enduml'), 'flows');
+    const single = findFileDiagrams(md('@startuml', 'A -> B', '@enduml'), 'flows');
+
+    expect(fenced.map((b) => [b.name, b.nameBasis])).toEqual([
+      ['orders', 'fence'],
+      [null, null],
+    ]);
+    expect(declared.map((d) => [d.name, d.nameBasis])).toEqual([
+      ['orders', 'explicit-id'],
+      [null, null],
+    ]);
+    expect(single.map((d) => [d.name, d.nameBasis])).toEqual([['flows', 'single-file-name']]);
+  });
+});
+
 describe('findFileDiagrams', () => {
   it('takes a file with one diagram as one block, named after the file', () => {
     const diagrams = findFileDiagrams(md("' a comment", '@startuml', 'A -> B', '@enduml', ''), 'orders');
@@ -265,6 +283,7 @@ describe('findFileDiagrams', () => {
     expect(diagrams).toEqual([
       {
         name: 'orders',
+        nameBasis: 'single-file-name',
         source: '@startuml\nA -> B\n@enduml',
         sourceLine: 1,
         openLine: 1,

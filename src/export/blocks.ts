@@ -18,6 +18,13 @@ import { isDiagramFence } from '../core/constants';
 import { splitLines } from '../core/lines';
 import { END, START, forEachShapeLine } from '../core/shape';
 
+/**
+ * Where a diagram's name comes from: the info string of its fence, the
+ * `(id=…)` a diagram of a PlantUML file declares, or the name of a PlantUML
+ * file for its only diagram.
+ */
+export type NameBasis = 'fence' | 'explicit-id' | 'single-file-name';
+
 /** A `plantuml` fenced block found in a document, or a diagram of a PlantUML file. */
 export interface PlantUmlBlock {
   /**
@@ -26,6 +33,12 @@ export interface PlantUmlBlock {
    * Export uses it as the file name.
    */
   name: string | null;
+  /**
+   * Where `name` comes from, or null when the block is unnamed. The same
+   * name from elsewhere names another diagram: export records the files it
+   * wrote under both (src/export/history.ts).
+   */
+  nameBasis: NameBasis | null;
   /** The block's contents, without the fence lines. */
   source: string;
   /**
@@ -175,8 +188,10 @@ export function findPlantUmlBlocks(text: string): PlantUmlBlock[] {
     const opening = lines[openLine] ?? '';
     const name = token.info.trim().split(/\s+/)[1];
     const leadingBlank = token.content.split('\n').findIndex((line) => line.trim() !== '');
+    const named = name !== undefined && name !== '';
     blocks.push({
-      name: name !== undefined && name !== '' ? name : null,
+      name: named ? name : null,
+      nameBasis: named ? 'fence' : null,
       source: token.content.trim(),
       sourceLine: openLine + 1 + Math.max(leadingBlank, 0),
       openLine,
@@ -233,6 +248,7 @@ export function findFileDiagrams(text: string, fileName: string): PlantUmlBlock[
 
   return found.map((diagram) => ({
     name: diagram.id ?? (found.length === 1 ? fileName : null),
+    nameBasis: diagram.id !== null ? 'explicit-id' : found.length === 1 ? 'single-file-name' : null,
     source: lines.slice(diagram.start, diagram.end + 1).join('\n'),
     sourceLine: diagram.start,
     openLine: diagram.start,
