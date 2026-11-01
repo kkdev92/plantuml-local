@@ -2376,6 +2376,440 @@ describe('export (dist)', () => {
         expect(vscodeStub._test.writtenFiles.get('file:///c/bigkept/images/one.png')).toBe('by hand');
       });
     });
+
+    it('finds a PNG out of date at another scale, and both images of a diagram in another palette, as its document exports now', async () => {
+      const folder = 'file:///c/pngfresh';
+      vscodeStub._test.setActiveEditor(makeEditor(`${folder}/doc.md`, NAMED_BLOCK, 1));
+      await vscodeStub._test.registeredCommands.get('plantumlLocal.exportSvg')?.();
+      const { panel, done } = await start(`${folder}/doc.md`);
+      panel.receive({ type: 'ready' });
+      const draw = panel.webview.posted[0] as { width: number; height: number };
+      panel.receive({ type: 'png', data: pngOf(draw.width, draw.height) });
+      await done;
+      const checked = async (): Promise<string[]> => {
+        const logs = vscodeStub._test.logs.length;
+        await vscodeStub._test.registeredCommands.get('plantumlLocal.checkExportFreshness')?.();
+        return vscodeStub._test.logs.slice(logs).map((line) => line.replace(/ \{"application":.*\}$/, ''));
+      };
+
+      const lighter = 'It was drawn in the light palette; exports are drawn in the dark palette now.';
+      vscodeStub._test.setConfiguration('exportPngScale', 4, folder);
+      try {
+        expect(await checked()).toEqual([
+          'info: Exported images of pngfresh/doc.md:',
+          'info: orders as SVG, pngfresh/images/orders.svg: Recorded inputs and output match.',
+          'info: orders as PNG, pngfresh/images/orders.png: Out of date. It was drawn at 2×; PNG images are drawn at 4× now.',
+        ]);
+        // Picked, the PNG is exported again as a PNG.
+        const calls = vscodeStub._test.commandCalls.length;
+        vscodeStub._test.quickPickReply = '$(sync) orders.png';
+        try {
+          await vscodeStub._test.registeredCommands.get('plantumlLocal.checkExportFreshness')?.();
+        } finally {
+          vscodeStub._test.quickPickReply = null;
+        }
+        expect(vscodeStub._test.commandCalls.slice(calls).filter(({ id }) => id.startsWith('plantumlLocal.export'))).toEqual([
+          { id: 'plantumlLocal.exportPng', args: [{ uri: `${folder}/doc.md`, line: 0 }] },
+        ]);
+        vscodeStub._test.setConfiguration('exportTheme', 'dark', folder);
+        expect(await checked()).toEqual([
+          'info: Exported images of pngfresh/doc.md:',
+          `info: orders as SVG, pngfresh/images/orders.svg: Out of date. ${lighter}`,
+          `info: orders as PNG, pngfresh/images/orders.png: Out of date. ${lighter} It was drawn at 2×; PNG images are drawn at 4× now.`,
+        ]);
+      } finally {
+        vscodeStub._test.setConfiguration('exportPngScale', undefined, folder);
+        vscodeStub._test.setConfiguration('exportTheme', undefined, folder);
+      }
+    });
+  });
+
+  describe('checking exported images', () => {
+    /**
+     * Checks the images exported from the document of the active editor,
+     * picking the item labelled `reply` from the list, if any: the lines it
+     * wrote to the output channel, without the fields the logger adds to
+     * each, and the lists it showed.
+     */
+    const check = async (reply: string | null = null): Promise<{ logged: string[]; shown: { title: string | undefined; labels: string[] }[] }> => {
+      const logs = vscodeStub._test.logs.length;
+      const picks = vscodeStub._test.quickPicksShown.length;
+      vscodeStub._test.quickPickReply = reply;
+      try {
+        await vscodeStub._test.registeredCommands.get('plantumlLocal.checkExportFreshness')?.();
+      } finally {
+        vscodeStub._test.quickPickReply = null;
+      }
+      return {
+        logged: vscodeStub._test.logs.slice(logs).map((line) => line.replace(/ \{"application":.*\}$/, '')),
+        shown: vscodeStub._test.quickPicksShown.slice(picks),
+      };
+    };
+    /** Exports the diagram at the cursor of `editor` as SVG, with `editor` the active one. */
+    const exportSvg = async (editor: TextEditorStub): Promise<void> => {
+      vscodeStub._test.setActiveEditor(editor);
+      await vscodeStub._test.registeredCommands.get('plantumlLocal.exportSvg')?.();
+    };
+    const history = (): string => JSON.stringify(context.workspaceState.get('exportHistory'));
+
+    it('finds an image current as exported, drawing, writing and recording nothing, and lists it', async () => {
+      await exportSvg(makeEditor('file:///c/fresh/doc.md', `# Design\n\n${NAMED_BLOCK}`, 3));
+      const writes = vscodeStub._test.fileWrites.length;
+      const recorded = history();
+      const panels = vscodeStub._test.webviewPanels.length;
+
+      const { logged, shown } = await check();
+
+      expect(logged).toEqual([
+        'info: Exported images of fresh/doc.md:',
+        'info: orders as SVG, fresh/images/orders.svg: Recorded inputs and output match.',
+      ]);
+      expect(shown).toEqual([{ title: 'Exported images of fresh/doc.md', labels: ['Images', '$(check) orders.svg'] }]);
+      expect(vscodeStub._test.fileWrites).toHaveLength(writes);
+      expect(history()).toBe(recorded);
+      expect(vscodeStub._test.webviewPanels).toHaveLength(panels);
+    });
+
+    it('finds an image out of date once its diagram changed, though the preview shows it as exported, and not for a heading above it', async () => {
+      const uri = 'file:///c/stale/doc.md';
+      const diagram = (label: string): string => `@startuml\nAlice -> Bob : ${label}\n@enduml\n`;
+      const editor = makeEditor(uri, `\`\`\`plantuml orders\n${diagram('asExported')}\`\`\``, 1);
+      await exportSvg(editor);
+      const row = (state: string): string => `info: orders as SVG, stale/images/orders.svg: ${state}`;
+
+      editor.document.setText(`# Heading\n\n\`\`\`plantuml orders\n${diagram('asExported')}\`\`\``);
+      expect((await check()).logged.at(-1)).toBe(row('Recorded inputs and output match.'));
+
+      // The preview, updated by hand, keeps the drawing of the diagram as exported.
+      const md = makeMd();
+      api.extendMarkdownIt(md);
+      const fence = (content: string): string =>
+        md.renderer.rules.fence!([{ info: 'plantuml orders', content }], 0, {}, { currentDocument: { toString: () => uri } }, {
+          renderToken: () => '',
+        });
+      vscodeStub._test.setConfiguration('preview.updateMode', 'manual', 'file:///c/stale');
+      try {
+        expect(await waitFor(() => fence(diagram('asExported')).includes('asExported'))).toBe(true);
+        // Edited, and not saved.
+        editor.document.setText(`# Heading\n\n\`\`\`plantuml orders\n${diagram('edited')}\`\`\``);
+        Object.assign(editor.document, { isDirty: true });
+        expect(fence(diagram('edited'))).toContain('asExported');
+
+        const { logged, shown } = await check();
+        expect(logged).toEqual([
+          'info: Exported images of stale/doc.md, checked against its unsaved changes:',
+          row('Out of date. The diagram changed.'),
+        ]);
+        expect(shown.at(-1)?.title).toBe('Exported images of stale/doc.md, checked against its unsaved changes');
+      } finally {
+        vscodeStub._test.setConfiguration('preview.updateMode', undefined, 'file:///c/stale');
+      }
+    });
+
+    it('finds an image deleted missing, and one edited since or open with unsaved changes a conflict, and makes none of them', async () => {
+      await exportSvg(makeEditor('file:///c/gone/doc.md', NAMED_BLOCK, 1));
+      const target = 'file:///c/gone/images/orders.svg';
+      const writes = vscodeStub._test.fileWrites.length;
+      const row = (state: string): string => `info: orders as SVG, gone/images/orders.svg: ${state}`;
+
+      const open = Object.assign(makeEditor(target, vscodeStub._test.writtenFiles.get(target)!, 0, { languageId: 'xml' }).document, {
+        isDirty: true,
+      });
+      vscodeStub._test.openDocuments.push(open);
+      try {
+        expect((await check()).logged.at(-1)).toBe(row('Conflict. The file is open with unsaved changes.'));
+      } finally {
+        vscodeStub._test.openDocuments.splice(vscodeStub._test.openDocuments.indexOf(open), 1);
+      }
+      vscodeStub._test.writtenFiles.set(target, '<svg>edited</svg>');
+      vscodeStub._test.writtenBytes.delete(target);
+      expect((await check()).logged.at(-1)).toBe(row('Conflict. The file changed after it was exported.'));
+      vscodeStub._test.writtenFiles.delete(target);
+      const { logged, shown } = await check();
+
+      expect(logged.at(-1)).toBe(row('Missing. The file is not there.'));
+      expect(shown.at(-1)?.labels).toEqual(['Images', '$(error) orders.svg']);
+      expect(vscodeStub._test.fileWrites).toHaveLength(writes);
+    });
+
+    it('takes no image without a record of it as the export\'s: neither one put where its diagram is exported, nor one an earlier version exported', async () => {
+      const target = 'file:///c/byhand/images/orders.svg';
+      vscodeStub._test.writtenFiles.set(target, '<svg>by hand</svg>');
+      vscodeStub._test.setActiveEditor(makeEditor('file:///c/byhand/doc.md', NAMED_BLOCK, 1));
+
+      const { logged, shown } = await check();
+
+      expect(logged.at(-1)).toBe(
+        'info: orders as SVG, byhand/images/orders.svg: Not managed by the export. ' +
+          'There is no record of exporting it: it was made by hand or by another program, or its record is gone.'
+      );
+      expect(shown.at(-1)?.labels).toEqual(['Images', '$(circle-outline) orders.svg']);
+      // What earlier versions kept: the document each file was exported from.
+      await context.workspaceState.update('exportedFiles', {
+        v: 1,
+        value: { [target]: { document: 'file:///c/byhand/doc.md', sha256: createHash('sha256').update('<svg>by hand</svg>').digest('hex') } },
+      });
+      try {
+        expect((await check()).logged.at(-1)).toBe(
+          'info: orders as SVG, byhand/images/orders.svg: Cannot be determined. ' +
+            'Only an earlier version of the extension recorded exporting it, without what it was drawn from.'
+        );
+      } finally {
+        await context.workspaceState.update('exportedFiles', undefined);
+      }
+    });
+
+    it('reads no image through a link, nor what is a folder or a file past 64 MiB where an image would be', async () => {
+      await exportSvg(makeEditor('file:///c/unread/doc.md', NAMED_BLOCK, 1));
+      const target = 'file:///c/unread/images/orders.svg';
+      const { stat, readFile } = vscodeStub.workspace.fs;
+      const read: string[] = [];
+      /** What the check says of the image, with `found` at its path as VS Code's file system describes it. */
+      const checkedWith = async (found: { type: number; size: number }): Promise<string | undefined> => {
+        vscodeStub.workspace.fs.stat = async (uri) => (uri.toString() === target ? { ...found, ctime: 0, mtime: 0 } : stat(uri));
+        try {
+          return (await check()).logged.at(-1);
+        } finally {
+          vscodeStub.workspace.fs.stat = stat;
+        }
+      };
+      vscodeStub.workspace.fs.readFile = (uri) => {
+        read.push(uri.toString());
+        return readFile(uri);
+      };
+      const { File, Directory, SymbolicLink, Unknown } = vscodeStub.FileType;
+      const row = (state: string): string => `info: orders as SVG, unread/images/orders.svg: ${state}`;
+      try {
+        // A link to a file is both, and one that leads nowhere is a link alone.
+        expect(await checkedWith({ type: File | SymbolicLink, size: 10 })).toBe(row('Cannot be checked. It is a link, which is not followed.'));
+        expect(await checkedWith({ type: Unknown | SymbolicLink, size: 0 })).toBe(row('Cannot be checked. It is a link, which is not followed.'));
+        expect(await checkedWith({ type: Directory, size: 0 })).toBe(
+          row('Cannot be checked. Something other than a file is where the image would be.')
+        );
+        expect(await checkedWith({ type: File, size: 64 * 1024 * 1024 + 1 })).toBe(
+          row('Cannot be determined. The file is larger than 64 MiB, the most that is read to check it.')
+        );
+      } finally {
+        vscodeStub.workspace.fs.readFile = readFile;
+      }
+      expect(read.filter((uri) => uri === target)).toEqual([]);
+    });
+
+    it('cannot tell an image drawn from text that reads the time, and names what it uses', async () => {
+      const lines = ['```plantuml dated', '@startuml', 'Alice -> Bob : %date()', '@enduml', '```'];
+      await exportSvg(makeEditor('file:///c/dated/doc.md', lines.join('\n'), 1));
+
+      const { logged, shown } = await check();
+
+      expect(logged.at(-1)).toBe(
+        'info: dated as SVG, dated/images/dated.svg: Cannot be determined. It uses %date(), which can draw it differently each time. ' +
+          'What it was drawn from is what it would be drawn from now.'
+      );
+      expect(shown.at(-1)?.labels).toEqual(['Images', '$(question) dated.svg']);
+    });
+
+    it('exports an image again when it is picked, as its export command does for the diagram on its line', async () => {
+      const editor = makeEditor('file:///c/again/doc.md', `# Doc\n\n${NAMED_BLOCK}`, 3);
+      await exportSvg(editor);
+      editor.document.setText(`# Doc\n\n${NAMED_BLOCK.replace(': hi', ': changed')}`);
+      const calls = vscodeStub._test.commandCalls.length;
+
+      await check('$(sync) orders.svg');
+
+      const exported = vscodeStub._test.commandCalls.slice(calls).filter(({ id }) => id === 'plantumlLocal.exportSvg');
+      expect(exported).toEqual([{ id: 'plantumlLocal.exportSvg', args: [{ uri: 'file:///c/again/doc.md', line: 2 }] }]);
+      // What it runs exports the diagram as it is now, which is then current.
+      vscodeStub._test.openDocument(editor.document);
+      try {
+        await vscodeStub._test.registeredCommands.get('plantumlLocal.exportSvg')?.(...exported[0]!.args);
+      } finally {
+        vscodeStub._test.closeDocument(editor.document);
+      }
+      expect(vscodeStub._test.writtenFiles.get('file:///c/again/images/orders.svg')).toContain('changed');
+      expect((await check()).logged.at(-1)).toBe('info: orders as SVG, again/images/orders.svg: Recorded inputs and output match.');
+    });
+
+    it('checks the diagrams of a PlantUML file as its export names them, taking no line between them for an image link', async () => {
+      const uri = 'file:///c/pumlfresh/flows.puml';
+      // The engine reads nothing between diagrams: no marked link is read there.
+      const lines = [
+        '@startuml(id=orders)',
+        'Alice -> Bob : orders',
+        '@enduml',
+        '![orders](images/old.svg#plantuml-local)',
+        '@startuml',
+        'Carol -> Dave : unnamed',
+        '@enduml',
+        '',
+        '@startuml(id=billing)',
+        'Erin -> Frank : billing',
+        '@enduml',
+      ];
+      const editor = makeEditor(uri, lines.join('\n'), 1, { languageId: 'plantuml' });
+      await exportSvg(editor);
+      editor.selection.active.line = 9;
+      await exportSvg(editor);
+      editor.document.setText(lines.join('\n').replace(': billing', ': changed'));
+      const calls = vscodeStub._test.commandCalls.length;
+
+      const { logged, shown } = await check('$(sync) billing.svg');
+
+      expect(logged).toEqual([
+        'info: Exported images of pumlfresh/flows.puml:',
+        'info: orders as SVG, pumlfresh/images/orders.svg: Recorded inputs and output match.',
+        'info: billing as SVG, pumlfresh/images/billing.svg: Out of date. The diagram changed.',
+        'info: Diagrams without a name are not checked: 1. They are exported under a name typed in, which is not recorded.',
+      ]);
+      expect(shown).toEqual([{ title: 'Exported images of pumlfresh/flows.puml', labels: ['Images', '$(check) orders.svg', '$(sync) billing.svg'] }]);
+      // Picked, it is exported again from the line it starts on, as the .puml preview asks.
+      expect(vscodeStub._test.commandCalls.slice(calls).filter(({ id }) => id.startsWith('plantumlLocal.export'))).toEqual([
+        { id: 'plantumlLocal.exportSvg', args: [{ uri, line: 8 }] },
+      ]);
+    });
+
+    it('lists apart a marked image link that leads elsewhere, going to its line when picked, and leaves the document as it is', async () => {
+      const lines = [
+        '# Doc',
+        '',
+        ...NAMED_BLOCK.split('\n'),
+        '',
+        '![orders](images/old.svg#plantuml-local)',
+        '',
+        '```plantuml billing',
+        '@startuml',
+        'A -> B',
+        '@enduml',
+        '```',
+        '',
+        '![my caption](images/elsewhere.svg)',
+      ];
+      const editor = makeEditor('file:///c/links/doc.md', lines.join('\n'), 3);
+      await exportSvg(editor);
+      const shownBefore = vscodeStub._test.shownDocuments.length;
+
+      const { logged, shown } = await check('$(link) orders');
+
+      expect(logged).toEqual([
+        'info: Exported images of links/doc.md:',
+        'info: orders as SVG, links/images/orders.svg: Recorded inputs and output match.',
+        'info: Image link of orders on line 9: The link images/old.svg#plantuml-local does not lead to the file the diagram is exported to.',
+      ]);
+      expect(shown.at(-1)?.labels).toEqual(['Images', '$(check) orders.svg', 'Image links', '$(link) orders']);
+      expect(vscodeStub._test.shownDocuments.slice(shownBefore)).toEqual([{ uri: 'file:///c/links/doc.md', line: 8 }]);
+      expect(editor.document.getText()).toBe(lines.join('\n'));
+    });
+
+    it('lists apart the image of a diagram renamed since, showing it in the Explorer when picked, and leaves it as it is', async () => {
+      const editor = makeEditor('file:///c/renamed/doc.md', NAMED_BLOCK, 1);
+      await exportSvg(editor);
+      editor.document.setText(NAMED_BLOCK.replace('plantuml orders', 'plantuml billing'));
+      const calls = vscodeStub._test.commandCalls.length;
+
+      const { logged, shown } = await check('$(file-media) renamed/images/orders.svg');
+
+      expect(logged).toEqual([
+        'info: Exported images of renamed/doc.md:',
+        'info: Recorded image of orders as SVG, which no diagram of this file is exported to now: renamed/images/orders.svg. It is left as it is.',
+      ]);
+      expect(shown.at(-1)?.labels).toEqual(['Images no diagram is exported to now', '$(file-media) renamed/images/orders.svg']);
+      const revealed = vscodeStub._test.commandCalls.slice(calls).filter(({ id }) => id === 'revealInExplorer');
+      expect(revealed.map(({ args }) => String(args[0]))).toEqual(['file:///c/renamed/images/orders.svg']);
+      expect(vscodeStub._test.writtenFiles.has('file:///c/renamed/images/orders.svg')).toBe(true);
+    });
+
+    it('checks nothing in Restricted Mode, for a file not saved or not on disk, or with no file open, and says why', async () => {
+      const calls = vscodeStub._test.commandCalls.length;
+      const picks = vscodeStub._test.quickPicksShown.length;
+      const warnings = vscodeStub._test.notifications.warn.length;
+      vscodeStub._test.setActiveEditor(makeEditor('file:///c/fresh/doc.md', NAMED_BLOCK, 1));
+      vscodeStub.workspace.isTrusted = false;
+      vscodeStub._test.notificationReply = 'Manage Workspace Trust';
+      try {
+        await check();
+      } finally {
+        vscodeStub._test.notificationReply = null;
+        vscodeStub.workspace.isTrusted = true;
+      }
+      vscodeStub._test.setActiveEditor(makeEditor('untitled:Untitled-1', NAMED_BLOCK, 1, { isUntitled: true }));
+      await check();
+      vscodeStub._test.setActiveEditor(makeEditor('vscode-vfs://github/owner/repo/doc.md', NAMED_BLOCK, 1));
+      await check();
+      // No editor, and no document open that another test left.
+      vscodeStub._test.setActiveEditor(undefined);
+      const open = vscodeStub._test.openDocuments.splice(0);
+      const visible = vscodeStub._test.visibleEditors.splice(0);
+      try {
+        await check();
+      } finally {
+        vscodeStub._test.openDocuments.push(...open);
+        vscodeStub._test.visibleEditors.push(...visible);
+      }
+
+      expect(vscodeStub._test.notifications.warn.slice(warnings)).toEqual([
+        'Checking exported images is unavailable in Restricted Mode. Trust this workspace to check them.',
+        'Save the file before checking the images exported from it.',
+        'The images exported from a file can be checked only for a file on disk.',
+        'Open a Markdown or PlantUML file to check the images exported from it.',
+      ]);
+      expect(vscodeStub._test.commandCalls.slice(calls).filter(({ id }) => id === 'workbench.trust.manage')).toHaveLength(1);
+      expect(vscodeStub._test.quickPicksShown).toHaveLength(picks);
+    });
+
+    it('shows nothing once cancelled, or once the file changed as it was checked, and does nothing picked once it changed since', async () => {
+      const editor = makeEditor('file:///c/moving/doc.md', NAMED_BLOCK, 1);
+      await exportSvg(editor);
+      const calls = vscodeStub._test.commandCalls.length;
+      const picks = vscodeStub._test.quickPicksShown.length;
+      const withProgress = vscodeStub.window.withProgress;
+
+      // Cancelled as it starts.
+      vscodeStub.window.withProgress = (options, task) =>
+        withProgress(options, (progress, token) => task(progress, { ...token, isCancellationRequested: true }));
+      try {
+        expect((await check()).logged).toEqual([]);
+      } finally {
+        vscodeStub.window.withProgress = withProgress;
+      }
+      expect(vscodeStub._test.notifications.info.at(-1)).toBe('The check of exported images was cancelled.');
+
+      // Edited as it was checked: what was found is of the text before.
+      vscodeStub.window.withProgress = async (options, task) => {
+        const found = await withProgress(options, task);
+        editor.document.version += 1;
+        return found;
+      };
+      vscodeStub._test.notificationReply = 'Check Again';
+      try {
+        expect((await check()).logged).toEqual([]);
+      } finally {
+        vscodeStub._test.notificationReply = null;
+        vscodeStub.window.withProgress = withProgress;
+      }
+      expect(vscodeStub._test.notifications.warn.at(-1)).toBe(
+        'The file changed while its exported images were checked, so what was found is not shown. Check them again.'
+      );
+      expect(vscodeStub._test.quickPicksShown).toHaveLength(picks);
+      expect(vscodeStub._test.commandCalls.slice(calls).map(({ id }) => id)).toContain('plantumlLocal.checkExportFreshness');
+
+      // Edited while the list was shown: its lines may have moved.
+      const createQuickPick = vscodeStub.window.createQuickPick;
+      vscodeStub.window.createQuickPick = () => {
+        const pick = createQuickPick();
+        const show = pick.show;
+        pick.show = () => {
+          editor.document.version += 1;
+          show();
+        };
+        return pick;
+      };
+      try {
+        await check('$(check) orders.svg');
+      } finally {
+        vscodeStub.window.createQuickPick = createQuickPick;
+      }
+      expect(vscodeStub._test.notifications.warn.at(-1)).toBe('The file changed after its exported images were checked. Check them again.');
+      expect(vscodeStub._test.commandCalls.slice(calls).map(({ id }) => id)).not.toContain('plantumlLocal.exportSvg');
+    });
   });
 });
 
@@ -5769,6 +6203,68 @@ describe('diagram dependencies (dist)', () => {
 
       expect(vscodeStub._test.writtenFiles.get(target)).toBe('<svg>drawn by hand</svg>');
       expect(vscodeStub._test.notifications.error.at(-1)).toMatch(STALE);
+    });
+  });
+
+  describe('checking the images exported from a document that includes files', () => {
+    /** Checks the images exported from the document of the active editor: the line it wrote of the last, without the fields the logger adds. */
+    const checked = async (): Promise<string | undefined> => {
+      const logs = vscodeStub._test.logs.length;
+      await vscodeStub._test.registeredCommands.get('plantumlLocal.checkExportFreshness')?.();
+      return vscodeStub._test.logs.slice(logs).at(-1)?.replace(/ \{"application":.*\}$/, '');
+    };
+    /** Exports `folder`/doc.md, whose diagram includes `include`, as SVG, leaving its editor the active one. */
+    const exported = async (folder: string, include: string): Promise<void> => {
+      vscodeStub._test.setActiveEditor(onDisk(`${folder}/doc.md`, ['```plantuml orders', '@startuml', `!include ${include}`, '@enduml', '```'], 1));
+      await vscodeStub._test.registeredCommands.get('plantumlLocal.exportSvg')?.();
+      expect(recordOf(uriOf(`${folder}/images/orders.svg`))?.input?.resources.files).toHaveLength(1);
+    };
+    const row = (state: string): RegExp => new RegExp(`^info: orders as SVG, .*images/orders\\.svg: ${state}$`);
+
+    it('finds an image out of date once a file it includes changed, not saved again the same, and checks one open as the editor has it', async () => {
+      const part = pathOf('docs/fresh-part/part.iuml');
+      await mkdir(pathOf('docs/fresh-part'), { recursive: true });
+      await writeFile(part, 'Alice -> Bob : before\n');
+      await exported('docs/fresh-part', 'part.iuml');
+
+      await writeFile(part, 'Alice -> Bob : before\n');
+      expect(await checked()).toMatch(row('Recorded inputs and output match\\.'));
+      await writeFile(part, 'Alice -> Bob : after\n');
+      expect(await checked()).toMatch(row('Out of date\\. An included file changed: .*part\\.iuml\\.'));
+
+      // Open with unsaved changes that put it back as it was drawn.
+      const open = Object.assign(onDisk('docs/fresh-part/part.iuml', ['Alice -> Bob : before', ''], 0, 'plantuml').document, { isDirty: true });
+      vscodeStub._test.openDocument(open);
+      try {
+        expect(await checked()).toMatch(row('Recorded inputs and output match\\. Checked against the unsaved changes of files it includes\\.'));
+      } finally {
+        vscodeStub._test.closeDocument(open);
+      }
+    });
+
+    it('finds an image out of date once an include is found where it is looked for first', async () => {
+      await mkdir(pathOf('docs/fresh-found'), { recursive: true });
+      await writeFile(pathOf('shared/fresh-found.iuml'), 'Alice -> Bob : shared\n');
+      await exported('docs/fresh-found', 'fresh-found.iuml');
+      expect(await checked()).toMatch(row('Recorded inputs and output match\\.'));
+
+      // Beside the document, where it is looked for before the include paths.
+      await writeFile(pathOf('docs/fresh-found/fresh-found.iuml'), 'Alice -> Bob : beside\n');
+
+      expect(await checked()).toMatch(row('Out of date\\. An include is found elsewhere now, or not at all: fresh-found\\.iuml\\.'));
+    });
+
+    it('cannot tell an image drawn from a file it includes that reads the time, and names the file', async () => {
+      await mkdir(pathOf('docs/fresh-dated'), { recursive: true });
+      await writeFile(pathOf('docs/fresh-dated/part.iuml'), 'Alice -> Bob : %date()\n');
+      await exported('docs/fresh-dated', 'part.iuml');
+
+      expect(await checked()).toMatch(
+        row(
+          'Cannot be determined\\. It uses %date\\(\\) in .*part\\.iuml, which can draw it differently each time\\. ' +
+            'What it was drawn from is what it would be drawn from now\\.'
+        )
+      );
     });
   });
 });

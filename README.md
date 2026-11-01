@@ -56,7 +56,7 @@ Your diagram source is processed locally and is not sent to a rendering service.
 - **Go to Diagram**: *Go to Diagram in Document…* lists the diagram blocks of a Markdown file — with the heading above each, its kind and its title or first line — and moves the cursor to the one picked
 - **Diagram Dependencies**: *Show Diagram Dependencies* lists in the Explorer what each diagram of the editor asked for when last drawn — the files read, not found or refused, each under the file that asked — its include lines that no request matches, and the files of the bundled libraries read; with a file in the editor, the diagrams of open documents that read it
 - **Colours**: A swatch beside each colour a diagram sets — a `skinparam` value, an element's colour, a `<style>` property — opens VS Code's colour picker, which writes the pick back as `#RRGGBB`
-- **Export**: Diagrams can be written to SVG files — one, a whole document or a whole folder — or to PNG files, one or a whole folder, and referenced from the Markdown, for hosts such as GitHub that do not draw PlantUML
+- **Export**: Diagrams can be written to SVG files — one, a whole document or a whole folder — or to PNG files, one or a whole folder, and referenced from the Markdown, for hosts such as GitHub that do not draw PlantUML; *Check Export Freshness* lists which images of a file are still what an export would write
 - **Multi-Diagram Pages**: Any number of diagrams per page; renders are serialised so results never mix
 - **Dark-Mode Aware**: Diagrams re-render to match your colour theme, or pin the palette via settings
 - **Full-Width Text Support**: Japanese and other full-width characters are measured and laid out correctly
@@ -942,6 +942,7 @@ reference whose target is `images/orders-api.svg#plantuml-local`.
 | `PlantUML Local: Copy Diagram as SVG Text` | Puts the SVG of the block under the cursor, or the only block in the file, on the clipboard as text — what the SVG export would write — without writing a file |
 | `PlantUML Local: Export All Diagrams in Folder as SVG` | Writes every **named** block of the Markdown and PlantUML files in a folder (below) |
 | `PlantUML Local: Export All Diagrams in Folder as PNG` | The same, as PNGs |
+| `PlantUML Local: Check Export Freshness` | Lists the images exported from the file, and whether each is still what an export would write, without writing anything (below) |
 
 The first five are also in the editor's right-click menu: the single exports
 and the copy appear with the cursor inside a block, the other two whenever the
@@ -1096,9 +1097,40 @@ relative to the Markdown file rather than to the workspace root, so moving a
 document keeps its diagrams beside it. Exporting writes files, so it needs a
 trusted workspace — the preview does not.
 
+*Check Export Freshness* says whether the images exported from the file in the
+editor are still what an export would write. It lists each named diagram, in
+each format that has a file or a record, as *Recorded inputs and output match*
+when the file holds what its record says was written and nothing the image was
+drawn from has changed: the diagram's text, the files it included and where
+they are found, the renderer, the palette and the PNG scale. That is all it
+says — not that drawing the diagram again, here or on another machine, draws
+the same image. Otherwise an image is *Out of date*; *Missing*; in *Conflict*
+— edited since it was exported, open with unsaved changes, recorded as another
+diagram's, or the file of two diagrams; *Cannot be determined* — exported by an
+earlier version, drawn though a file it includes was not read, drawn from text
+that reads the time, a random number or the environment or runs the
+preprocessor beyond plain includes and themes, or larger than 64 MiB or
+unreadable; *Not managed by the export*, without a record of it; or *Cannot be
+checked*, a link or a folder where the file would be. Each comes with all its
+reasons, in the list and in the Output panel. Apart from the images come the
+marked image links that lead to another file, show another name or lead to no
+image, and the recorded images that no diagram of the file is exported to any
+more, which are left as they are. Picking an image exports it again, asking
+what an export asks; a link goes to its line; a recorded image is shown in the
+Explorer.
+
+The check draws nothing and writes nothing — no image, no document and no
+record. It reads the files the diagrams are exported to, not following a
+symbolic link, the records, and the files the diagrams include, found as an
+export would find them now, with the unsaved changes of open files, which it
+then says. It needs a trusted workspace and a saved file on disk. A diagram
+without a name is not checked, since an export under a name you type is not
+recorded.
+
 Two things to keep in mind. The SVG is a snapshot: after editing a block,
-re-run the command (commit the `images/` directory alongside the document,
-or the references point at nothing). And this flow is for hosts that do
+re-run the command (*Check Export Freshness* lists the images that need it;
+commit the `images/` directory alongside the document, or the references point
+at nothing). And this flow is for hosts that do
 *not* render PlantUML — one that does, like GitLab, renders the block itself
 and would show the referenced image as a second copy.
 

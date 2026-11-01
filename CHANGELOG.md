@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Check Export Freshness says whether exported images are still what an
+  export would write.** For the file in the editor, it lists each named
+  diagram, in each format that has a file or a record, as *Recorded inputs
+  and output match*, *Out of date*, *Missing*, *Conflict*, *Cannot be
+  determined*, *Not managed by the export* or *Cannot be checked*, with all
+  its reasons: the diagram's text, an included file or where includes are
+  found changed; another renderer, palette or PNG scale; a file deleted,
+  edited since, open with unsaved changes or recorded as another diagram's;
+  an image an earlier version exported, or one drawn from text that may draw
+  otherwise another time. Apart from them come the marked image links that
+  lead elsewhere, show another name or lead to no image, and the recorded
+  images no diagram of the file is exported to any more. Picking an image
+  exports it again, picking a link goes to its line, and the Output panel
+  gets the same list. The check draws, writes and records nothing, follows no
+  symbolic link, reads included files with the unsaved changes of open ones
+  and says so, and needs a trusted workspace and a saved file on disk.
+
 ### Changed
 
 - **Exported files are recorded per diagram.** An export replaces a file

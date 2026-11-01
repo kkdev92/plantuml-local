@@ -273,6 +273,11 @@ export class ExportLedger {
     return this.history().records.get(output) ?? null;
   }
 
+  /** The records of the files exported from the document at `document`, as its URI is recorded. */
+  recordsOf(document: string): ArtifactRecord[] {
+    return [...this.history().records.values()].filter((record) => record.key.documentUri === document);
+  }
+
   /**
    * Whether `existing`, the file at `output`, is what an earlier version
    * recorded exporting there from `document`, unchanged since.
