@@ -77,7 +77,17 @@ import {
   type ReplaceTarget,
 } from './export/exporter';
 import { MAX_DOCUMENTS, findDocuments } from './export/folder';
-import { ExportLedger } from './export/history';
+import {
+  checkFreshness,
+  type FreshnessDeps,
+  type FreshnessReason,
+  type FreshnessReport,
+  type FreshnessRow,
+  type FreshnessState,
+  type OutputRead,
+  type ReferenceProblem,
+} from './export/freshness';
+import { ExportLedger, type ArtifactRecord } from './export/history';
 import { shippedRenderer } from './export/manifest';
 import type { ExportRecords } from './export/ownership';
 import { recheckInputs, type InputChange } from './export/recheck';
@@ -87,7 +97,7 @@ import { documentColumnOf, documentLineOf } from './core/positions';
 import { hasStartLine } from './core/shape';
 import { errorMessage, libraryNotBundled } from './core/messages';
 import { lineAfterEdits, planReferenceEdits, type ReferenceEdit } from './export/references';
-import { scanText } from './export/replay';
+import { scanText, type ReplayReason } from './export/replay';
 import {
   diagramAt,
   expandSnippet,
@@ -307,6 +317,16 @@ export const ExportFolderSvg = defineCommandContract<readonly unknown[], void>({
 /** Writes the named diagrams of the documents under a folder to PNG files. */
 export const ExportFolderPng = defineCommandContract<readonly unknown[], void>({
   id: COMMANDS.EXPORT_FOLDER_PNG,
+});
+
+/**
+ * Lists the images the diagrams of a document are exported as, whether
+ * each is still the image of its diagram, and the marked image links after
+ * its blocks that are not (src/export/freshness.ts). Writes nothing: an
+ * image picked from the list is exported again by its export command.
+ */
+export const CheckExportFreshness = defineCommandContract<readonly [], void>({
+  id: COMMANDS.CHECK_EXPORT_FRESHNESS,
 });
 
 /**
@@ -650,7 +670,8 @@ function isMarkdownFile(document: vscode.TextDocument): boolean {
  */
 async function chooseMarkdownDocument(
   context: OperationContext,
-  workspace: WorkspaceService
+  workspace: WorkspaceService,
+  words: ChoiceWords = exportWords(context.l10n)
 ): Promise<vscode.TextDocument | null> {
   const active = vscode.window.activeTextEditor;
   if (active?.document.languageId === 'markdown') {
@@ -659,7 +680,7 @@ async function chooseMarkdownDocument(
 
   const open = vscode.workspace.textDocuments.filter(isMarkdownFile);
   if (open.length === 0) {
-    void context.notify.warn(context.l10n.t('Open a Markdown file to export its diagrams.'));
+    void context.notify.warn(words.none);
     return null;
   }
   if (open.length === 1) {
@@ -674,10 +695,22 @@ async function chooseMarkdownDocument(
     ...open.filter((document) => visible.has(document.uri.toString())),
     ...open.filter((document) => !visible.has(document.uri.toString())),
   ].map((document) => ({ label: workspace.relativePath(document.uri), document }));
-  const picked = await context.ask.one(items, {
-    title: context.l10n.t('Select the Markdown file to export diagrams from'),
-  });
+  const picked = await context.ask.one(items, { title: words.title });
   return picked?.document ?? null;
+}
+
+/** What choosing a Markdown document says: with none open, and over the list of those that are. */
+interface ChoiceWords {
+  none: string;
+  title: string;
+}
+
+/** What choosing the document to export from says. */
+function exportWords(l10n: L10n): ChoiceWords {
+  return {
+    none: l10n.t('Open a Markdown file to export its diagrams.'),
+    title: l10n.t('Select the Markdown file to export diagrams from'),
+  };
 }
 
 /** A button on a notification, and what it does. */
@@ -792,7 +825,8 @@ async function activeDocument(
 /**
  * The document a command acts on, or null after explaining why there is
  * none: the document `target` names, else a Markdown document, or with
- * `plantUml`, the PlantUML file in the active editor.
+ * `plantUml`, the PlantUML file in the active editor. `words` are what
+ * choosing a Markdown document says; an export's by default.
  *
  * `vscode.window` rather than the kit's editor service because export
  * needs the document's own URI to resolve a relative directory against,
@@ -802,7 +836,8 @@ async function pickDocument(
   context: OperationContext,
   workspace: WorkspaceService,
   plantUml: boolean,
-  target: ExportTarget | null
+  target: ExportTarget | null,
+  words?: ChoiceWords
 ): Promise<ActiveDocument | null> {
   const active = vscode.window.activeTextEditor?.document;
   const document =
@@ -813,7 +848,7 @@ async function pickDocument(
         )
       : plantUml && active?.languageId === 'plantuml'
         ? active
-        : await chooseMarkdownDocument(context, workspace);
+        : await chooseMarkdownDocument(context, workspace, words);
   if (document === null) {
     return null;
   }
@@ -1351,28 +1386,33 @@ function drawingDeps(
         'The SVG text is {0} MiB, over the 32 MiB that can be copied. Export the diagram as an SVG file instead.',
         String(Math.ceil(bytes / (1024 * 1024)))
       ),
-    pngScale: (): number => {
-      const scale = settings.read({ resource: document }).values[CONFIG.EXPORT_PNG_SCALE];
-      return PNG_SCALES.includes(scale as 1 | 2 | 4) ? Number(scale) : 2;
-    },
-    // Exports default to the light palette regardless of the editor theme:
-    // the files face hosts like GitHub, whose background this extension
-    // does not control, and a dark diagram on a white page reads as broken.
-    // `preview` restores the old follow-the-editor behaviour.
-    isDark: (): boolean => {
-      const mode = settings.read({ resource: document }).values[CONFIG.EXPORT_THEME] as
-        | 'light'
-        | 'dark'
-        | 'preview';
-      if (mode === 'dark') {
-        return true;
-      }
-      if (mode === 'preview') {
-        return isDark(settings.read().values[CONFIG.THEME] as 'auto' | 'light' | 'dark');
-      }
-      return false;
-    },
+    pngScale: (): number => exportPngScale(settings, document),
+    isDark: (): boolean => exportsDark(settings, document),
   };
+}
+
+/** The scale a PNG exported from `document` is drawn at: 1, 2 or 4 times the diagram's size. */
+function exportPngScale(settings: SettingsReader, document: vscode.Uri): number {
+  const scale = settings.read({ resource: document }).values[CONFIG.EXPORT_PNG_SCALE];
+  return PNG_SCALES.includes(scale as 1 | 2 | 4) ? Number(scale) : 2;
+}
+
+/**
+ * Whether the images exported from `document` are drawn in dark colours.
+ * Exports default to the light palette regardless of the editor theme: the
+ * files face hosts like GitHub, whose background this extension does not
+ * control, and a dark diagram on a white page reads as broken. `preview`
+ * restores the old follow-the-editor behaviour.
+ */
+function exportsDark(settings: SettingsReader, document: vscode.Uri): boolean {
+  const mode = settings.read({ resource: document }).values[CONFIG.EXPORT_THEME] as 'light' | 'dark' | 'preview';
+  if (mode === 'dark') {
+    return true;
+  }
+  if (mode === 'preview') {
+    return isDark(settings.read().values[CONFIG.THEME] as 'auto' | 'light' | 'dark');
+  }
+  return false;
 }
 
 /**
@@ -1574,6 +1614,338 @@ function exporterDeps(
     },
     deleteFolder: (folder) => deleteEmptyFolder(vscode.Uri.parse(folder)),
   };
+}
+
+/**
+ * What a check of the images exported from `document` reads, and how: the
+ * files through `vscode.workspace.fs`, which tells a link from a file, as
+ * the export reads them; the records; and the files its diagrams include,
+ * looked for as an export would look for them now. A file it includes is
+ * named by its path as VS Code knows it. `signal` says the check was
+ * cancelled.
+ */
+function freshnessDeps(
+  settings: SettingsReader,
+  exports: ExportLedger,
+  document: vscode.Uri,
+  signal: AbortSignal
+): FreshnessDeps {
+  const failed = (error: unknown): OutputRead =>
+    error instanceof vscode.FileSystemError && error.code === 'FileNotFound'
+      ? { kind: 'none' }
+      : { kind: 'failed', message: error instanceof Error ? error.message : String(error) };
+  return {
+    resolve: (documentPath, relative) => vscode.Uri.joinPath(vscode.Uri.parse(documentPath), '..', relative).toString(),
+    recordsOf: (path) => exports.recordsOf(path),
+    ownerOf: (path) => exports.ownerOf(path),
+    wroteBefore: (path, source, existing) => exports.wroteBefore(path, source, existing),
+    isDirty: (path) => vscode.workspace.textDocuments.some((open) => open.isDirty && open.uri.toString() === path),
+    readOutput: async (path, limit): Promise<OutputRead> => {
+      const uri = vscode.Uri.parse(path);
+      let stat: vscode.FileStat;
+      try {
+        stat = await vscode.workspace.fs.stat(uri);
+      } catch (error: unknown) {
+        return failed(error);
+      }
+      // A link, even a broken one, says so: where it leads is not looked at.
+      if ((stat.type & vscode.FileType.SymbolicLink) !== 0) {
+        return { kind: 'link' };
+      }
+      if ((stat.type & vscode.FileType.File) === 0) {
+        return { kind: 'not-file' };
+      }
+      if (stat.size > limit) {
+        return { kind: 'too-large' };
+      }
+      try {
+        const bytes = await vscode.workspace.fs.readFile(uri);
+        // Grown since it was looked at: no more is made of it than of one that size.
+        return bytes.byteLength > limit ? { kind: 'too-large' } : { kind: 'bytes', bytes };
+      } catch (error: unknown) {
+        return failed(error);
+      }
+    },
+    rendererIdentity: () => shippedRenderer(__dirname, join(__dirname, '..', 'media', 'png', 'png.js'), HELP_ENGINE),
+    isDark: () => exportsDark(settings, document),
+    pngScale: () => exportPngScale(settings, document),
+    recheck: async (drawn, source): Promise<{ changes: InputChange[]; unsaved: boolean }> => {
+      const reading = await readingNow(document, { includePaths: (each) => includePathsOf(settings, each) });
+      let unsaved = false;
+      const openText = (path: string): string | undefined => {
+        const text = reading.openText(path);
+        unsaved ||= text !== undefined && reading.unsaved(path);
+        return text;
+      };
+      const changes = await recheckInputs(drawn, source, reading.access, openText);
+      return {
+        changes: changes.map((change) => (change.change === 'file' ? { ...change, file: reading.opened(change.file) } : change)),
+        unsaved,
+      };
+    },
+    cancelled: () => signal.aborted,
+  };
+}
+
+/** What each state of an exported image is called, in the display language. */
+function freshnessStates(l10n: L10n): Record<FreshnessState, string> {
+  return {
+    current: l10n.t('Recorded inputs and output match'),
+    stale: l10n.t('Out of date'),
+    missing: l10n.t('Missing'),
+    conflict: l10n.t('Conflict'),
+    unknown: l10n.t('Cannot be determined'),
+    unmanaged: l10n.t('Not managed by the export'),
+    unsupported: l10n.t('Cannot be checked'),
+  };
+}
+
+/** The icon of each state in the list of exported images. */
+const FRESHNESS_ICONS: Record<FreshnessState, string> = {
+  current: 'check',
+  stale: 'sync',
+  missing: 'error',
+  conflict: 'warning',
+  unknown: 'question',
+  unmanaged: 'circle-outline',
+  unsupported: 'circle-slash',
+};
+
+/** How many of the lines that make an image's text uncertain a reason names; past that, it ends in an ellipsis. */
+const REPLAY_NAMED = 3;
+
+/** What makes an image's text uncertain, as it is written in the text, and the file it is in when not the diagram's own. */
+function replayReasonText(l10n: L10n, workspace: WorkspaceService, reason: ReplayReason): string {
+  const at = reason.what.indexOf(':');
+  const kind = reason.what.slice(0, at);
+  const name = reason.what.slice(at + 1);
+  const what =
+    kind === 'function'
+      ? `%${name}()`
+      : kind === 'theme'
+        ? `!theme ${name}`
+        : kind === 'library'
+          ? `<${name}>`
+          : l10n.t('a preprocessor line');
+  return reason.file === null ? what : l10n.t('{0} in {1}', what, workspace.relativePath(vscode.Uri.file(reason.file)));
+}
+
+/** Why an exported image is in its state, in the display language; files by their paths in the workspace. */
+function freshnessReasonText(l10n: L10n, workspace: WorkspaceService, reason: FreshnessReason): string {
+  const path = (uri: string): string => workspace.relativePath(vscode.Uri.parse(uri));
+  const palette = (name: 'light' | 'dark'): string => (name === 'dark' ? l10n.t('dark') : l10n.t('light'));
+  switch (reason.why) {
+    case 'unrecorded':
+      return l10n.t('There is no record of exporting it: it was made by hand or by another program, or its record is gone.');
+    case 'not-file':
+      return l10n.t('Something other than a file is where the image would be.');
+    case 'link':
+      return l10n.t('It is a link, which is not followed.');
+    case 'shared':
+      return l10n.t('Other diagrams are exported to the same file: {0}.', reason.with.join(', '));
+    case 'owner':
+      return l10n.t('It is recorded as the image of {0} in {1}.', reason.owner.name, path(reason.owner.documentUri));
+    case 'edited':
+      return l10n.t('The file changed after it was exported.');
+    case 'dirty':
+      return l10n.t('The file is open with unsaved changes.');
+    case 'deleted':
+      return l10n.t('The file is not there.');
+    case 'earlier-version':
+      return l10n.t('Only an earlier version of the extension recorded exporting it, without what it was drawn from.');
+    case 'no-inputs':
+      return l10n.t('It was recorded without what it was drawn from.');
+    case 'incomplete':
+      return l10n.t('It was drawn though a file it includes was not read.');
+    case 'replay': {
+      const named = [...new Set(reason.reasons.map((each) => replayReasonText(l10n, workspace, each)))];
+      const listed = named.slice(0, REPLAY_NAMED).join(', ') + (named.length > REPLAY_NAMED ? ', …' : '');
+      return reason.replay === 'volatile'
+        ? l10n.t('It uses {0}, which can draw it differently each time.', listed)
+        : l10n.t('It uses {0}, so what it draws cannot be told from what it was drawn from.', listed);
+    }
+    case 'renderer-unknown':
+      return l10n.t('The renderer of this version could not be identified.');
+    case 'too-large':
+      return l10n.t('The file is larger than 64 MiB, the most that is read to check it.');
+    case 'unreadable':
+      return l10n.t('The file could not be read: {0}', reason.message);
+    case 'elsewhere':
+      return l10n.t('It was exported to {0}, not where its images go now.', path(reason.output));
+    case 'renderer':
+      return l10n.t('It was drawn by another version of the renderer.');
+    case 'palette':
+      return l10n.t('It was drawn in the {0} palette; exports are drawn in the {1} palette now.', palette(reason.was), palette(reason.now));
+    case 'scale':
+      return l10n.t('It was drawn at {0}×; PNG images are drawn at {1}× now.', String(reason.was ?? '?'), String(reason.now));
+    case 'input':
+      switch (reason.change.change) {
+        case 'diagram':
+          return l10n.t('The diagram changed.');
+        case 'context':
+          return l10n.t('Where its included files are looked for changed.');
+        case 'answer':
+          return l10n.t('An include is found elsewhere now, or not at all: {0}.', reason.change.path);
+        case 'file':
+          return l10n.t('An included file changed: {0}.', workspace.relativePath(vscode.Uri.file(reason.change.file)));
+      }
+  }
+}
+
+/** All that is said of an exported image besides its state: its reasons, and how far they go. */
+function freshnessNotes(l10n: L10n, workspace: WorkspaceService, row: FreshnessRow): string[] {
+  const notes = row.reasons.map((reason) => freshnessReasonText(l10n, workspace, reason));
+  // Unknown, but nothing it was drawn from changed: said apart, as no
+  // promise that drawing it now draws the same.
+  if (row.state === 'unknown' && row.compared && !row.reasons.some((reason) => reason.state === 'stale')) {
+    notes.push(l10n.t('What it was drawn from is what it would be drawn from now.'));
+  }
+  if (row.unsaved) {
+    notes.push(l10n.t('Checked against the unsaved changes of files it includes.'));
+  }
+  return notes;
+}
+
+/** What is wrong with a marked image link, in the display language. */
+function referenceProblemText(l10n: L10n, problem: ReferenceProblem): string {
+  switch (problem.problem) {
+    case 'invalid':
+      return l10n.t('The link {0} is not a path relative to this file.', problem.target);
+    case 'elsewhere':
+      return l10n.t('The link {0} does not lead to the file the diagram is exported to.', problem.target);
+    case 'name':
+      return l10n.t('The link shows the image as {0}, not by the name of the diagram.', problem.alt);
+    case 'no-image':
+      return l10n.t('The link {0} leads to an image that is not there.', problem.target);
+  }
+}
+
+/** Writes what a check found to the output channel: each image, each link, each record left, and what was not checked. */
+function logFreshness(
+  context: OperationContext,
+  workspace: WorkspaceService,
+  document: vscode.TextDocument,
+  found: FreshnessReport
+): void {
+  const { l10n, logger } = context;
+  const states = freshnessStates(l10n);
+  const file = workspace.relativePath(document.uri);
+  logger.info(
+    document.isDirty
+      ? l10n.t('Exported images of {0}, checked against its unsaved changes:', file)
+      : l10n.t('Exported images of {0}:', file)
+  );
+  for (const row of found.rows) {
+    logger.info(
+      [
+        l10n.t('{0} as {1}, {2}: {3}.', row.name, row.format.toUpperCase(), workspace.relativePath(vscode.Uri.parse(row.output)), states[row.state]),
+        ...freshnessNotes(l10n, workspace, row),
+      ].join(' ')
+    );
+  }
+  for (const problem of found.references) {
+    logger.info(
+      [l10n.t('Image link of {0} on line {1}:', problem.name, String(problem.line + 1)), referenceProblemText(l10n, problem)].join(' ')
+    );
+  }
+  for (const record of found.orphans) {
+    logger.info(
+      l10n.t(
+        'Recorded image of {0} as {1}, which no diagram of this file is exported to now: {2}. It is left as it is.',
+        record.key.name,
+        record.key.format.toUpperCase(),
+        workspace.relativePath(vscode.Uri.parse(record.output))
+      )
+    );
+  }
+  if (found.unnamed > 0) {
+    logger.info(l10n.t('Diagrams without a name are not checked: {0}. They are exported under a name typed in, which is not recorded.', String(found.unnamed)));
+  }
+  if (found.invalid > 0) {
+    logger.info(l10n.t('Diagrams whose name cannot be a file name are not checked: {0}.', String(found.invalid)));
+  }
+}
+
+/** An item of the list of exported images, and what picking it does. */
+type FreshnessItem = vscode.QuickPickItem &
+  ({ row: FreshnessRow } | { problem: ReferenceProblem } | { record: ArtifactRecord } | { separator: true });
+
+/**
+ * Lists what a check found: the images, then the marked links that are
+ * wrong, then the records left. Picking an image exports it again, as its
+ * export command does, asking what that asks; a link, goes to its line; a
+ * record, shows its file in the Explorer. Nothing is done once the
+ * document has changed since the check: its lines may have moved.
+ */
+async function showFreshness(
+  context: OperationContext,
+  workspace: WorkspaceService,
+  document: ActiveDocument,
+  found: FreshnessReport
+): Promise<void> {
+  const { l10n } = context;
+  const states = freshnessStates(l10n);
+  const separator = (label: string): FreshnessItem => ({ label, kind: vscode.QuickPickItemKind.Separator, separator: true });
+  const file = workspace.relativePath(document.textDocument.uri);
+  const items: FreshnessItem[] = [
+    ...(found.rows.length === 0 ? [] : [separator(l10n.t('Images'))]),
+    ...found.rows.map(
+      (row): FreshnessItem => ({
+        label: `$(${FRESHNESS_ICONS[row.state]}) ${row.name}.${row.format}`,
+        description: `${states[row.state]} · ${workspace.relativePath(vscode.Uri.parse(row.output))}`,
+        detail: freshnessNotes(l10n, workspace, row).join(' '),
+        row,
+      })
+    ),
+    ...(found.references.length === 0 ? [] : [separator(l10n.t('Image links'))]),
+    ...found.references.map(
+      (problem): FreshnessItem => ({
+        label: `$(link) ${problem.name}`,
+        description: l10n.t('line {0}', String(problem.line + 1)),
+        detail: referenceProblemText(l10n, problem),
+        problem,
+      })
+    ),
+    ...(found.orphans.length === 0 ? [] : [separator(l10n.t('Images no diagram is exported to now'))]),
+    ...found.orphans.map(
+      (record): FreshnessItem => ({
+        label: `$(file-media) ${workspace.relativePath(vscode.Uri.parse(record.output))}`,
+        description: `${record.key.name} · ${record.key.format.toUpperCase()}`,
+        detail: l10n.t('No diagram of this file is exported to it now. It is left as it is.'),
+        record,
+      })
+    ),
+  ];
+  if (items.length === 0) {
+    void context.notify.info(l10n.t('No exported images were found for the diagrams of {0}.', file));
+    return;
+  }
+  const picked = await context.ask.one(items, {
+    title: document.textDocument.isDirty
+      ? l10n.t('Exported images of {0}, checked against its unsaved changes', file)
+      : l10n.t('Exported images of {0}', file),
+    placeHolder: l10n.t('Select an image to export it again, or a link to go to it'),
+    matchOnDescription: true,
+    matchOnDetail: true,
+  });
+  if (picked === undefined || 'separator' in picked) {
+    return;
+  }
+  if (document.textDocument.version !== document.version) {
+    void context.notify.warn(l10n.t('The file changed after its exported images were checked. Check them again.'));
+    return;
+  }
+  if ('row' in picked) {
+    await context.commands.execute(picked.row.format === 'svg' ? COMMANDS.EXPORT_SVG : COMMANDS.EXPORT_PNG, {
+      uri: document.path,
+      line: picked.row.line,
+    });
+  } else if ('problem' in picked) {
+    const { line } = picked.problem;
+    await vscode.window.showTextDocument(document.textDocument, { selection: new vscode.Range(line, 0, line, 0) });
+  } else {
+    await context.commands.execute('revealInExplorer', vscode.Uri.parse(picked.record.output));
+  }
 }
 
 /**
@@ -2947,6 +3319,74 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
       }
 
       await reportOutcome(context, reported, extra, applyFailed, 0, document.textDocument.uri);
+    },
+  });
+
+  module.commands.handle(CheckExportFreshness, {
+    inject: { settings: Settings.token, exports: Exports, workspace: Workspace },
+    execute: async (context: OperationContext, _args, { settings, exports, workspace }): Promise<void> => {
+      // It reads what the diagrams include, as an export does: only in a
+      // workspace trusted to have its files read.
+      if (!vscode.workspace.isTrusted) {
+        await notifyWith(
+          context,
+          'warn',
+          context.l10n.t('Checking exported images is unavailable in Restricted Mode. Trust this workspace to check them.'),
+          [{ title: context.l10n.t('Manage Workspace Trust'), run: (): Promise<unknown> => context.commands.execute('workbench.trust.manage') }]
+        );
+        return;
+      }
+      const document = await pickDocument(context, workspace, true, null, {
+        none: context.l10n.t('Open a Markdown or PlantUML file to check the images exported from it.'),
+        title: context.l10n.t('Select the Markdown file to check the images exported from'),
+      });
+      if (document === null) {
+        return;
+      }
+      const { textDocument } = document;
+      if (textDocument.isUntitled) {
+        void context.notify.warn(context.l10n.t('Save the file before checking the images exported from it.'));
+        return;
+      }
+      // Exports from a document on another file system are not recorded as
+      // having inputs that can be looked at again: its includes are not read.
+      if (textDocument.uri.scheme !== 'file') {
+        void context.notify.warn(context.l10n.t('The images exported from a file can be checked only for a file on disk.'));
+        return;
+      }
+      const directory = exportDirectory(context, settings, textDocument.uri);
+      if (directory === null) {
+        return;
+      }
+
+      const found = await context.progress.run(
+        { title: context.l10n.t('Checking exported images…'), cancellable: true },
+        (_report, signal) =>
+          checkFreshness(
+            freshnessDeps(settings, exports, textDocument.uri, signal),
+            document.path,
+            document.text,
+            diagramsOf(textDocument, document.text),
+            directory,
+            textDocument.languageId === 'markdown'
+          )
+      );
+      if (found === 'cancelled') {
+        void context.notify.info(context.l10n.t('The check of exported images was cancelled.'));
+        return;
+      }
+      // What was found is of the text as it was when the check began.
+      if (textDocument.version !== document.version) {
+        await notifyWith(
+          context,
+          'warn',
+          context.l10n.t('The file changed while its exported images were checked, so what was found is not shown. Check them again.'),
+          [{ title: context.l10n.t('Check Again'), run: (): Promise<unknown> => context.commands.execute(COMMANDS.CHECK_EXPORT_FRESHNESS) }]
+        );
+        return;
+      }
+      logFreshness(context, workspace, textDocument, found);
+      await showFreshness(context, workspace, document, found);
     },
   });
 

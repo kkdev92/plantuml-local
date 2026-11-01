@@ -179,6 +179,11 @@
         "category": "PlantUML Local"
       },
       {
+        "command": "plantumlLocal.checkExportFreshness",
+        "title": "%command.checkExportFreshness.title%",
+        "category": "PlantUML Local"
+      },
+      {
         "command": "plantumlLocal.assignDiagramName",
         "title": "%command.assignDiagramName.title%",
         "category": "PlantUML Local"

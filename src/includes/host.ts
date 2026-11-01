@@ -171,15 +171,26 @@ export async function openSession(
  * Where the diagrams of `document` look for their local includes now, and
  * how they read a file — an open document as it is edited — apart from the
  * reads of any export: for looking again at what a drawing was drawn from
- * (src/export/recheck.ts). `opened` gives a path found as VS Code knows it.
+ * (src/export/recheck.ts). `opened` gives a path found as VS Code knows it;
+ * `unsaved` says whether the document open at a path has unsaved changes.
  */
 export async function readingNow(
   document: vscode.Uri,
   host: Pick<IncludeHost, 'includePaths'>
-): Promise<{ access: IncludeAccess; opened: (path: string) => string; openText: (path: string) => string | undefined }> {
+): Promise<{
+  access: IncludeAccess;
+  opened: (path: string) => string;
+  openText: (path: string) => string | undefined;
+  unsaved: (path: string) => boolean;
+}> {
   const { access, folder } = await accessFor(document, host);
   const opened = (path: string): string => asOpened(access, folder, path);
-  return { access, opened, openText: (path) => openText(opened(path)) ?? openText(path) };
+  return {
+    access,
+    opened,
+    openText: (path) => openText(opened(path)) ?? openText(path),
+    unsaved: (path) => (openDocument(opened(path)) ?? openDocument(path))?.isDirty === true,
+  };
 }
 
 /**
@@ -212,10 +223,13 @@ export async function accessFor(
   return { access, folder };
 }
 
+/** The document open at `path`, its path compared as file events are. */
+function openDocument(path: string): vscode.TextDocument | undefined {
+  const key = pathKey(path);
+  return vscode.workspace.textDocuments.find((document) => document.uri.scheme === 'file' && pathKey(document.uri.fsPath) === key);
+}
+
 /** The text of the document open at `path`, unsaved changes and all, its path compared as file events are. */
 function openText(path: string): string | undefined {
-  const key = pathKey(path);
-  return vscode.workspace.textDocuments
-    .find((document) => document.uri.scheme === 'file' && pathKey(document.uri.fsPath) === key)
-    ?.getText();
+  return openDocument(path)?.getText();
 }

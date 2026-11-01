@@ -8,6 +8,7 @@
   "command.exportAllAndUpdateRefs.title": "すべての図を SVG に書き出して画像リンクを更新する",
   "command.exportFolderSvg.title": "フォルダー内のすべての図を SVG に書き出す",
   "command.exportFolderPng.title": "フォルダー内のすべての図を PNG に書き出す",
+  "command.checkExportFreshness.title": "出力画像の鮮度を確認",
   "command.assignDiagramName.title": "図に書き出し用の名前を付ける",
   "command.addMissingEnd.title": "図を閉じる行を補う",
   "command.diagramAction.title": "図の操作を実行する",

@@ -1,6 +1,6 @@
 import { EXPORT_FRAGMENT } from '../core/constants';
 import { splitLines } from '../core/lines';
-import { findPlantUmlBlocks } from './blocks';
+import { findPlantUmlBlocks, type PlantUmlBlock } from './blocks';
 
 /**
  * Plans the image-reference lines that follow exported diagrams.
@@ -42,10 +42,10 @@ export type ReferenceEdit =
 
 /**
  * A whole line that is exactly one image reference: optional indent,
- * `![alt](target)`, nothing else. Group 1/2 capture the target with and
- * without CommonMark's angle-bracket form.
+ * `![alt](target)`, nothing else. Group 1 captures the alt text, 2/3 the
+ * target with and without CommonMark's angle-bracket form.
  */
-const IMAGE_LINE = /^\s*!\[[^\]]*\]\(\s*(?:<([^<>]*)>|([^)\s]+))\s*\)\s*$/;
+const IMAGE_LINE = /^\s*!\[([^\]]*)\]\(\s*(?:<([^<>]*)>|([^)\s]+))\s*\)\s*$/;
 
 /** The reference target for `name` under `directory`, POSIX separators. */
 function targetPath(directory: string, name: string): string {
@@ -88,7 +88,52 @@ function imageTarget(line: string): string | null {
   if (match === null) {
     return null;
   }
-  return match[1] ?? match[2] ?? null;
+  return match[2] ?? match[3] ?? null;
+}
+
+/**
+ * The slot of `block`: the first non-blank line after its closing fence,
+ * within its container, and that line as the container sees it — or, with
+ * no such line, the line the container ends before and null.
+ */
+function slotOf(lines: readonly string[], block: PlantUmlBlock): { slot: number; occupant: string | null } {
+  const inside = insideContainer(block.container);
+  let slot = block.closeLine + 1;
+  for (; slot < lines.length; slot++) {
+    const body = inside(lines[slot] ?? '');
+    if (body === null) {
+      break;
+    }
+    if (body.trim() !== '') {
+      return { slot, occupant: body };
+    }
+  }
+  return { slot, occupant: null };
+}
+
+/** A marked image reference: the line it is on (counting from 0), its alt text, and its target as written. */
+export interface ManagedReference {
+  line: number;
+  alt: string;
+  target: string;
+}
+
+/**
+ * The marked reference in the slot of `block`, a block of the Markdown
+ * text whose lines are `lines` — the line the export writes, or rewrites,
+ * after it — or null when the slot holds anything else: a reference
+ * written by hand is not the export's to report on.
+ */
+export function managedReferenceOf(lines: readonly string[], block: PlantUmlBlock): ManagedReference | null {
+  if (!block.closed) {
+    return null;
+  }
+  const { slot, occupant } = slotOf(lines, block);
+  const match = occupant === null ? null : IMAGE_LINE.exec(occupant);
+  const target = match?.[2] ?? match?.[3] ?? null;
+  return match === null || target === null || !target.endsWith(EXPORT_FRAGMENT)
+    ? null
+    : { line: slot, alt: match[1] ?? '', target };
 }
 
 /**
@@ -120,18 +165,7 @@ export function planReferenceEdits(
 
     // The block's slot: the first non-blank line after the closing fence,
     // within the block's container.
-    let slot = block.closeLine + 1;
-    let occupant: string | null = null;
-    for (; slot < lines.length; slot++) {
-      const body = inside(lines[slot] ?? '');
-      if (body === null) {
-        break;
-      }
-      if (body.trim() !== '') {
-        occupant = body;
-        break;
-      }
-    }
+    const { slot, occupant } = slotOf(lines, block);
     const target = occupant === null ? null : imageTarget(occupant);
 
     if (target !== null && target.endsWith(EXPORT_FRAGMENT)) {

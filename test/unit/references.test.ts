@@ -1,7 +1,8 @@
 import MarkdownIt from 'markdown-it';
 import { describe, expect, it } from 'vitest';
 
-import { lineAfterEdits, planReferenceEdits, type ReferenceEdit } from '../../src/export/references';
+import { findPlantUmlBlocks } from '../../src/export/blocks';
+import { lineAfterEdits, managedReferenceOf, planReferenceEdits, type ReferenceEdit } from '../../src/export/references';
 
 const md = (...lines: string[]): string => lines.join('\n');
 const exported = (...names: string[]): Set<string> => new Set(names);
@@ -200,6 +201,44 @@ describe('planReferenceEdits', () => {
     const result = apply(text, planReferenceEdits(text, exported('orders'), '.'));
 
     expect(result).toContain('![orders](orders.svg#plantuml-local)');
+  });
+});
+
+describe('managedReferenceOf', () => {
+  /** The marked reference of the first block of `text`. */
+  function referenceOf(text: string): ReturnType<typeof managedReferenceOf> {
+    const [block] = findPlantUmlBlocks(text);
+    return managedReferenceOf(text.split('\n'), block!);
+  }
+
+  it('finds the line the export wrote, with its alt text and its target as written', () => {
+    expect(referenceOf(md(...BLOCK, '', '![orders](images/orders.svg#plantuml-local)', '', 'after'))).toEqual({
+      line: 6,
+      alt: 'orders',
+      target: 'images/orders.svg#plantuml-local',
+    });
+  });
+
+  it('reads the angle-bracket form and a line a block quote holds', () => {
+    expect(referenceOf(md(...BLOCK, '', '![orders](<my diagrams/orders.svg#plantuml-local>)'))).toMatchObject({
+      target: 'my diagrams/orders.svg#plantuml-local',
+    });
+    expect(referenceOf(md('> ```plantuml q', '> @startuml', '> ```', '>', '> ![renamed](images/q.png#plantuml-local)'))).toEqual({
+      line: 4,
+      alt: 'renamed',
+      target: 'images/q.png#plantuml-local',
+    });
+  });
+
+  it('takes no reference written by hand, inline in prose, past other text, outside the container, or after an unclosed fence', () => {
+    expect(referenceOf(md(...BLOCK, '', '![my caption](images/orders.svg)'))).toBeNull();
+    expect(referenceOf(md(...BLOCK, '', 'see ![orders](images/orders.svg#plantuml-local) inline'))).toBeNull();
+    expect(referenceOf(md(...BLOCK, 'prose', '![orders](images/orders.svg#plantuml-local)'))).toBeNull();
+    expect(referenceOf(md('> ```plantuml q', '> @startuml', '> ```', '', '![q](images/q.svg#plantuml-local)'))).toBeNull();
+    expect(referenceOf(md(...BLOCK))).toBeNull();
+    expect(referenceOf(md('```plantuml open', '@startuml', '', '![open](images/open.svg#plantuml-local)'))).toBeNull();
+    // A fence the end of its quote closes, and a quote after it.
+    expect(referenceOf(md('> ```plantuml q', '> @startuml', '', '> ![q](images/q.svg#plantuml-local)'))).toBeNull();
   });
 });
 

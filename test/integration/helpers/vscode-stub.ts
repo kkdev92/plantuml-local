@@ -648,6 +648,7 @@ export interface VscodeStub {
   TreeItem: new (label: string, collapsibleState?: number) => TreeItemStub;
   ThemeIcon: (new (id: string) => { id: string }) & { File: { id: string } };
   ViewColumn: Record<'Active' | 'Beside' | 'One', number>;
+  QuickPickItemKind: Record<'Separator' | 'Default', number>;
   EndOfLine: Record<'LF' | 'CRLF', number>;
   Position: new (line: number, character: number) => PositionStub;
   /** Both overloads: two positions, or four numbers. */
@@ -1616,6 +1617,7 @@ export function createVscodeStub(): VscodeStub {
     TreeItem,
     ThemeIcon,
     ViewColumn: { Active: -1, Beside: -2, One: 1 },
+    QuickPickItemKind: { Separator: -1, Default: 0 },
     Uri: {
       parse: makeUri,
       joinPath: (base, ...parts) => joinUri(base, parts),

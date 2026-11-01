@@ -8,6 +8,7 @@
   "command.exportAllAndUpdateRefs.title": "Export All Diagrams as SVG and Update Image Links",
   "command.exportFolderSvg.title": "Export All Diagrams in Folder as SVG",
   "command.exportFolderPng.title": "Export All Diagrams in Folder as PNG",
+  "command.checkExportFreshness.title": "Check Export Freshness",
   "command.assignDiagramName.title": "Name Diagram for Export",
   "command.addMissingEnd.title": "Add Missing End Line",
   "command.diagramAction.title": "Run Diagram Action",

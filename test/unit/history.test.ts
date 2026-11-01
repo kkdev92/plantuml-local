@@ -282,6 +282,16 @@ describe('ExportLedger', () => {
     expect([...readHistory(store.get()).records.keys()]).toEqual([record('b').output]);
   });
 
+  it('gives back the records of one document, as its URI is recorded, and none of a later version', () => {
+    const other = record('other', { key: key('other', { documentUri: 'file:///repo/docs/other.md' }) });
+    const ledger = new ExportLedger(memory(stored(record('a'), other, record('b'))), () => ({}));
+
+    expect(ledger.recordsOf(DOC)).toEqual([record('a'), record('b')]);
+    expect(ledger.recordsOf('file:///repo/docs/other.md')).toEqual([other]);
+    expect(ledger.recordsOf('file:///repo/docs/Design.md')).toEqual([]);
+    expect(new ExportLedger(memory({ schemaVersion: 3, artifacts: [record('a')] }), () => ({})).recordsOf(DOC)).toEqual([]);
+  });
+
   it('reads what an earlier version recorded', () => {
     const ledger = new ExportLedger(memory(), () => ({ [record('orders').output]: { document: DOC, sha256: sha256(bytes('<svg/>')) } }));
 
