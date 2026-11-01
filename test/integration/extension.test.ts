@@ -2444,6 +2444,29 @@ describe('style items and skinparams in completion and hovers (dist)', () => {
     expect(names).toContain('Alice');
   });
 
+  it('puts what it offers before the aliases of a Markdown block, as VS Code sorts the list', async () => {
+    const document = makeEditor(
+      'file:///c/style/order.md',
+      ['```plantuml', 'participant "Web shop" as Shop', 'skinparam ', 'skinparam backgroundColor ', 'Shop -> Bob', '```'].join('\n'),
+      0
+    ).document;
+    // With no word typed, VS Code keeps the order of its first sort: by the
+    // sort text in lower case, then by the label.
+    const sorted = (items: CompletionItemStub[]): string[] => {
+      const key = (item: CompletionItemStub): string => (item.sortText ?? labelOf(item)).toLowerCase();
+      return [...items]
+        .sort((one, other) => (key(one) < key(other) ? -1 : key(one) > key(other) ? 1 : labelOf(one) < labelOf(other) ? -1 : 1))
+        .map(labelOf);
+    };
+
+    const names = sorted((await invoke(document, 2, 10)) ?? []);
+    expect(names.slice(0, 5)).toEqual(['defaultFontName', 'defaultFontSize', 'defaultFontColor', 'backgroundColor', 'Shop']);
+    const colours = (await invoke(document, 3, 26)) ?? [];
+    const values = colours.filter((item) => item.kind === vscodeStub.CompletionItemKind.Color).length;
+    expect(values).toBeGreaterThan(100);
+    expect(sorted(colours).indexOf('Shop')).toBe(values);
+  });
+
   it('explains a property and a skinparam on hover, in any case, and nothing on a value or a selector', async () => {
     const document = makeEditor(
       'file:///c/style/hover.puml',
