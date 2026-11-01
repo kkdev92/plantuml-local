@@ -92,6 +92,7 @@ const deps: ExporterDeps = {
   isDirty: () => false,
   // Nothing drawn here says what it was drawn from, so no renderer is asked for.
   rendererIdentity: () => Promise.resolve(null),
+  staleInputs: () => Promise.resolve(null),
   record: () => Promise.resolve('recorded'),
   lock: (_path, task) => task(),
   confirmReplace: () => Promise.reject(new Error('unexpected question: a file already exists')),

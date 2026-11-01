@@ -458,5 +458,8 @@
   "PlantUML Local does not rename to a name longer than {0} characters.": "PlantUML Local は、{0} 文字を超える名前には変更しません。",
   "PlantUML Local does not rename to {0}: an alias is of ASCII letters, digits and _, and does not start with a digit.": "PlantUML Local は {0} には変更しません。別名は、ASCII の英字・数字・_ でできていて、数字で始まらない名前にしてください。",
   "PlantUML Local does not rename to {0}: it is a keyword of the diagram.": "PlantUML Local は {0} には変更しません。図のキーワードです。",
-  "PlantUML Local does not rename to {0}: a participant of the diagram has that name already.": "PlantUML Local は {0} には変更しません。図の参加者に、もうその名前があります。"
+  "PlantUML Local does not rename to {0}: a participant of the diagram has that name already.": "PlantUML Local は {0} には変更しません。図の参加者に、もうその名前があります。",
+  "What the diagram was drawn from changed during export, so it was not written: {0}. Export again.": "書き出し中に、図の描画に使ったものが変更されたため、書き込みませんでした: {0}。もう一度書き出してください。",
+  "the diagram itself": "図そのもの",
+  "where its included files are looked for": "インクルードするファイルを探す場所"
 }

@@ -18,6 +18,7 @@ import {
   SVG_TEXT_LIMIT,
   svgSize,
   writeDocuments,
+  type Drawing,
   type ExporterDeps,
   type ExportFormat,
   type ReplaceTarget,
@@ -25,7 +26,7 @@ import {
 import { ExportLedger, type RecordResult } from '../../src/export/history';
 import { isInputManifest, type RendererIdentity } from '../../src/export/manifest';
 import { sha256, type ExportRecords } from '../../src/export/ownership';
-import type { DiagramRender } from '../../src/core/types';
+import type { DiagramRender, DrawnInputs } from '../../src/core/types';
 
 /** What the renderer hands the exporter for `svg`: no local include failed. */
 const rendered = (svg: string): DiagramRender => ({ svg, failedIncludes: new Map(), dependencies: [] });
@@ -63,6 +64,7 @@ function makeDeps(
   confirmReplace: ReturnType<typeof vi.fn>;
   toPng: ReturnType<typeof vi.fn>;
   record: ReturnType<typeof vi.fn>;
+  staleInputs: ReturnType<typeof vi.fn>;
   spool: ReturnType<typeof vi.fn>;
   deleteSpool: ReturnType<typeof vi.fn>;
   deleteFolder: ReturnType<typeof vi.fn>;
@@ -99,6 +101,8 @@ function makeDeps(
     isDirty: (): boolean => false,
     record: vi.fn((...args: Parameters<ExporterDeps['record']>): Promise<RecordResult> => ledger.record(...args)),
     rendererIdentity: (): Promise<RendererIdentity | null> => Promise.resolve(RENDERER),
+    // What each drawing was drawn from is as it was, unless a test says otherwise.
+    staleInputs: vi.fn((): Promise<string | null> => Promise.resolve(null)),
     lock: <T>(path: string, task: () => Promise<T>): Promise<T> => ledger.lock(path, task),
     ledger,
     // Declines, so a question no test expected writes nothing.
@@ -156,6 +160,7 @@ function makeDeps(
     confirmReplace: ReturnType<typeof vi.fn>;
     toPng: ReturnType<typeof vi.fn>;
     record: ReturnType<typeof vi.fn>;
+    staleInputs: ReturnType<typeof vi.fn>;
     spool: ReturnType<typeof vi.fn>;
     deleteSpool: ReturnType<typeof vi.fn>;
     deleteFolder: ReturnType<typeof vi.fn>;
@@ -1695,5 +1700,88 @@ describe('the record of what an image was drawn from', () => {
       expect(halted?.unchanged.map((r) => r.name)).toEqual(['orders']);
       expect(deps.record).toHaveBeenCalledOnce();
     });
+  });
+});
+
+describe('what a drawing was drawn from, looked at again before it is written', () => {
+  /** A diagram that includes a file next to it. */
+  const INPUTS: DrawnInputs = {
+    context: { root: '/repo', folder: '/repo/docs', searchFolders: [] },
+    requests: [{ path: 'part.iuml', from: null, kind: 'include', outcome: 'read', file: '/repo/docs/part.iuml', looked: [] }],
+    files: [{ file: '/repo/docs/part.iuml', sha256: 'a'.repeat(64), origin: 'disk', findings: [] }],
+  };
+  /** Each diagram drawn with the reads of an export, from the file it includes as `part` has it, by its SHA-256. */
+  const drawing = (part: () => string = () => 'a'.repeat(64)): Partial<ExporterDeps> => ({
+    render: vi.fn((source: string) =>
+      Promise.resolve({
+        ...rendered(`<svg width="40" height="20" viewBox="0 0 40 20">${source.includes('part') ? 'same' : source}</svg>`),
+        log: { requests: [], libraries: [] },
+        inputs: { ...INPUTS, files: [{ ...INPUTS.files[0]!, sha256: part() }] },
+      })
+    ),
+  });
+  const hashed = (text: string): string => sha256(new TextEncoder().encode(text));
+  const target = '/repo/docs/images/orders.svg';
+  const [block] = findPlantUmlBlocks('```plantuml orders\n!include part.iuml\n```');
+
+  it('passes each drawing what it was drawn from: one with a name of its own by its text too, one without by its includes alone', async () => {
+    const deps = makeDeps(drawing());
+    const [unnamed] = findPlantUmlBlocks('```plantuml\n!include part.iuml\n```');
+
+    await exportOne(deps, DOC, 'images', block!, 'orders');
+    await exportOne(deps, DOC, 'images', unnamed!, 'billing');
+
+    const includes = { context: INPUTS.context, requests: INPUTS.requests, files: [{ file: '/repo/docs/part.iuml', sha256: 'a'.repeat(64) }] };
+    expect(deps.staleInputs.mock.calls.map(([drawn]) => (drawn as Drawing).drawnFrom)).toEqual([
+      { source: hashed('!include part.iuml\n'), ...includes },
+      { source: null, ...includes },
+    ]);
+    expect(deps.writeFile).toHaveBeenCalledTimes(2);
+  });
+
+  it('writes and records nothing for a drawing whose inputs changed once it was drawn, and says why', async () => {
+    const deps = makeDeps(drawing(), { [target]: '<svg>by hand</svg>' });
+    deps.confirmReplace.mockResolvedValue('replace');
+    deps.staleInputs.mockResolvedValue('part.iuml changed');
+
+    expect(await exportOne(deps, DOC, 'images', block!, 'orders')).toEqual({
+      name: 'orders',
+      path: null,
+      error: 'part.iuml changed',
+      cause: 'inputs',
+    });
+    expect(deps.writeFile).not.toHaveBeenCalled();
+    expect(deps.record).not.toHaveBeenCalled();
+    expect(deps.disk.get(target)).toBe('<svg>by hand</svg>');
+    // Looked at again once the question was answered, just before writing.
+    expect(deps.confirmReplace.mock.invocationCallOrder[0]).toBeLessThan(deps.staleInputs.mock.invocationCallOrder[0]!);
+  });
+
+  it('writes the rest of an export, each drawing looked at again in its turn', async () => {
+    const deps = makeDeps(drawing());
+    deps.staleInputs.mockImplementation((drawn: Drawing) => Promise.resolve(drawn.name === 'two' ? 'part.iuml changed' : null));
+    const text = ['one', 'two', 'three'].map((name) => `\`\`\`plantuml ${name}\n!include part.iuml\n${name}\n\`\`\``).join('\n\n');
+
+    const outcome = await exportMarkdown(deps, DOC, 'images', text);
+
+    expect(outcome?.written.map((r) => r.name)).toEqual(['one', 'three']);
+    expect(outcome?.failed).toEqual([{ name: 'two', path: null, error: 'part.iuml changed', cause: 'inputs' }]);
+    expect(deps.ledger.ownerOf('/repo/docs/images/two.svg')).toBeNull();
+    expect(deps.staleInputs).toHaveBeenCalledTimes(3);
+  });
+
+  it('does not record what a file holding its image already was drawn from this time, once that changed too', async () => {
+    let part = 'a'.repeat(64);
+    const deps = makeDeps(drawing(() => part));
+    await exportOne(deps, DOC, 'images', block!, 'orders');
+    // A comment changed in the included file: the image is the same. Then it changed again.
+    part = 'b'.repeat(64);
+    deps.staleInputs.mockResolvedValue('part.iuml changed');
+    deps.record.mockClear();
+
+    expect(await exportOne(deps, DOC, 'images', block!, 'orders')).toMatchObject({ unchanged: true });
+    expect(deps.record).not.toHaveBeenCalled();
+    expect(deps.ledger.ownerOf(target)?.input?.resources.files[0]?.sha256).toBe('a'.repeat(64));
+    expect(deps.staleInputs).toHaveBeenCalledTimes(2);
   });
 });

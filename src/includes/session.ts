@@ -1,7 +1,7 @@
 import { INCLUDE_LIMITS } from '../core/constants';
 import { splitLines } from '../core/lines';
 import { forEachCodeLine } from '../core/shape';
-import type { IncludedFile, IncludeKind, IncludeLoader } from '../core/types';
+import type { IncludeContext, IncludedFile, IncludeKind, IncludeLoader, InputRequest, RequestOutcome } from '../core/types';
 import { includesWhitePageLibrary, themeLines } from '../render/palette';
 import { parseIncludePath, type PathRefusal } from './path-policy';
 import { readMeasured, type MeasuredRead, type ReadRefusal } from './reader';
@@ -185,6 +185,44 @@ export class IncludeSession {
     }
     return fail({ kind: 'missing', searched: !parsed.path.anchored && scope.searchFolders.length > 0 });
   };
+}
+
+/** Where the files of `access` are looked for, or why none are, as what a drawing was drawn from says it. */
+export function contextOf(access: IncludeAccess): IncludeContext {
+  return access.available
+    ? { root: access.scope.root, folder: access.scope.documentFolder, searchFolders: [...access.scope.searchFolders] }
+    : { unavailable: access.why };
+}
+
+/** How a request that failed for `reason` ended, in words that stay the same in every language. */
+export function outcomeOf(reason: IncludeFailureReason): RequestOutcome {
+  switch (reason.kind) {
+    case 'unavailable':
+      return `unavailable:${reason.why}`;
+    case 'path':
+      return `path:${reason.refusal}`;
+    case 'outside':
+      return 'outside';
+    case 'missing':
+      return reason.searched ? 'missing:searched' : 'missing';
+    case 'read':
+      return `read:${reason.refusal}`;
+    case 'limit':
+      return `limit:${reason.limit}`;
+  }
+}
+
+/**
+ * The requests of a session as what a drawing was drawn from says them:
+ * each as asked, how it ended, the file delivered and the places looked at.
+ */
+export function inputRequestsOf(requests: readonly IncludeRequest[]): InputRequest[] {
+  return requests.map(({ path, from, kind, answer }): InputRequest => {
+    const asked = { path, from, kind: kind ?? null };
+    return 'delivered' in answer
+      ? { ...asked, outcome: 'read', file: answer.delivered, looked: [...answer.missing] }
+      : { ...asked, outcome: outcomeOf(answer.failed), file: null, looked: [...answer.looked] };
+  });
 }
 
 /**

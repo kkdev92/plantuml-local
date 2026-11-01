@@ -9,9 +9,7 @@ import type {
   DrawnInputs,
   DrawnRequest,
   DrawnRequestState,
-  IncludeContext,
   IncludeLoader,
-  InputRequest,
   LibraryRead,
 } from '../core/types';
 import { RenderFailure, type Drawing } from '../render/client';
@@ -19,7 +17,7 @@ import { includeAccess } from './access';
 import { describeIncludeFailure, describeIncludeFailures, hasLocalInclude, type IncludeLabels } from './describe';
 import { DrawingFailure } from './drawings';
 import { INCLUDE_EXTENSIONS } from './path-policy';
-import { IncludeSession, type IncludeAccess, type IncludeFailureReason } from './session';
+import { contextOf, IncludeSession, inputRequestsOf, type IncludeAccess, type IncludeFailureReason } from './session';
 import type { ReadSnapshot } from './snapshot';
 import { pathKey } from './tracking';
 
@@ -104,39 +102,9 @@ export function drawInDocuments(renderer: Renderer, host: IncludeHost, snapshot?
   };
 }
 
-/** Where the files of `access` are looked for, or why none are. */
-function contextOf(access: IncludeAccess): IncludeContext {
-  return access.available
-    ? { root: access.scope.root, folder: access.scope.documentFolder, searchFolders: [...access.scope.searchFolders] }
-    : { unavailable: access.why };
-}
-
-/** How a request that failed for `reason` ended, in words that stay the same in every language. */
-function outcomeOf(reason: IncludeFailureReason): string {
-  switch (reason.kind) {
-    case 'unavailable':
-      return `unavailable:${reason.why}`;
-    case 'path':
-      return `path:${reason.refusal}`;
-    case 'outside':
-      return 'outside';
-    case 'missing':
-      return reason.searched ? 'missing:searched' : 'missing';
-    case 'read':
-      return `read:${reason.refusal}`;
-    case 'limit':
-      return `limit:${reason.limit}`;
-  }
-}
-
 /** What a drawing of `session` was drawn from: where it looked, what it asked for and the files `snapshot` delivered. */
 function drawnInputs(session: IncludeSession, access: IncludeAccess, snapshot: ReadSnapshot): DrawnInputs {
-  const requests = session.requests.map(({ path, from, kind, answer }): InputRequest => {
-    const asked = { path, from, kind: kind ?? null };
-    return 'delivered' in answer
-      ? { ...asked, outcome: 'read', file: answer.delivered, looked: [...answer.missing] }
-      : { ...asked, outcome: outcomeOf(answer.failed), file: null, looked: [...answer.looked] };
-  });
+  const requests = inputRequestsOf(session.requests);
   const files: DeliveredFile[] = [];
   for (const id of new Set(requests.flatMap(({ file }) => (file === null ? [] : [file])))) {
     const delivered = snapshot.delivered(id);
@@ -197,6 +165,21 @@ export async function openSession(
     root: access.available ? access.scope.root : undefined,
     access,
   };
+}
+
+/**
+ * Where the diagrams of `document` look for their local includes now, and
+ * how they read a file — an open document as it is edited — apart from the
+ * reads of any export: for looking again at what a drawing was drawn from
+ * (src/export/recheck.ts). `opened` gives a path found as VS Code knows it.
+ */
+export async function readingNow(
+  document: vscode.Uri,
+  host: Pick<IncludeHost, 'includePaths'>
+): Promise<{ access: IncludeAccess; opened: (path: string) => string; openText: (path: string) => string | undefined }> {
+  const { access, folder } = await accessFor(document, host);
+  const opened = (path: string): string => asOpened(access, folder, path);
+  return { access, opened, openText: (path) => openText(opened(path)) ?? openText(path) };
 }
 
 /**

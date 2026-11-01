@@ -1012,7 +1012,12 @@ diagram. A file that changes while the export runs — while its question is
 open, say — is left as it is and reported, whatever the answer. A file a
 diagram includes is read once per export, so every image of one export, or of
 a folder, is drawn from the same text of it, even when it is saved while the
-export runs. Each file is
+export runs. Just before it writes an image, the export looks again at what the
+image was drawn from — the diagram's text, the files it included, where it
+looked for them and the include settings — and writes no image whose diagram or
+included files changed since it was drawn: the message names what changed, and
+exporting again draws the diagram as it is. Of a diagram exported under a name
+you type, only the files it included are looked at again. Each file is
 written under a temporary name beside the target and then renamed over it, so
 an export that fails part way never leaves half an image behind. The images an
 export has drawn wait in memory until it writes them, up to 64 MiB in all; past
@@ -1032,8 +1037,9 @@ line on the next run, while every line without the marker — including a
 hand-written reference to the same file — is never touched. The update command
 is idempotent: running it twice changes nothing, and one Undo reverts whatever
 it wrote. A block inside a block quote or a list item gets its reference inside
-the same quote or item. If the document changes while the export runs, the files
-are written but the references are left alone; run the command again.
+the same quote or item. If the document changes while the export runs, the
+references are left alone, and a diagram that changed is not written either; run
+the command again.
 
 Exports use the light palette regardless of your editor theme, since the files
 face hosts whose background this extension does not control;

@@ -1606,6 +1606,38 @@ describe('export (dist)', () => {
       );
     });
 
+    it('export-all writes no diagram whose text changed while it asked, and writes the rest', async () => {
+      const text = ['```plantuml edited', 'A -> B : drawn', '```', '', '```plantuml left', 'A -> B : left', '```'].join('\n');
+      const editor = makeEditor('file:///c/edited/doc.md', text, 0);
+      for (const name of ['edited', 'left']) {
+        vscodeStub._test.writtenFiles.set(`file:///c/edited/images/${name}.svg`, '<svg>drawn by hand</svg>');
+      }
+      // Typed in the first diagram while the question is open.
+      const warn = vscodeStub.window.showWarningMessage;
+      vscodeStub.window.showWarningMessage = async (...args) => {
+        editor.document.setText(text.replace('A -> B : drawn', 'A -> B : typed'));
+        return warn(...args);
+      };
+      vscodeStub._test.setActiveEditor(editor);
+      vscodeStub._test.messageReply = 'Overwrite';
+      const logsBefore = vscodeStub._test.logs.length;
+      try {
+        await vscodeStub._test.registeredCommands.get('plantumlLocal.exportAllSvg')?.();
+      } finally {
+        vscodeStub._test.messageReply = null;
+        vscodeStub.window.showWarningMessage = warn;
+        vscodeStub._test.setActiveEditor(undefined);
+      }
+
+      expect(vscodeStub._test.writtenFiles.get('file:///c/edited/images/edited.svg')).toBe('<svg>drawn by hand</svg>');
+      expect(vscodeStub._test.writtenFiles.get('file:///c/edited/images/left.svg')).toContain('left');
+      expect(vscodeStub._test.logs.slice(logsBefore).filter((line) => line.startsWith('warn: Could not export'))).toEqual([
+        expect.stringMatching(
+          /^warn: Could not export edited: What the diagram was drawn from changed during export, so it was not written: the diagram itself\. Export again\. /
+        ),
+      ]);
+    });
+
     describe('exported by an earlier version', () => {
       const exported = '<svg>exported by an earlier version</svg>';
       // What earlier versions kept: the document each file was exported from.
@@ -5569,51 +5601,175 @@ describe('diagram dependencies (dist)', () => {
     }
   });
 
-  it('draws every document of a folder export from the same read of a file they include', async () => {
+  describe('a folder export whose included file is saved as it draws', () => {
+    const BEFORE = 'Alice -> Bob : before\n';
     const block = (name: string): string => ['```plantuml ' + name, '@startuml', '!include part.iuml', '@enduml', '```'].join('\n');
-    await mkdir(pathOf('docs/together'), { recursive: true });
-    await writeFile(pathOf('docs/together/part.iuml'), 'Alice -> Bob : before\n');
-    const documents = [uriOf('docs/together/a.md'), uriOf('docs/together/b.md')];
-    vscodeStub._test.writtenFiles.set(documents[0]!, block('first'));
-    vscodeStub._test.writtenFiles.set(documents[1]!, block('second'));
-    // The file is saved as the second document is about to be drawn.
-    const withProgress = vscodeStub.window.withProgress;
-    vscodeStub.window.withProgress = (options, task) =>
-      withProgress(options, (progress, token) =>
-        task(
-          {
-            report: (value) => {
-              if (JSON.stringify(value).includes('(2/2)')) {
-                writeFileSync(pathOf('docs/together/part.iuml'), 'Alice -> Bob : after\n');
-              }
-              progress.report(value);
-            },
-          },
-          token
-        )
-      );
-    vscodeStub._test.messageReply = 'Export';
-    try {
-      await vscodeStub._test.registeredCommands.get('plantumlLocal.exportFolderSvg')?.(vscodeStub.Uri.parse(uriOf('docs/together')));
-    } finally {
-      vscodeStub._test.messageReply = null;
-      vscodeStub.window.withProgress = withProgress;
-      for (const document of documents) {
-        vscodeStub._test.writtenFiles.delete(document);
-      }
-    }
+    const outputsIn = (folder: string): string[] => [uriOf(`${folder}/images/first.svg`), uriOf(`${folder}/images/second.svg`)];
 
-    const outputs = [uriOf('docs/together/images/first.svg'), uriOf('docs/together/images/second.svg')];
-    for (const output of outputs) {
-      expect(vscodeStub._test.writtenFiles.get(output), output).toContain('before');
-    }
-    expect(readFileSync(pathOf('docs/together/part.iuml'), 'utf8')).toBe('Alice -> Bob : after\n');
-    // Recorded as read: once, by the same SHA-256.
-    const files = outputs.map((output) => recordOf(output)?.input?.resources.files);
-    expect(files[0]).toEqual([
-      { file: pathOf('docs/together/part.iuml'), sha256: createHash('sha256').update('Alice -> Bob : before\n').digest('hex'), origin: 'disk' },
-    ]);
-    expect(files[1]).toEqual(files[0]);
+    /**
+     * Exports `folder`, whose two documents include part.iuml: the file is
+     * saved with other text as the second document is about to be drawn,
+     * and, when `back`, saved as it was once the export looks at the files
+     * it is to write.
+     */
+    const exportWhileSaved = async (folder: string, back: boolean): Promise<void> => {
+      const part = pathOf(`${folder}/part.iuml`);
+      await mkdir(pathOf(folder), { recursive: true });
+      await writeFile(part, BEFORE);
+      const documents = [uriOf(`${folder}/a.md`), uriOf(`${folder}/b.md`)];
+      vscodeStub._test.writtenFiles.set(documents[0]!, block('first'));
+      vscodeStub._test.writtenFiles.set(documents[1]!, block('second'));
+      const withProgress = vscodeStub.window.withProgress;
+      vscodeStub.window.withProgress = (options, task) =>
+        withProgress(options, (progress, token) =>
+          task(
+            {
+              report: (value) => {
+                if (JSON.stringify(value).includes('(2/2)')) {
+                  writeFileSync(part, 'Alice -> Bob : after\n');
+                }
+                progress.report(value);
+              },
+            },
+            token
+          )
+        );
+      const stat = vscodeStub.workspace.fs.stat;
+      vscodeStub.workspace.fs.stat = (uri) => {
+        if (back && outputsIn(folder).includes(uri.toString())) {
+          writeFileSync(part, BEFORE);
+        }
+        return stat(uri);
+      };
+      vscodeStub._test.messageReply = 'Export';
+      try {
+        await vscodeStub._test.registeredCommands.get('plantumlLocal.exportFolderSvg')?.(vscodeStub.Uri.parse(uriOf(folder)));
+      } finally {
+        vscodeStub._test.messageReply = null;
+        vscodeStub.window.withProgress = withProgress;
+        vscodeStub.workspace.fs.stat = stat;
+        for (const document of documents) {
+          vscodeStub._test.writtenFiles.delete(document);
+        }
+      }
+    };
+
+    it('draws every document from the same read of the file', async () => {
+      await exportWhileSaved('docs/together', true);
+
+      const outputs = outputsIn('docs/together');
+      for (const output of outputs) {
+        expect(vscodeStub._test.writtenFiles.get(output), output).toContain('before');
+      }
+      // Recorded as read: once, by the same SHA-256.
+      const files = outputs.map((output) => recordOf(output)?.input?.resources.files);
+      expect(files[0]).toEqual([
+        { file: pathOf('docs/together/part.iuml'), sha256: createHash('sha256').update(BEFORE).digest('hex'), origin: 'disk' },
+      ]);
+      expect(files[1]).toEqual(files[0]);
+    });
+
+    it('writes none of the drawings once the file is otherwise, and says why', async () => {
+      const logsBefore = vscodeStub._test.logs.length;
+
+      await exportWhileSaved('docs/apart', false);
+
+      // The second document was drawn from the first read too, or it would be written.
+      for (const output of outputsIn('docs/apart')) {
+        expect(vscodeStub._test.writtenFiles.has(output), output).toBe(false);
+        expect(recordOf(output), output).toBeUndefined();
+      }
+      expect(readFileSync(pathOf('docs/apart/part.iuml'), 'utf8')).toBe('Alice -> Bob : after\n');
+      expect(vscodeStub._test.notifications.warn.at(-1)).toBe(
+        'Diagrams that could not be exported: 2. See the Output panel for the reasons.'
+      );
+      const reasons = vscodeStub._test.logs.slice(logsBefore).filter((line) => line.includes('Could not export'));
+      expect(reasons).toHaveLength(2);
+      for (const reason of reasons) {
+        expect(reason).toMatch(/What the diagram was drawn from changed during export, so it was not written: .*part\.iuml\. Export again\./);
+      }
+    });
+  });
+
+  describe('an export whose included file is saved while it asks about replacing the image', () => {
+    /**
+     * Exports the block of `lines` at `folder`/doc.md, named `name` when the
+     * block has none, over an image drawn by hand: part.iuml is saved with
+     * `saved` while the export asks, and the question is answered Overwrite.
+     */
+    const exportOver = async (folder: string, lines: readonly string[], saved: string, name?: string): Promise<void> => {
+      const part = pathOf(`${folder}/part.iuml`);
+      const warn = vscodeStub.window.showWarningMessage;
+      vscodeStub.window.showWarningMessage = async (...args) => {
+        writeFileSync(part, saved);
+        return warn(...args);
+      };
+      vscodeStub._test.setActiveEditor(onDisk(`${folder}/doc.md`, lines, 2));
+      vscodeStub._test.messageReply = 'Overwrite';
+      vscodeStub._test.inputBoxReply = name ?? null;
+      try {
+        await vscodeStub._test.registeredCommands.get('plantumlLocal.exportSvg')?.();
+      } finally {
+        vscodeStub._test.inputBoxReply = null;
+        vscodeStub._test.messageReply = null;
+        vscodeStub._test.setActiveEditor(undefined);
+        vscodeStub.window.showWarningMessage = warn;
+      }
+    };
+    const STALE = /^Could not export the diagram: What the diagram was drawn from changed during export, so it was not written: .*part\.iuml\. Export again\.$/;
+
+    it('writes the diagram once exported again, not before', async () => {
+      await mkdir(pathOf('docs/asked'), { recursive: true });
+      await writeFile(pathOf('docs/asked/part.iuml'), 'Alice -> Bob : before\n');
+      const target = uriOf('docs/asked/images/orders.svg');
+      vscodeStub._test.writtenFiles.set(target, '<svg>drawn by hand</svg>');
+      const lines = ['```plantuml orders', '@startuml', '!include part.iuml', '@enduml', '```'];
+
+      await exportOver('docs/asked', lines, 'Alice -> Bob : after\n');
+      expect(vscodeStub._test.writtenFiles.get(target)).toBe('<svg>drawn by hand</svg>');
+      expect(recordOf(target)).toBeUndefined();
+      expect(vscodeStub._test.notifications.error.at(-1)).toMatch(STALE);
+
+      // Drawn from the file as it is now, and saved the same while it asks.
+      await exportOver('docs/asked', lines, 'Alice -> Bob : after\n');
+      expect(vscodeStub._test.writtenFiles.get(target)).toContain('after');
+      expect(recordOf(target)).toBeDefined();
+    });
+
+    it('looks again at an included file open with changes not saved as the editor has it, as it was drawn', async () => {
+      await mkdir(pathOf('docs/open'), { recursive: true });
+      await writeFile(pathOf('docs/open/part.iuml'), 'Alice -> Bob : saved\n');
+      const target = uriOf('docs/open/images/orders.svg');
+      vscodeStub._test.writtenFiles.set(target, '<svg>drawn by hand</svg>');
+      const open = onDisk('docs/open/part.iuml', ['Alice -> Bob : unsaved'], 0, 'plantuml').document;
+      vscodeStub._test.openDocument(open);
+      try {
+        await exportOver('docs/open', ['```plantuml orders', '@startuml', '!include part.iuml', '@enduml', '```'], 'Alice -> Bob : saved\n');
+      } finally {
+        vscodeStub._test.closeDocument(open);
+      }
+
+      expect(vscodeStub._test.writtenFiles.get(target)).toContain('unsaved');
+      expect(recordOf(target)?.input?.resources.files).toEqual([
+        {
+          file: pathOf('docs/open/part.iuml'),
+          sha256: createHash('sha256').update('Alice -> Bob : unsaved').digest('hex'),
+          origin: 'editor',
+        },
+      ]);
+    });
+
+    it('looks again at the includes of a diagram exported under a name asked for', async () => {
+      await mkdir(pathOf('docs/unnamed'), { recursive: true });
+      await writeFile(pathOf('docs/unnamed/part.iuml'), 'Alice -> Bob : before\n');
+      const target = uriOf('docs/unnamed/images/billing.svg');
+      vscodeStub._test.writtenFiles.set(target, '<svg>drawn by hand</svg>');
+
+      await exportOver('docs/unnamed', ['```plantuml', '@startuml', '!include part.iuml', '@enduml', '```'], 'Alice -> Bob : after\n', 'billing');
+
+      expect(vscodeStub._test.writtenFiles.get(target)).toBe('<svg>drawn by hand</svg>');
+      expect(vscodeStub._test.notifications.error.at(-1)).toMatch(STALE);
+    });
   });
 });
 
