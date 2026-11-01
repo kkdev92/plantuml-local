@@ -20,7 +20,6 @@ import {
   setting,
   type OperationContext,
   type ServiceToken,
-  type TypedStorage,
   type WorkspaceService,
 } from '@kkdev92/vscode-ext-kit';
 import type MarkdownIt from 'markdown-it';
@@ -62,8 +61,10 @@ import {
   drawDocument,
   exportAll,
   exportOne,
+  planDocument,
   preparePng,
   prepareSvg,
+  refuseSharedFiles,
   writeDocuments,
   type DrawingDeps,
   type DrawnDocument,
@@ -71,9 +72,11 @@ import {
   type ExporterDeps,
   type ExportOutcome,
   type ExportResult,
+  type ReplaceTarget,
 } from './export/exporter';
 import { MAX_DOCUMENTS, findDocuments } from './export/folder';
-import { isLastExport, withExport, type ExportRecords } from './export/ownership';
+import { ExportLedger } from './export/history';
+import type { ExportRecords } from './export/ownership';
 import { findColors, hexOf, rgbOf } from './core/colors';
 import { splitLines } from './core/lines';
 import { documentColumnOf, documentLineOf } from './core/positions';
@@ -236,13 +239,25 @@ export const Settings = defineSettings({
 });
 
 /**
- * What the export commands wrote, kept in the workspace's state on this
- * machine (src/export/ownership.ts).
+ * What earlier versions recorded of the files the export commands wrote,
+ * kept in the workspace's state on this machine (src/export/ownership.ts):
+ * read, and no longer written.
  */
 const ExportedFiles = defineStorage<ExportRecords>({
   key: 'exportedFiles',
   scope: 'workspace',
   defaultValue: {},
+});
+
+/**
+ * What the export commands wrote, per diagram, kept in the workspace's state
+ * on this machine (src/export/history.ts). Taken as stored and checked
+ * record by record there, since a later version may have written it.
+ */
+const ExportHistory = defineStorage<unknown>({
+  key: 'exportHistory',
+  scope: 'workspace',
+  defaultValue: null,
 });
 
 /** Clears the render cache so every diagram on the page is drawn again. */
@@ -453,6 +468,9 @@ const Palettes: ServiceToken<ThemePalettes> = serviceToken<ThemePalettes>('plant
 
 /** Renders shared by the preview and the diagnostics, so a diagram both need is drawn once. */
 const Renders: ServiceToken<SharedRender> = serviceToken<SharedRender>('plantuml.renders');
+
+/** The records of the exports in this window, and the files they are writing. */
+const Exports: ServiceToken<ExportLedger> = serviceToken<ExportLedger>('plantuml.exports');
 
 /** The last drawing of each diagram the shared renders drew for a document, with what it asked for. */
 const Drawings: ServiceToken<DrawingRecords> = serviceToken<DrawingRecords>('plantuml.drawings');
@@ -1349,7 +1367,7 @@ function exporterDeps(
   renderer: RendererClient,
   palettes: ThemePalettes,
   settings: SettingsReader,
-  exportRecords: TypedStorage<ExportRecords>,
+  exports: ExportLedger,
   workspace: WorkspaceService,
   document: vscode.Uri
 ): ExporterDeps {
@@ -1361,6 +1379,7 @@ function exporterDeps(
     ),
     sameFileMessage: context.l10n.t('Multiple diagrams would be saved to the same file. Give each diagram a unique name or use separate export folders.'),
     changedMessage: context.l10n.t('The image file changed during export, so it was not overwritten. Check it, then export again.'),
+    dirtyMessage: context.l10n.t('The image file is open with unsaved changes, so it was not overwritten. Save or revert it, then export again.'),
     toPng: (svg, width, height, background) => drawPng(context.l10n, svg, width, height, background),
     resolve: (documentPath, relative) =>
       vscode.Uri.joinPath(vscode.Uri.parse(documentPath), '..', relative).toString(),
@@ -1383,43 +1402,20 @@ function exporterDeps(
       }
       return vscode.workspace.fs.readFile(uri);
     },
+    ownerOf: (path) => exports.ownerOf(path),
+    wroteBefore: (path, source, existing) => exports.wroteBefore(path, source, existing),
     // Open with unsaved edits, it is someone's work, whoever wrote it last.
-    wroteLast: (path, source, existing): boolean =>
-      !vscode.workspace.textDocuments.some((open) => open.isDirty && open.uri.toString() === path) &&
-      isLastExport(exportRecords.get(), path, source, existing),
-    noteWritten: async (path, source, content): Promise<void> => {
-      const records = exportRecords.get();
-      const next = withExport(records, path, source, content);
-      if (next !== records) {
-        await exportRecords.set(next).catch((error: unknown) => {
-          context.logger.warn(context.l10n.t(
-            'Could not save export history for {0}. You may be asked before overwriting this file next time. Details: {1}',
-            path,
-            error instanceof Error ? error.message : String(error)
-          ));
-        });
-      }
-    },
-    confirmReplace: (paths, canKeep): Promise<'replace' | 'keep' | undefined> => {
-      const files = paths.map((path) => workspace.relativePath(vscode.Uri.parse(path)));
-      const replace = { title: context.l10n.t('Overwrite'), value: 'replace' as const };
-      const keep = { title: context.l10n.t('Keep Existing Files'), value: 'keep' as const };
-      const actions = canKeep ? [replace, keep] : [replace];
-      // VS Code adds a Cancel button to a modal, which answers undefined.
-      if (files.length === 1) {
-        return context.notify.warn(
-          context.l10n.t('{0} already exists and has different contents. Overwrite it?', files[0] ?? ''),
-          { modal: true, actions }
-        );
-      }
-      return context.notify.warn(
-        context.l10n.t(
-          '{0} files already exist and have different contents. Overwrite them?',
-          String(files.length)
-        ),
-        { modal: true, detail: files.join('\n'), actions }
-      );
-    },
+    isDirty: (path) => vscode.workspace.textDocuments.some((open) => open.isDirty && open.uri.toString() === path),
+    record: (key, path, content) =>
+      exports.record(key, path, content, (error) => {
+        context.logger.warn(context.l10n.t(
+          'Could not save export history for {0}. You may be asked before overwriting this file next time. Details: {1}',
+          path,
+          error instanceof Error ? error.message : String(error)
+        ));
+      }),
+    lock: (path, task) => exports.lock(path, task),
+    confirmReplace: (targets, canKeep) => confirmReplace(context, workspace, targets, canKeep),
     // Written beside the target first and renamed over it, so a write that
     // fails part way leaves the old file in place, not half an image.
     writeFile: async (path, content, replace): Promise<void> => {
@@ -1442,6 +1438,82 @@ function exporterDeps(
 }
 
 /**
+ * Asks before replacing `targets`, files that hold something other than
+ * their diagram: why a file an earlier version exported is asked about,
+ * and that a file replaced becomes its diagram's own to replace without
+ * asking. With `canKeep`, the files can be kept and the rest written.
+ */
+function confirmReplace(
+  context: OperationContext,
+  workspace: WorkspaceService,
+  targets: readonly ReplaceTarget[],
+  canKeep: boolean
+): Promise<'replace' | 'keep' | undefined> {
+  const fileOf = (target: ReplaceTarget): string => workspace.relativePath(vscode.Uri.parse(target.path));
+  const replace = { title: context.l10n.t('Overwrite'), value: 'replace' as const };
+  const keep = { title: context.l10n.t('Keep Existing Files'), value: 'keep' as const };
+  const actions = canKeep ? [replace, keep] : [replace];
+  const earlier = targets.some((target) => target.byEarlierVersion);
+  const recorded = targets.every((target) => target.recorded);
+  // VS Code adds a Cancel button to a modal, which answers undefined.
+  const [only] = targets;
+  if (targets.length === 1 && only !== undefined) {
+    const detail = [
+      ...(earlier
+        ? [context.l10n.t('An earlier version of PlantUML Local exported this file. Exports are now recorded per diagram, so it asks once before overwriting such a file.')]
+        : []),
+      ...(recorded
+        ? [context.l10n.t("Once overwritten, the file is recorded as this diagram's export, and exporting the diagram again overwrites it without asking.")]
+        : []),
+    ];
+    return context.notify.warn(
+      context.l10n.t('{0} already exists and has different contents. Overwrite it?', fileOf(only)),
+      { modal: true, ...(detail.length > 0 ? { detail: detail.join('\n\n') } : {}), actions }
+    );
+  }
+  const files = targets.map((target) =>
+    target.byEarlierVersion ? context.l10n.t('{0} (exported by an earlier version)', fileOf(target)) : fileOf(target)
+  );
+  const detail = [
+    files.join('\n'),
+    ...(earlier
+      ? [context.l10n.t('Files exported by an earlier version of PlantUML Local are asked about once, as exports are now recorded per diagram.')]
+      : []),
+    ...(recorded
+      ? [context.l10n.t("Once overwritten, each file is recorded as its diagram's export, and exporting the diagrams again overwrites them without asking.")]
+      : []),
+  ];
+  return context.notify.warn(
+    context.l10n.t('{0} files already exist and have different contents. Overwrite them?', String(targets.length)),
+    { modal: true, detail: detail.join('\n\n'), actions }
+  );
+}
+
+/**
+ * Why a diagram exported was not recorded as the export of its file, for
+ * the Output panel: exporting it again asks before overwriting the file.
+ */
+function untrackedMessage(l10n: L10n, result: ExportResult): string {
+  switch (result.untracked) {
+    case 'full':
+      return l10n.t(
+        'Exported {0} without recording it: the export history of this workspace is full. Exporting the diagram again asks before overwriting the file.',
+        result.name
+      );
+    case 'later-version':
+      return l10n.t(
+        'Exported {0} without recording it: a later version of PlantUML Local keeps the export history of this workspace. Exporting the diagram again asks before overwriting the file.',
+        result.name
+      );
+    default:
+      return l10n.t(
+        'Exported {0}, but could not save the record of it. Exporting the diagram again asks before overwriting the file.',
+        result.name
+      );
+  }
+}
+
+/**
  * The bulk export with progress, shared by both Export All commands. Null
  * when replacing existing files is declined.
  */
@@ -1450,14 +1522,14 @@ function runBulkExport(
   renderer: RendererClient,
   palettes: ThemePalettes,
   settings: SettingsReader,
-  exportRecords: TypedStorage<ExportRecords>,
+  exports: ExportLedger,
   workspace: WorkspaceService,
   document: ActiveDocument,
   directory: string
 ): Promise<ExportOutcome | null> {
   return context.progress.run({ title: context.l10n.t('Exporting diagrams…') }, (report) =>
     exportAll(
-      exporterDeps(context, renderer, palettes, settings, exportRecords, workspace, document.textDocument.uri),
+      exporterDeps(context, renderer, palettes, settings, exports, workspace, document.textDocument.uri),
       document.path,
       directory,
       diagramsOf(document.textDocument, document.text),
@@ -1507,12 +1579,13 @@ async function reportOutcome(
   unnamedIn?: vscode.Uri
 ): Promise<void> {
   const messages: string[] = [];
-  if (outcome.written.length > 0) {
-    messages.push(context.l10n.t('Diagrams exported: {0}', String(outcome.written.length)));
+  const exported = [...outcome.written, ...outcome.untracked];
+  if (exported.length > 0) {
+    messages.push(context.l10n.t('Diagrams exported: {0}', String(exported.length)));
   }
   // Diagrams written without a formula, an embedded diagram or an image the
   // engine does not draw: counted here, named in the output.
-  const leftOut = outcome.written.filter((result) => (result.notes?.length ?? 0) > 0);
+  const leftOut = [...exported, ...outcome.unchanged].filter((result) => (result.notes?.length ?? 0) > 0);
   if (leftOut.length > 0) {
     messages.push(
       context.l10n.t(
@@ -1525,8 +1598,25 @@ async function reportOutcome(
     }
   }
   messages.push(...extra);
+  if (outcome.unchanged.length > 0) {
+    messages.push(context.l10n.t('Image files already up to date: {0}', String(outcome.unchanged.length)));
+  }
+  if (outcome.untracked.length > 0) {
+    messages.push(
+      context.l10n.t(
+        "Exported files not recorded as their diagrams' exports: {0}. Exporting them again asks before overwriting them. See the Output panel for why.",
+        String(outcome.untracked.length)
+      )
+    );
+    for (const result of outcome.untracked) {
+      context.logger.warn(untrackedMessage(context.l10n, result));
+    }
+  }
   if (outcome.kept > 0) {
     messages.push(context.l10n.t('Existing files kept: {0}', String(outcome.kept)));
+  }
+  if (outcome.stopped > 0) {
+    messages.push(context.l10n.t('Diagrams not written because the export stopped: {0}', String(outcome.stopped)));
   }
   if (outcome.failed.length > 0) {
     messages.push(context.l10n.t('Diagrams that could not be exported: {0}. See the Output panel for the reasons.', String(outcome.failed.length)));
@@ -1560,12 +1650,13 @@ async function reportOutcome(
 
   const summary = messages.join(' · ');
   context.logger.info(summary);
+  const incomplete = outcome.failed.length > 0 || outcome.untracked.length > 0 || leftOut.length > 0;
   await announceExport(
     context,
     summary,
-    forceWarn || outcome.failed.length > 0 || outcome.unnamed > 0 || leftOut.length > 0,
-    outcome.written[0]?.path ?? undefined,
-    outcome.failed.length > 0 || leftOut.length > 0,
+    forceWarn || incomplete || outcome.unnamed > 0 || outcome.stopped > 0,
+    [...exported, ...outcome.unchanged][0]?.path ?? undefined,
+    incomplete,
     outcome.unnamed > 0 ? unnamedIn : undefined
   );
 }
@@ -1736,6 +1827,7 @@ function applyReferenceEdits(
 export const plantuml = defineModule('plantuml', (module): undefined => {
   module.settings.add(Settings);
   module.storage.add(ExportedFiles);
+  module.storage.add(ExportHistory);
 
   module.services.singleton(Renderer, {
     inject: { logger: Log, settings: Settings.token, l10n: Localization },
@@ -1755,6 +1847,11 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
   module.services.singleton(Palettes, {
     inject: { renderer: Renderer },
     create: ({ renderer }) => new ThemePalettes((source, dark) => renderer.render(source, dark)),
+  });
+
+  module.services.singleton(Exports, {
+    inject: { history: ExportHistory.token, earlier: ExportedFiles.token },
+    create: ({ history, earlier }) => new ExportLedger(history, () => earlier.get()),
   });
 
   module.services.singleton(IncludeWatch, () => new IncludeWatcher());
@@ -2221,13 +2318,13 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         renderer,
         palettes,
         settings,
-        exportRecords,
+        exports,
         workspace,
       }: {
         renderer: RendererClient;
         palettes: ThemePalettes;
         settings: SettingsReader;
-        exportRecords: TypedStorage<ExportRecords>;
+        exports: ExportLedger;
         workspace: WorkspaceService;
       }
     ): Promise<void> => {
@@ -2257,7 +2354,9 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         return;
       }
 
-      const deps = exporterDeps(context, renderer, palettes, settings, exportRecords, workspace, document.textDocument.uri);
+      const deps = exporterDeps(context, renderer, palettes, settings, exports, workspace, document.textDocument.uri);
+      // The document's other diagrams, any of which headed for the same file fails the export.
+      const blocks = diagramsOf(document.textDocument, document.text);
       // How the export went; a failure comes with the way on that suits it.
       const report = async (result: ExportResult | null, as: ExportFormat): Promise<void> => {
         if (result === null) {
@@ -2266,14 +2365,27 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         if (result.error === null) {
           // What the drawing was written without, if anything, is said with it.
           const notes = result.notes ?? [];
-          context.logger.info([context.l10n.t('Exported to {0}', String(result.path)), ...notes].join(' '));
           // The file as the Explorer names it, rather than its encoded URI.
           const written = workspace.relativePath(vscode.Uri.parse(String(result.path)));
+          if (result.untracked !== undefined) {
+            context.logger.warn(untrackedMessage(context.l10n, result));
+          }
+          const said = (file: string): string =>
+            result.unchanged === true
+              ? context.l10n.t('{0} already holds this diagram, so it was left as it is.', file)
+              : result.untracked !== undefined
+                ? context.l10n.t(
+                    "Exported to {0}, but not recorded as this diagram's export, so exporting it again asks before overwriting the file. See the Output panel for why.",
+                    file
+                  )
+                : context.l10n.t('Exported to {0}', file);
+          context.logger.info([said(String(result.path)), ...notes].join(' '));
           await announceExport(
             context,
-            [context.l10n.t('Exported to {0}', written), ...notes].join(' '),
-            notes.length > 0,
-            result.path ?? undefined
+            [said(written), ...notes].join(' '),
+            notes.length > 0 || result.untracked !== undefined,
+            result.path ?? undefined,
+            result.untracked !== undefined
           );
           return;
         }
@@ -2288,7 +2400,7 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
           }
           actions.push({
             title: context.l10n.t('Export as SVG'),
-            run: async () => report(await exportOne(deps, document.path, directory, block, name), 'svg'),
+            run: async () => report(await exportOne(deps, document.path, directory, block, name, 'svg', blocks), 'svg'),
           });
         } else if (result.cause === 'file') {
           actions.push(explorerButton(context, vscode.Uri.parse(deps.resolve(document.path, `${directory}/${name}.${as}`)), true));
@@ -2299,9 +2411,9 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
       };
       await report(
         format === 'svg'
-          ? await exportOne(deps, document.path, directory, block, name)
+          ? await exportOne(deps, document.path, directory, block, name, 'svg', blocks)
           : await context.progress.run({ title: context.l10n.t('Exporting PNG…') }, () =>
-              exportOne(deps, document.path, directory, block, name, 'png')
+              exportOne(deps, document.path, directory, block, name, 'png', blocks)
             ),
         format
       );
@@ -2312,7 +2424,7 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
       renderer: Renderer,
       palettes: Palettes,
       settings: Settings.token,
-      exportRecords: ExportedFiles.token,
+      exports: Exports,
       workspace: Workspace,
     },
     execute: exportAtCursor('svg'),
@@ -2323,7 +2435,7 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
       renderer: Renderer,
       palettes: Palettes,
       settings: Settings.token,
-      exportRecords: ExportedFiles.token,
+      exports: Exports,
       workspace: Workspace,
     },
     execute: exportAtCursor('png'),
@@ -2347,13 +2459,13 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
       renderer: Renderer,
       palettes: Palettes,
       settings: Settings.token,
-      exportRecords: ExportedFiles.token,
+      exports: Exports,
       workspace: Workspace,
     },
     execute: async (
       context: OperationContext,
       args,
-      { renderer, palettes, settings, exportRecords, workspace }
+      { renderer, palettes, settings, exports, workspace }
     ): Promise<void> => {
       // No file is written, so neither an untitled document nor a restricted
       // workspace is refused: the diagram is drawn as far as it can be there,
@@ -2366,7 +2478,7 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
       if (block === null) {
         return;
       }
-      const deps = exporterDeps(context, renderer, palettes, settings, exportRecords, workspace, document.textDocument.uri);
+      const deps = exporterDeps(context, renderer, palettes, settings, exports, workspace, document.textDocument.uri);
       const prepared = await prepareSvg(deps, block);
       // The file the clipboard cannot take: the same diagram, the same drawing.
       const exportInstead: NoticeAction = {
@@ -2412,7 +2524,7 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
       renderer: Renderer,
       palettes: Palettes,
       settings: Settings.token,
-      exportRecords: ExportedFiles.token,
+      exports: Exports,
       workspace: Workspace,
     },
     execute: async (context: OperationContext, args, { viewers, ...deps }): Promise<void> => {
@@ -2539,13 +2651,13 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
       renderer: Renderer,
       palettes: Palettes,
       settings: Settings.token,
-      exportRecords: ExportedFiles.token,
+      exports: Exports,
       workspace: Workspace,
     },
     execute: async (
       context: OperationContext,
       _args,
-      { renderer, palettes, settings, exportRecords, workspace }
+      { renderer, palettes, settings, exports, workspace }
     ): Promise<void> => {
       const document = await activeDocument(context, workspace, true);
       if (document === null) {
@@ -2557,7 +2669,7 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         return;
       }
 
-      const outcome = await runBulkExport(context, renderer, palettes, settings, exportRecords, workspace, document, directory);
+      const outcome = await runBulkExport(context, renderer, palettes, settings, exports, workspace, document, directory);
       if (outcome === null) {
         return;
       }
@@ -2577,13 +2689,13 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
       renderer: Renderer,
       palettes: Palettes,
       settings: Settings.token,
-      exportRecords: ExportedFiles.token,
+      exports: Exports,
       workspace: Workspace,
     },
     execute: async (
       context: OperationContext,
       _args,
-      { renderer, palettes, settings, exportRecords, workspace }
+      { renderer, palettes, settings, exports, workspace }
     ): Promise<void> => {
       const document = await activeDocument(context, workspace, false);
       if (document === null) {
@@ -2595,7 +2707,7 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         return;
       }
 
-      const outcome = await runBulkExport(context, renderer, palettes, settings, exportRecords, workspace, document, directory);
+      const outcome = await runBulkExport(context, renderer, palettes, settings, exports, workspace, document, directory);
       if (outcome === null) {
         return;
       }
@@ -2615,17 +2727,19 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         return;
       }
 
-      // Only successfully exported names get a reference — a failed block
-      // must not gain a link to a file that is stale or absent. A change
-      // between this plan and the edit makes VS Code refuse the edit.
-      const exported = new Set(outcome.written.map((result) => result.name));
+      // Only names whose file holds the diagram, as the record of it says,
+      // get a reference — a failed block must not gain a link to a file that
+      // is stale or absent, nor a diagram exported without its record one to
+      // a file the next export asks about. A change between this plan and
+      // the edit makes VS Code refuse the edit.
+      const exported = new Set([...outcome.written, ...outcome.unchanged].map((result) => result.name));
       const edits = planReferenceEdits(document.text, exported, directory);
 
       const extra: string[] = [];
       let applyFailed = false;
       let reported = outcome;
       if (edits.length === 0) {
-        if (outcome.written.length > 0) {
+        if (exported.size > 0) {
           extra.push(context.l10n.t('Image links are up to date'));
         }
       } else if (await applyReferenceEdits(document.textDocument, edits)) {
@@ -2657,13 +2771,13 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         renderer,
         palettes,
         settings,
-        exportRecords,
+        exports,
         workspace,
       }: {
         renderer: RendererClient;
         palettes: ThemePalettes;
         settings: SettingsReader;
-        exportRecords: TypedStorage<ExportRecords>;
+        exports: ExportLedger;
         workspace: WorkspaceService;
       }
     ): Promise<void> => {
@@ -2722,7 +2836,14 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
       const unnamedIn = sources.find((source) => source.blocks.some((block) => block.name === null))?.uri;
       if (named === 0) {
         const unnamed = sources.reduce((sum, source) => sum + source.blocks.length, 0);
-        await reportOutcome(context, { written: [], failed: [], unnamed, kept: 0 }, [], false, unnamedDiagrams(sources), unnamedIn);
+        await reportOutcome(
+          context,
+          { written: [], unchanged: [], untracked: [], failed: [], unnamed, kept: 0, stopped: 0 },
+          [],
+          false,
+          unnamedDiagrams(sources),
+          unnamedIn
+        );
         return;
       }
 
@@ -2758,27 +2879,33 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
       const outcome = await context.progress.run(
         { title: context.l10n.t('Exporting diagrams…'), cancellable: true },
         async (report, signal) => {
+          const deps = exporterDeps(context, renderer, palettes, settings, exports, workspace, folder);
+          // Every document is planned before any diagram is drawn: diagrams
+          // of different documents headed for one file are all refused.
+          const plans = refuseSharedFiles(
+            deps,
+            planned.map((source) => ({
+              ...planDocument(deps, source.uri.toString(), source.directory, source.blocks, format),
+              uri: source.uri,
+            }))
+          );
           const drawn: DrawnDocument[] = [];
           // One panel draws every PNG: opened at the first, closed after the last.
           const pngs = lazyPngPanel(context.l10n, context.l10n.t('Creating PNG images…'));
           try {
-            for (const [index, source] of planned.entries()) {
+            for (const [index, plan] of plans.entries()) {
               if (signal.aborted) {
                 return undefined;
               }
-              const document = workspace.relativePath(source.uri);
+              const document = workspace.relativePath(plan.uri);
               report.report({
-                message: `${document} (${String(index + 1)}/${String(planned.length)})`,
-                increment: 100 / planned.length,
+                message: `${document} (${String(index + 1)}/${String(plans.length)})`,
+                increment: 100 / plans.length,
               });
-              const deps = exporterDeps(context, renderer, palettes, settings, exportRecords, workspace, source.uri);
+              const documentDeps = exporterDeps(context, renderer, palettes, settings, exports, workspace, plan.uri);
               const result = await drawDocument(
-                { ...deps, toPng: (svg, width, height, background) => pngs.draw(svg, width, height, background) },
-                source.uri.toString(),
-                source.directory,
-                source.blocks,
-                undefined,
-                format
+                { ...documentDeps, toPng: (svg, width, height, background) => pngs.draw(svg, width, height, background) },
+                plan
               );
               // Several documents are exported, so each failure names its own.
               drawn.push({
@@ -2789,11 +2916,11 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
           } finally {
             pngs.dispose();
           }
-          // Nothing is written once cancelled.
+          // Nothing is written once cancelled before writing, and nothing more once cancelled during it.
           if (signal.aborted) {
             return undefined;
           }
-          return writeDocuments(exporterDeps(context, renderer, palettes, settings, exportRecords, workspace, folder), drawn);
+          return writeDocuments(deps, drawn, () => signal.aborted);
         }
       );
       if (outcome === undefined || outcome === null) {
@@ -2807,7 +2934,7 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
       renderer: Renderer,
       palettes: Palettes,
       settings: Settings.token,
-      exportRecords: ExportedFiles.token,
+      exports: Exports,
       workspace: Workspace,
     },
     execute: exportFolder('svg'),
@@ -2818,7 +2945,7 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
       renderer: Renderer,
       palettes: Palettes,
       settings: Settings.token,
-      exportRecords: ExportedFiles.token,
+      exports: Exports,
       workspace: Workspace,
     },
     execute: exportFolder('png'),

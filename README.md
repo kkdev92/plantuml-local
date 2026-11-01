@@ -967,6 +967,10 @@ required for the bulk commands, and the single-diagram one asks when the block
 has none — or when its name could not be a file name, since names are limited
 to 128 ASCII letters, digits, hyphens and underscores, and cannot be a Windows
 device name such as `CON`. The bulk commands report such a block as failed.
+Blocks headed for one file — of one name, or of names that differ only in
+case, which Windows and macOS take for one file — are all reported before
+anything is drawn, and none of them is written; nor is one of them exported
+alone.
 
 With the cursor on the opening line of a block that has no usable name, the
 light bulb offers *Name this diagram for export…*: it asks for a name and
@@ -982,19 +986,27 @@ holding a single diagram may leave it out, and the diagram is named after the
 file. References are inserted into Markdown only.
 
 A file already at the target is replaced only when you say so, or when the
-export put it there. If it holds the diagram already, nothing is written. If
-the export wrote it from the same document and it has not changed since, it is
-replaced without a question, so exporting an edited diagram again just updates
-its file. Anything else — a file put there by hand, another document's export,
-a file changed since or open with unsaved edits — the command asks about first,
-once for all the files it would replace, and the bulk commands can keep those
-files and write the rest. What the export wrote is kept in the workspace's
-state on this machine: each file, its document and a SHA-256 of the contents,
-no diagram. On another machine, the first export asks. A file that changes
-while the export runs — while its question is open, say — is left as it is and
-reported, whatever the answer. Each file is written under a temporary name
-beside the target and then renamed over it, so an export that fails part way
-never leaves half an image behind.
+export put it there for the same diagram. If it holds the diagram already,
+nothing is written, and the message counts it as up to date. If the export
+wrote it for the same diagram — the same document, the same name taken from
+the same place, the same format — and it has not changed since, it is replaced
+without a question, so exporting an edited diagram again just updates its
+file. Anything else — a file put there by hand, another diagram's export, a
+file changed since — the command asks about first, once for all the files it
+would replace, and the bulk commands can keep those files and write the rest;
+a file replaced is then its diagram's own. A file open with unsaved edits is
+not written at all. What the export wrote is kept in the workspace's state on
+this machine: each file, the diagram it was written for and a SHA-256 of the
+contents, no diagram source, for up to 2,000 files. A file that cannot be
+recorded — past that, or when the state does not take the record — is still
+written, and the message says so; the next export asks about it, as it asks
+each time about the file of a diagram exported under a name you type. On
+another machine, the first export asks. A file an earlier version exported is
+asked about once, saying why: those versions recorded the document, not the
+diagram. A file that changes while the export runs — while its question is
+open, say — is left as it is and reported, whatever the answer. Each file is
+written under a temporary name beside the target and then renamed over it, so
+an export that fails part way never leaves half an image behind.
 
 The `#plantuml-local` fragment on the inserted reference does two jobs. GitHub
 ignores it and renders the SVG, while this extension's preview hides marked
@@ -1050,10 +1062,11 @@ unsaved edits of open files. It skips `.git`, `.hg`, `.svn`, `node_modules`,
 `dist` and `build` folders, follows no symbolic link or junction, and leaves out
 a PlantUML file without a start line, which only other files include. It asks
 before drawing, naming the documents, and then once for all the files it would
-replace. A diagram headed for the same file as another — two documents beside
-each other naming a block alike — is reported instead of written over it. A
-folder of more than 500 documents or 2,000 named diagrams is refused rather than
-exported in part, and cancelling while it draws writes nothing. *Export All
+replace. Diagrams headed for the same file — two documents beside each other
+naming a block alike — are all reported before anything is drawn, and none of
+them is written. A folder of more than 500 documents or 2,000 named diagrams is
+refused rather than exported in part. Cancelling while it draws writes nothing;
+cancelling while it writes stops before the next file. *Export All
 Diagrams in Folder as PNG*, beside it in the menu, writes PNGs instead, as
 *Export Diagram as PNG* does, drawing them one after another in a single panel
 that closes once the last is drawn.

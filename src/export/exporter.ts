@@ -6,6 +6,8 @@ import { withIncludeReason } from '../includes/describe';
 import { recognizeEngineError } from '../render/engine-error';
 import { drawReadable } from '../render/palette';
 import { isValidBlockName, type PlantUmlBlock } from './blocks';
+import { artifactKey, sameKey, type ArtifactKey, type ArtifactRecord, type RecordResult } from './history';
+import { sha256 } from './ownership';
 
 /**
  * Renders diagrams to SVG files next to the document, or one to a PNG.
@@ -42,25 +44,37 @@ export interface ExporterDeps {
    */
   readExisting(path: string): Promise<Uint8Array | null>;
   /**
-   * Whether `existing`, the file at `path`, is what an export from
-   * `document` last wrote there, unchanged since (src/export/ownership.ts).
-   * Such a file is replaced without asking.
+   * The record of the file at `path`: the diagram an export last wrote it
+   * for, and the SHA-256 of what it wrote (src/export/history.ts). Null
+   * when there is none to go by.
    */
-  wroteLast(path: string, document: string, existing: Uint8Array): boolean;
+  ownerOf(path: string): ArtifactRecord | null;
   /**
-   * Records that the file at `path` holds `content`, exported from
-   * `document`. Never rejects: a record that is not kept only means the
-   * next export asks.
+   * Whether `existing`, the file at `path`, is what an earlier version of
+   * the extension recorded exporting there from `document`, unchanged since
+   * (src/export/ownership.ts). Such a file is replaced once that is
+   * confirmed, as the records of this version are kept per diagram.
    */
-  noteWritten(path: string, document: string, content: Uint8Array): Promise<void>;
+  wroteBefore(path: string, document: string, existing: Uint8Array): boolean;
+  /** Whether the file at `path` is open with unsaved changes: someone's work, whoever wrote it last. */
+  isDirty(path: string): boolean;
+  /**
+   * Records that `content` was written to `path` for the diagram `key`
+   * names, so that exporting it again replaces the file without asking.
+   * Never rejects: what became of the record is the answer.
+   */
+  record(key: ArtifactKey, path: string, content: Uint8Array): Promise<RecordResult>;
+  /** Runs `task` once no other export in this window is writing the file at `path`. */
+  lock<T>(path: string, task: () => Promise<T>): Promise<T>;
   /**
    * Asks before replacing files that hold something other than their
-   * diagram, and that the export did not write: 'replace' them, 'keep'
-   * them and write only the rest, or undefined to write nothing. `canKeep`
-   * says whether there is a rest: more than one diagram is being exported.
+   * diagram, and that are not their diagram's own export: 'replace' them,
+   * 'keep' them and write only the rest, or undefined to write nothing.
+   * `canKeep` says whether there is a rest: more than one diagram is being
+   * exported.
    */
   confirmReplace(
-    paths: readonly string[],
+    files: readonly ReplaceTarget[],
     canKeep: boolean
   ): Promise<'replace' | 'keep' | undefined>;
   /**
@@ -114,6 +128,21 @@ export interface ExporterDeps {
   sameFileMessage: string;
   /** Localised reason given for a file that changed after the export looked at it. */
   changedMessage: string;
+  /** Localised reason given for a file open with unsaved changes. */
+  dirtyMessage: string;
+}
+
+/** A file the export asks before replacing. */
+export interface ReplaceTarget {
+  path: string;
+  /** Whether an earlier version of the extension exported it, as {@link ExporterDeps.wroteBefore} says. */
+  byEarlierVersion: boolean;
+  /**
+   * Whether, once replaced, it is recorded as its diagram's export, which
+   * exporting the diagram again then replaces without asking: not for a
+   * diagram exported under a name asked for, which has none of its own.
+   */
+  recorded: boolean;
 }
 
 /** What drawing a diagram as it is exported needs: the deps that do not touch files. */
@@ -180,15 +209,32 @@ export interface ExportResult {
   fitsAt?: number;
   /** What a written diagram was drawn without: notation the engine does not draw, for the report. */
   notes?: string[];
+  /** Set for a file that held the diagram already, and was left as it was. */
+  unchanged?: true;
+  /**
+   * For a file written but not recorded as its diagram's export, which
+   * exporting the diagram again then asks before replacing: why.
+   */
+  untracked?: Exclude<RecordResult, 'recorded'>;
 }
 
 export interface ExportOutcome {
+  /** Diagrams written to their files. */
   written: ExportResult[];
+  /** Diagrams whose files held them already, left as they were. */
+  unchanged: ExportResult[];
+  /** Diagrams written to their files, but not recorded as their exports. */
+  untracked: ExportResult[];
   failed: ExportResult[];
   /** Blocks skipped because they carry no name. */
   unnamed: number;
   /** Existing files left as they were, replacing them having been declined. */
   kept: number;
+  /**
+   * Diagrams not written because the export stopped part way: cancelled, or
+   * unable to record what it wrote.
+   */
+  stopped: number;
 }
 
 /** A diagram rendered and ready to write: the SVG's text, or a PNG. */
@@ -197,9 +243,19 @@ export interface Drawing {
   path: string;
   /** The document the diagram is exported from. */
   document: string;
+  /** The diagram the file is recorded as the export of, or null for one exported under a name asked for. */
+  key: ArtifactKey | null;
   content: string | Uint8Array;
   /** Notation the engine drew the diagram without, said in the export's report. */
   notes?: string[];
+}
+
+/** A diagram planned for export, before anything is drawn: the file it goes to, and what it is recorded as. */
+export interface PlannedDiagram {
+  block: PlantUmlBlock;
+  name: string;
+  path: string;
+  key: ArtifactKey | null;
 }
 
 /** What a diagram is exported as. */
@@ -385,7 +441,35 @@ function pngSource(deps: DrawingDeps, name: string, svg: string, dark: boolean):
 }
 
 /**
- * Renders one block, or says why it cannot be exported.
+ * Plans the export of `block` under `name`, before anything is drawn: the
+ * file it goes to and what the file is recorded as, or why it cannot be
+ * exported.
+ */
+function planDiagram(
+  deps: Pick<ExporterDeps, 'resolve' | 'invalidNameMessage'>,
+  documentPath: string,
+  directory: string,
+  block: PlantUmlBlock,
+  name: string,
+  format: ExportFormat
+): PlannedDiagram | ExportResult {
+  // Names become file names, and they come from the document — so on a
+  // repository someone else wrote, `x/../../..` would put a file wherever
+  // the block asked. Checked here rather than only at the call sites so
+  // that no future caller can route around it.
+  if (!isValidBlockName(name)) {
+    return { name, path: null, error: deps.invalidNameMessage, cause: 'source' };
+  }
+  return {
+    block,
+    name,
+    path: deps.resolve(documentPath, `${directory}/${name}.${format}`),
+    key: artifactKey(documentPath, block, name, format),
+  };
+}
+
+/**
+ * Renders one planned diagram, or says why it cannot be exported.
  *
  * Renders are serialised inside the worker, so calling this in a loop is
  * already sequential; there is nothing to gain from firing them at once.
@@ -393,15 +477,9 @@ function pngSource(deps: DrawingDeps, name: string, svg: string, dark: boolean):
 async function drawBlock(
   deps: ExporterDeps,
   documentPath: string,
-  directory: string,
-  block: PlantUmlBlock,
-  name: string,
+  { block, name, path, key }: PlannedDiagram,
   format: ExportFormat
 ): Promise<Drawing | ExportResult> {
-  // Names become file names, and they come from the document — so on a
-  // repository someone else wrote, `x/../../..` would put a file wherever
-  // the block asked. Checked here rather than only at the call sites so
-  // that no future caller can route around it.
   if (!isValidBlockName(name)) {
     return { name, path: null, error: deps.invalidNameMessage, cause: 'source' };
   }
@@ -410,10 +488,9 @@ async function drawBlock(
   if (!('svg' in rendered)) {
     return rendered;
   }
-  const path = deps.resolve(documentPath, `${directory}/${name}.${format}`);
   const notes = notationNotes(deps, block.source);
   if (format === 'svg') {
-    return { name, path, document: documentPath, content: rendered.svg, notes };
+    return { name, path, document: documentPath, key, content: rendered.svg, notes };
   }
 
   const source = pngSource(deps, name, rendered.svg, rendered.dark);
@@ -429,7 +506,7 @@ async function drawBlock(
   if (!isPngOfSize(png, source.width, source.height) || png.byteLength > PNG_LIMITS.bytes) {
     return { name, path: null, error: deps.pngFailedMessage, cause: 'png' };
   }
-  return { name, path, document: documentPath, content: png, notes };
+  return { name, path, document: documentPath, key, content: png, notes };
 }
 
 /**
@@ -463,39 +540,114 @@ export async function prepareSvg(deps: DrawingDeps, block: PlantUmlBlock): Promi
   return { svg: rendered.svg, notes: notationNotes(deps, block.source) };
 }
 
+/** A file a drawing goes to, looked at before any is written. */
+interface Checked {
+  drawing: Drawing;
+  /** The file's bytes, or null when there was none. */
+  existing: Uint8Array | null;
+  /** The file's record. */
+  owner: ArtifactRecord | null;
+  /**
+   * What is done with it: written without asking, as a new file or the
+   * diagram's own export, unchanged since; left alone, as it holds the
+   * drawing already; or written once that is confirmed.
+   */
+  action: 'write' | 'unchanged' | 'ask';
+  /** For a file asked about, whether an earlier version of the extension exported it. */
+  byEarlierVersion: boolean;
+}
+
+/** Whether `existing` is the drawing's diagram's own export, as `owner` records it, unchanged since. */
+function isOwn(drawing: Drawing, owner: ArtifactRecord | null, existing: Uint8Array): boolean {
+  return drawing.key !== null && owner !== null && sameKey(owner.key, drawing.key) && owner.sha256 === sha256(existing);
+}
+
+/** Whether two records, or the lack of one, say the same. */
+function sameRecord(a: ArtifactRecord | null, b: ArtifactRecord | null): boolean {
+  return a === null || b === null ? a === b : a.output === b.output && a.sha256 === b.sha256 && sameKey(a.key, b.key);
+}
+
+/** Looks at the file a drawing goes to: what is done with it, or why nothing can be. */
+async function check(deps: ExporterDeps, drawing: Drawing): Promise<Checked | ExportResult> {
+  try {
+    if (deps.isDirty(drawing.path)) {
+      return { name: drawing.name, path: null, error: deps.dirtyMessage, cause: 'file' };
+    }
+    const existing = await deps.readExisting(drawing.path);
+    const owner = deps.ownerOf(drawing.path);
+    const looked = { drawing, existing, owner, byEarlierVersion: false };
+    if (existing !== null && holds(existing, drawing.content)) {
+      return { ...looked, action: 'unchanged' };
+    }
+    if (existing === null || isOwn(drawing, owner, existing)) {
+      return { ...looked, action: 'write' };
+    }
+    // A file recorded as another diagram's export is that diagram's,
+    // whatever an earlier version recorded.
+    return { ...looked, action: 'ask', byEarlierVersion: owner === null && deps.wroteBefore(drawing.path, drawing.document, existing) };
+  } catch (error: unknown) {
+    return { name: drawing.name, path: null, error: messageOf(error), cause: 'file' };
+  }
+}
+
+/** What became of a drawing given its turn: written, and the record of it if it has a name of its own; or why not. */
+type Committed = { written: true; recorded: RecordResult | null } | { written: false; error: string };
+
 /**
- * Writes the drawings, asking once before replacing any file that holds
- * something else: it may be a file someone put there by hand, or changed.
- * A file an export from the same document wrote, unchanged since, is the
- * export's own to replace. A file that already holds its drawing is left
- * alone, since writing it again would change nothing. A file that changed
- * after it was looked at, while the question was open say, is no longer
- * the one the answer was about, and is left as it is. Null when the
- * replacement is declined outright.
+ * Writes a drawing once no other export in this window is writing its
+ * file, if the file is as it was looked at: the same bytes, the same
+ * record, no unsaved changes. A file that changed since, while a question
+ * was open say, is no longer the one the answer was about, and is left as
+ * it is. A file removed since is written as a new one.
+ */
+function commit(deps: ExporterDeps, { drawing, existing, owner }: Checked): Promise<Committed> {
+  return deps.lock(drawing.path, async (): Promise<Committed> => {
+    if (deps.isDirty(drawing.path)) {
+      return { written: false, error: deps.dirtyMessage };
+    }
+    const now = await deps.readExisting(drawing.path);
+    const changed = existing === null ? now !== null : now !== null && !holds(now, existing);
+    if (changed || !sameRecord(deps.ownerOf(drawing.path), owner)) {
+      return { written: false, error: deps.changedMessage };
+    }
+    await deps.writeFile(drawing.path, drawing.content, now !== null);
+    const recorded = drawing.key === null ? null : await deps.record(drawing.key, drawing.path, bytesOf(drawing.content));
+    return { written: true, recorded };
+  });
+}
+
+/**
+ * Writes the drawings. A file that already holds its drawing is left
+ * alone, since writing it again would change nothing, and is not taken
+ * for the export of the diagram either. A file the diagram's own export is
+ * recorded in, unchanged since, is replaced without asking. Before
+ * replacing any other — a file someone put there by hand, or changed, or
+ * one exported for another diagram — the export asks once for all of them.
+ * A file open with unsaved changes is not written at all. Writing stops
+ * part way once `stop` says so, or once what was written cannot be
+ * recorded. Null when the replacement is declined outright.
  */
 async function writeDrawings(
   deps: ExporterDeps,
-  drawings: readonly Drawing[]
-): Promise<Pick<ExportOutcome, 'written' | 'failed' | 'kept'> | null> {
+  drawings: readonly Drawing[],
+  stop?: () => boolean
+): Promise<Omit<ExportOutcome, 'unnamed'> | null> {
   const failed: ExportResult[] = [];
-  const checked: { drawing: Drawing; existing: Uint8Array | null; own: boolean }[] = [];
+  const checked: Checked[] = [];
   for (const drawing of drawings) {
-    try {
-      const existing = await deps.readExisting(drawing.path);
-      const own = existing !== null && deps.wroteLast(drawing.path, drawing.document, existing);
-      checked.push({ drawing, existing, own });
-    } catch (error: unknown) {
-      failed.push({ name: drawing.name, path: null, error: messageOf(error), cause: 'file' });
+    const looked = await check(deps, drawing);
+    if ('action' in looked) {
+      checked.push(looked);
+    } else {
+      failed.push(looked);
     }
   }
 
-  const replacing = checked.filter(
-    ({ drawing, existing, own }) => existing !== null && !own && !holds(existing, drawing.content)
-  );
+  const asking = checked.filter((entry) => entry.action === 'ask');
   let replace = false;
-  if (replacing.length > 0) {
+  if (asking.length > 0) {
     const answer = await deps.confirmReplace(
-      replacing.map(({ drawing }) => drawing.path),
+      asking.map(({ drawing, byEarlierVersion }) => ({ path: drawing.path, byEarlierVersion, recorded: drawing.key !== null })),
       drawings.length > 1
     );
     if (answer === undefined) {
@@ -504,41 +656,47 @@ async function writeDrawings(
     replace = answer === 'replace';
   }
 
-  const written: ExportResult[] = [];
-  let kept = 0;
-  for (const { drawing, existing, own } of checked) {
+  const outcome: Omit<ExportOutcome, 'unnamed'> = { written: [], unchanged: [], untracked: [], failed, kept: 0, stopped: 0 };
+  let halted = false;
+  for (const entry of checked) {
+    const { drawing } = entry;
     const result: ExportResult = {
       name: drawing.name,
       path: drawing.path,
       error: null,
       ...(drawing.notes !== undefined && drawing.notes.length > 0 ? { notes: drawing.notes } : {}),
     };
-    if (existing !== null && holds(existing, drawing.content)) {
-      await deps.noteWritten(drawing.path, drawing.document, bytesOf(drawing.content));
-      written.push(result);
-    } else if (existing !== null && !own && !replace) {
-      kept += 1;
+    if (entry.action === 'unchanged') {
+      outcome.unchanged.push({ ...result, unchanged: true });
+    } else if (entry.action === 'ask' && !replace) {
+      outcome.kept += 1;
+    } else if (halted || stop?.() === true) {
+      outcome.stopped += 1;
     } else {
       try {
-        const now = existing === null ? null : await deps.readExisting(drawing.path);
-        if (existing !== null && now !== null && !holds(now, existing)) {
-          failed.push({ name: drawing.name, path: null, error: deps.changedMessage, cause: 'file' });
-          continue;
+        const committed = await commit(deps, entry);
+        if (!committed.written) {
+          failed.push({ name: drawing.name, path: null, error: committed.error, cause: 'file' });
+        } else if (committed.recorded === null || committed.recorded === 'recorded') {
+          outcome.written.push(result);
+        } else {
+          outcome.untracked.push({ ...result, untracked: committed.recorded });
+          // A state that did not take this record will not take the next.
+          halted = committed.recorded === 'not-saved';
         }
-        await deps.writeFile(drawing.path, drawing.content, now !== null);
-        await deps.noteWritten(drawing.path, drawing.document, bytesOf(drawing.content));
-        written.push(result);
       } catch (error: unknown) {
         failed.push({ name: drawing.name, path: null, error: messageOf(error), cause: 'file' });
       }
     }
   }
-  return { written, failed, kept };
+  return outcome;
 }
 
 /**
  * Exports a single block under an explicit name, as an SVG or a PNG.
- * Null when replacing the file already there is declined.
+ * `blocks`, the diagrams of the document, are looked through for another
+ * headed for the same file: the export fails then, as Export All fails
+ * both. Null when replacing the file already there is declined.
  */
 export async function exportOne(
   deps: ExporterDeps,
@@ -546,9 +704,25 @@ export async function exportOne(
   directory: string,
   block: PlantUmlBlock,
   name: string,
-  format: ExportFormat = 'svg'
+  format: ExportFormat = 'svg',
+  blocks: readonly PlantUmlBlock[] = []
 ): Promise<ExportResult | null> {
-  const drawing = await drawBlock(deps, documentPath, directory, block, name, format);
+  const planned = planDiagram(deps, documentPath, directory, block, name, format);
+  if (!('block' in planned)) {
+    return planned;
+  }
+  const file = planned.path.toLowerCase();
+  const shared = blocks.some(
+    (other) =>
+      other.openLine !== block.openLine &&
+      other.name !== null &&
+      isValidBlockName(other.name) &&
+      deps.resolve(documentPath, `${directory}/${other.name}.${format}`).toLowerCase() === file
+  );
+  if (shared) {
+    return { name, path: null, error: deps.sameFileMessage, cause: 'source' };
+  }
+  const drawing = await drawBlock(deps, documentPath, planned, format);
   if (!('content' in drawing)) {
     return drawing;
   }
@@ -556,10 +730,85 @@ export async function exportOne(
   if (outcome === null || outcome.kept > 0) {
     return null;
   }
-  return outcome.written[0] ?? outcome.failed[0] ?? null;
+  return outcome.written[0] ?? outcome.unchanged[0] ?? outcome.untracked[0] ?? outcome.failed[0] ?? null;
 }
 
-/** A document's named blocks drawn as SVG or PNG, for {@link writeDocuments}. */
+/** A document's named blocks, planned for export before anything is drawn. */
+export interface PlannedDocument {
+  document: string;
+  format: ExportFormat;
+  diagrams: readonly PlannedDiagram[];
+  /** Diagrams refused before they are drawn. */
+  failed: readonly ExportResult[];
+  /** Blocks skipped because they carry no name. */
+  unnamed: number;
+}
+
+/**
+ * Plans the export of every named block of a document, as `format`: its
+ * ` ```plantuml ` blocks (findPlantUmlBlocks) or the diagrams of a PlantUML
+ * file (findFileDiagrams).
+ *
+ * Unnamed blocks are counted rather than guessed at: a positional name
+ * would move the moment a block is inserted above it, silently orphaning
+ * whatever already referenced the old file. A name that cannot be a file
+ * name is a failure, not a missing name.
+ */
+export function planDocument(
+  deps: Pick<ExporterDeps, 'resolve' | 'invalidNameMessage'>,
+  documentPath: string,
+  directory: string,
+  blocks: readonly PlantUmlBlock[],
+  format: ExportFormat = 'svg'
+): PlannedDocument {
+  const diagrams: PlannedDiagram[] = [];
+  const failed: ExportResult[] = [];
+  let unnamed = 0;
+  for (const block of blocks) {
+    if (block.name === null) {
+      unnamed += 1;
+      continue;
+    }
+    const planned = planDiagram(deps, documentPath, directory, block, block.name, format);
+    if ('block' in planned) {
+      diagrams.push(planned);
+    } else {
+      failed.push(planned);
+    }
+  }
+  return { document: documentPath, format, diagrams, failed, unnamed };
+}
+
+/**
+ * Fails every diagram of `documents` headed for a file another one is
+ * headed for too, before any is drawn: none of them is written, since
+ * which one the file should hold is not for the export to choose. Files
+ * are compared regardless of case, as Windows and macOS compare them.
+ * What else the plans carry is kept.
+ */
+export function refuseSharedFiles<T extends PlannedDocument>(
+  deps: Pick<ExporterDeps, 'sameFileMessage'>,
+  documents: readonly T[]
+): T[] {
+  const headed = new Map<string, number>();
+  for (const { path } of documents.flatMap((document) => document.diagrams)) {
+    const file = path.toLowerCase();
+    headed.set(file, (headed.get(file) ?? 0) + 1);
+  }
+  const shared = (diagram: PlannedDiagram): boolean => (headed.get(diagram.path.toLowerCase()) ?? 0) > 1;
+  return documents.map((document) => ({
+    ...document,
+    diagrams: document.diagrams.filter((diagram) => !shared(diagram)),
+    failed: [
+      ...document.failed,
+      ...document.diagrams
+        .filter(shared)
+        .map((diagram): ExportResult => ({ name: diagram.name, path: null, error: deps.sameFileMessage, cause: 'source' })),
+    ],
+  }));
+}
+
+/** A document's planned diagrams drawn as SVG or PNG, for {@link writeDocuments}. */
 export interface DrawnDocument {
   drawings: readonly Drawing[];
   failed: readonly ExportResult[];
@@ -567,80 +816,54 @@ export interface DrawnDocument {
   unnamed: number;
 }
 
-/**
- * Draws every named block of a document, as `format`: its ` ```plantuml `
- * blocks (findPlantUmlBlocks) or the diagrams of a PlantUML file
- * (findFileDiagrams).
- *
- * Unnamed blocks are counted rather than guessed at: a positional name
- * would move the moment a block is inserted above it, silently orphaning
- * whatever already referenced the old file. A name that cannot be a file
- * name is a failure, not a missing name.
- */
+/** Draws what {@link planDocument} planned for a document. */
 export async function drawDocument(
   deps: ExporterDeps,
-  documentPath: string,
-  directory: string,
-  blocks: readonly PlantUmlBlock[],
-  onProgress?: (done: number, total: number, name: string) => void,
-  format: ExportFormat = 'svg'
+  plan: PlannedDocument,
+  onProgress?: (done: number, total: number, name: string) => void
 ): Promise<DrawnDocument> {
-  const named = blocks.filter(
-    (block): block is PlantUmlBlock & { name: string } => block.name !== null
-  );
-
   const drawings: Drawing[] = [];
-  const failed: ExportResult[] = [];
-  for (const [index, block] of named.entries()) {
-    onProgress?.(index, named.length, block.name);
-    const drawing = await drawBlock(deps, documentPath, directory, block, block.name, format);
+  const failed: ExportResult[] = [...plan.failed];
+  for (const [index, diagram] of plan.diagrams.entries()) {
+    onProgress?.(index, plan.diagrams.length, diagram.name);
+    const drawing = await drawBlock(deps, plan.document, diagram, plan.format);
     if ('content' in drawing) {
       drawings.push(drawing);
     } else {
       failed.push(drawing);
     }
   }
-  return { drawings, failed, unnamed: blocks.length - named.length };
+  return { drawings, failed, unnamed: plan.unnamed };
 }
 
 /**
  * Writes what {@link drawDocument} drew, of one document or several, asking
- * once before replacing files. A drawing headed for the same file as one
- * before it fails rather than overwrite it; files are compared regardless
- * of case, as Windows and macOS compare them. Null when replacing the
- * files already there is declined, in which case nothing is written.
+ * once before replacing files. `stop` is asked before each file is written,
+ * and ends the export part way. Null when replacing the files already there
+ * is declined, in which case nothing is written.
  */
 export async function writeDocuments(
   deps: ExporterDeps,
-  documents: readonly DrawnDocument[]
+  documents: readonly DrawnDocument[],
+  stop?: () => boolean
 ): Promise<ExportOutcome | null> {
-  const failed = documents.flatMap((document) => document.failed);
-  const drawings: Drawing[] = [];
-  const taken = new Set<string>();
-  for (const drawing of documents.flatMap((document) => document.drawings)) {
-    const file = drawing.path.toLowerCase();
-    if (taken.has(file)) {
-      failed.push({ name: drawing.name, path: null, error: deps.sameFileMessage, cause: 'source' });
-    } else {
-      taken.add(file);
-      drawings.push(drawing);
-    }
-  }
-
-  const outcome = await writeDrawings(deps, drawings);
+  const outcome = await writeDrawings(
+    deps,
+    documents.flatMap((document) => document.drawings),
+    stop
+  );
   if (outcome === null) {
     return null;
   }
   return {
-    written: outcome.written,
-    failed: [...failed, ...outcome.failed],
+    ...outcome,
+    failed: [...documents.flatMap((document) => document.failed), ...outcome.failed],
     unnamed: documents.reduce((sum, document) => sum + document.unnamed, 0),
-    kept: outcome.kept,
   };
 }
 
 /**
- * Exports every named block of a document as SVG (see {@link drawDocument}).
+ * Exports every named block of a document as SVG (see {@link planDocument}).
  * Null when replacing the files already there is declined, in which case
  * nothing is written.
  */
@@ -651,5 +874,9 @@ export async function exportAll(
   blocks: readonly PlantUmlBlock[],
   onProgress?: (done: number, total: number, name: string) => void
 ): Promise<ExportOutcome | null> {
-  return writeDocuments(deps, [await drawDocument(deps, documentPath, directory, blocks, onProgress)]);
+  const drawn: DrawnDocument[] = [];
+  for (const plan of refuseSharedFiles(deps, [planDocument(deps, documentPath, directory, blocks)])) {
+    drawn.push(await drawDocument(deps, plan, onProgress));
+  }
+  return writeDocuments(deps, drawn);
 }
