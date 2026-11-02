@@ -184,6 +184,16 @@
         "category": "PlantUML Local"
       },
       {
+        "command": "plantumlLocal.enableSvgAutoExport",
+        "title": "%command.enableSvgAutoExport.title%",
+        "category": "PlantUML Local"
+      },
+      {
+        "command": "plantumlLocal.disableSvgAutoExport",
+        "title": "%command.disableSvgAutoExport.title%",
+        "category": "PlantUML Local"
+      },
+      {
         "command": "plantumlLocal.assignDiagramName",
         "title": "%command.assignDiagramName.title%",
         "category": "PlantUML Local"
@@ -556,6 +566,12 @@
           "default": true,
           "scope": "resource",
           "description": "%config.rename.enabled.description%"
+        },
+        "plantumlLocal.autoExport.enabled": {
+          "type": "boolean",
+          "default": false,
+          "scope": "machine",
+          "description": "%config.autoExport.enabled.description%"
         }
       }
     }

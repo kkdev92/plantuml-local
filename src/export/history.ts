@@ -125,7 +125,7 @@ function isObject(value: unknown): value is Record<string, unknown> {
 }
 
 /** Whether `value` is a key as this version writes one. */
-function isArtifactKey(value: unknown): value is ArtifactKey {
+export function isArtifactKey(value: unknown): value is ArtifactKey {
   if (!isObject(value) || !NAME_BASES.has(value['nameBasis'])) {
     return false;
   }

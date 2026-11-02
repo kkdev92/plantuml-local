@@ -87,7 +87,18 @@ export function drawInDocuments(renderer: Renderer, host: IncludeHost, snapshot?
     const { session, opened, access } = await openSession(vscode.Uri.parse(document), host, snapshot);
     const requests = (): DrawnRequest[] => drawnRequests(session, opened, describe);
     const looked = (): string[] => [...session.dependencies].map((path) => pathKey(opened(path)));
-    const { svg, libraries } = await draw(source, dark, session.load, requests, looked);
+    let drawing: Drawing;
+    try {
+      drawing = await draw(source, dark, session.load, requests, looked);
+    } finally {
+      // Drawn from saved files alone, a drawing that looked at a file open
+      // with unsaved changes — one read, or a place found empty that an
+      // editor has a file for — is not what the saved files draw.
+      if (snapshot?.savedOnly === true) {
+        noteUnsavedAmong(snapshot, session.dependencies, opened);
+      }
+    }
+    const { svg, libraries } = drawing;
     const dependencies = looked();
     host.remember?.(`${document}\n${source}`, dependencies);
     const styled = session.themes.length > 0 || session.whitePageLibrary;
@@ -144,7 +155,8 @@ function drawnRequests(
  * path it found as VS Code knows it ({@link asOpened}), and `root` the real
  * path of the workspace folder it reads in, undefined when it reads none.
  * With `snapshot`, the session reads what the export it belongs to has read
- * already, and looks where it first looked.
+ * already, and looks where it first looked; and when the snapshot reads
+ * saved files only, it reads an open document only as saved ({@link savedText}).
  */
 export async function openSession(
   document: vscode.Uri,
@@ -156,11 +168,12 @@ export async function openSession(
     : snapshot.access(document.toString(), () => accessFor(document, host)));
   const opened = (path: string): string => asOpened(access, folder, path);
   const editorText = (path: string): string | undefined => openText(opened(path)) ?? openText(path);
+  const text = snapshot?.savedOnly === true ? savedText(snapshot, opened) : editorText;
   return {
     session:
       snapshot === undefined
         ? new IncludeSession(access, editorText)
-        : new IncludeSession(access, editorText, INCLUDE_LIMITS, snapshot.reader(editorText)),
+        : new IncludeSession(access, text, INCLUDE_LIMITS, snapshot.reader(text)),
     opened,
     root: access.available ? access.scope.root : undefined,
     access,
@@ -232,4 +245,32 @@ function openDocument(path: string): vscode.TextDocument | undefined {
 /** The text of the document open at `path`, unsaved changes and all, its path compared as file events are. */
 function openText(path: string): string | undefined {
   return openDocument(path)?.getText();
+}
+
+/**
+ * Reads files for `snapshot` as they are saved: a document open in an
+ * editor without unsaved changes as the editor has it — what was saved, in
+ * the encoding it was opened in — and a file no editor has from disk. A
+ * document with unsaved changes is noted in `snapshot` and read from disk
+ * meanwhile: what is drawn from it is not used.
+ */
+function savedText(snapshot: ReadSnapshot, opened: (path: string) => string): (path: string) => string | undefined {
+  return (path) => {
+    const document = openDocument(opened(path)) ?? openDocument(path);
+    if (document?.isDirty === true) {
+      snapshot.noteUnsaved(document.uri.fsPath);
+      return undefined;
+    }
+    return document?.getText();
+  };
+}
+
+/** Notes in `snapshot` each of `paths` an editor has open with unsaved changes, `opened` giving a path as VS Code knows it. */
+function noteUnsavedAmong(snapshot: ReadSnapshot, paths: Iterable<string>, opened: (path: string) => string): void {
+  for (const path of paths) {
+    const document = openDocument(opened(path)) ?? openDocument(path);
+    if (document?.isDirty === true) {
+      snapshot.noteUnsaved(document.uri.fsPath);
+    }
+  }
 }
