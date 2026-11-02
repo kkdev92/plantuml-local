@@ -252,8 +252,19 @@ export interface PermitBackend {
 export class PermitStore {
   private updates: Promise<unknown> = Promise.resolve();
   private read: { stored: unknown; permits: Permits } | null = null;
+  private readonly listeners = new Set<() => void>();
 
   constructor(private readonly backend: PermitBackend) {}
+
+  /** Calls `listener` each time a change to the permissions is kept, until the result is disposed. */
+  onDidChange(listener: () => void): { dispose(): void } {
+    this.listeners.add(listener);
+    return {
+      dispose: (): void => {
+        this.listeners.delete(listener);
+      },
+    };
+  }
 
   /** The permissions as they are now, read again only once they change. */
   private permits(): Permits {
@@ -323,6 +334,13 @@ export class PermitStore {
     // The state keeps a copy of what it is given, and gives that copy back
     // until the next update: known, so not read again.
     this.read = { stored: this.backend.get(), permits };
+    for (const listener of [...this.listeners]) {
+      try {
+        listener();
+      } catch {
+        // What a listener does with the news is its own affair: the change is kept.
+      }
+    }
   }
 
   private update(change: () => Promise<PermitResult>, onError?: (error: unknown) => void): Promise<PermitResult> {

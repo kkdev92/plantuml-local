@@ -6267,6 +6267,67 @@ describe('diagram dependencies (dist)', () => {
       );
     });
   });
+
+  describe('a diagram exported on save', () => {
+    /** Writes `text` to the file `name` and saves it, as an editor does. */
+    const save = async (name: string, text: string): Promise<void> => {
+      await writeFile(pathOf(name), text);
+      vscodeStub._test.saveDocument(onDisk(name, [text], 0, 'plantuml').document);
+    };
+    const until = async (done: () => boolean, what: string): Promise<void> => {
+      expect(await waitFor(done, 20_000), what).toBe(true);
+    };
+
+    afterEach(async () => {
+      vscodeStub._test.setConfiguration('autoExport.enabled', undefined);
+      await context.workspaceState.update('svgAutoExport', undefined);
+    });
+
+    it('is exported again once a file it includes is saved, and once it includes a file not found, once that file is saved', async () => {
+      await mkdir(pathOf('docs/sync'), { recursive: true });
+      await writeFile(pathOf('docs/sync/part.iuml'), 'Alice -> Bob : before\n');
+      const editor = onDisk('docs/sync/doc.md', ['```plantuml orders', '@startuml', '!include part.iuml', '@enduml', '```'], 1);
+      const target = uriOf('docs/sync/images/orders.svg');
+      const { warn } = vscodeStub._test.notifications;
+      vscodeStub._test.openDocuments.push(editor.document);
+      vscodeStub._test.setActiveEditor(editor);
+      try {
+        await run('plantumlLocal.exportSvg');
+        vscodeStub._test.messageReply = 'Allow';
+        try {
+          await run('plantumlLocal.enableSvgAutoExport');
+        } finally {
+          vscodeStub._test.messageReply = null;
+        }
+        expect((context.workspaceState.get('svgAutoExport') as { value: { permits: unknown[] } } | undefined)?.value.permits).toHaveLength(1);
+        vscodeStub._test.setConfiguration('autoExport.enabled', true);
+
+        await save('docs/sync/part.iuml', 'Alice -> Bob : after\n');
+        await until(() => vscodeStub._test.writtenFiles.get(target)?.includes('after') === true, 'exported once the included file was saved');
+        const recorded = recordOf(target);
+
+        // It includes a file that is not there: left as it is, and so is its record.
+        const warns = warn.length;
+        await save('docs/sync/part.iuml', '!include later.iuml\nAlice -> Bob : after\n');
+        await until(() => warn.length > warns, 'told');
+        expect(warn.slice(warns)).toEqual([expect.stringMatching(/^SVG auto export skipped orders\. /)]);
+        expect(vscodeStub._test.writtenFiles.get(target)).toContain('after');
+        expect(recordOf(target)).toEqual(recorded);
+
+        // The file it did not find, saved there.
+        await save('docs/sync/later.iuml', 'Carol -> Dave : later\n');
+        await until(() => vscodeStub._test.writtenFiles.get(target)?.includes('later') === true, 'exported once the file not found was saved');
+        // In the order of their paths.
+        expect(recordOf(target)?.input?.resources.files.map(({ file }) => file)).toEqual([pathOf('docs/sync/later.iuml'), pathOf('docs/sync/part.iuml')]);
+        // Its record names that file now.
+        await save('docs/sync/later.iuml', 'Carol -> Dave : again\n');
+        await until(() => vscodeStub._test.writtenFiles.get(target)?.includes('again') === true, 'exported once that file was saved again');
+      } finally {
+        vscodeStub._test.setActiveEditor(undefined);
+        vscodeStub._test.openDocuments.splice(vscodeStub._test.openDocuments.indexOf(editor.document), 1);
+      }
+    });
+  });
 });
 
 describe('copying SVG text (dist)', () => {
@@ -7393,6 +7454,459 @@ describe('allowing SVG auto export (dist)', () => {
 
   it('says when no diagram has it to disable', async () => {
     expect((await disable(undefined)).info).toEqual(['SVG auto export is not allowed for any diagram in this workspace.']);
+  });
+
+  describe('on save', () => {
+    /** The documents a test opened in an editor, closed after it. */
+    const opened: TextEditorStub['document'][] = [];
+    /** Turns automatic export on, as the setting does on this computer. */
+    const turnOn = (): void => {
+      vscodeStub._test.setConfiguration('autoExport.enabled', true);
+    };
+    /**
+     * The bytes of the file at `uri`: others once it is written again, as
+     * an export writes beside it and puts what it wrote in its place.
+     */
+    const bytesOf = (uri: string): Uint8Array | undefined => vscodeStub._test.writtenBytes.get(uri);
+    /** What was logged since `from`, without the fields the logger adds. */
+    const loggedSince = (from: number): string[] => vscodeStub._test.logs.slice(from).map((line) => line.replace(/ \{"application":.*\}$/, ''));
+    /** What was logged since `from` of exporting on save. */
+    const syncLogsSince = (from: number): string[] =>
+      loggedSince(from).filter((line) => /on save\.$|already holds|SVG auto export (skipped|ended)/.test(line));
+    /** Waits until `done` holds, failing as `what` after a while, with what was logged meanwhile. */
+    const until = async (done: () => boolean, what: string): Promise<void> => {
+      const logs = vscodeStub._test.logs.length;
+      if (!(await waitFor(done, 20_000))) {
+        expect.fail(`${what}: not so after a while. Logged meanwhile:\n${loggedSince(logs).join('\n')}`);
+      }
+    };
+    /** The warnings shown since `from`, besides the questions asked. */
+    const warnedSince = (from: number): string[] => {
+      const questions = new Set(vscodeStub._test.modals.map(({ message }) => message));
+      return vscodeStub._test.notifications.warn.slice(from).filter((message) => !questions.has(message));
+    };
+    /**
+     * Opens an editor of `text` at /c/`folder`/doc.md, with no unsaved
+     * changes, and allows SVG auto export for its diagram at `line` once
+     * it is exported.
+     */
+    const allowedAt = async (folder: string, text: string, line = 1): Promise<TextEditorStub> => {
+      const editor = makeEditor(`file:///c/${folder}/doc.md`, text, line);
+      vscodeStub._test.openDocuments.push(editor.document);
+      opened.push(editor.document);
+      await exportSvg(editor);
+      expect((await enable(editor)).modals, `asked to allow it in ${folder}`).toHaveLength(1);
+      return editor;
+    };
+    let barriers = 0;
+    /**
+     * Waits until what was saved before is exported, and what came of it
+     * told: saves a diagram of its own, allowed and its SVG file edited
+     * since, whose turn comes after theirs, and waits for it to be told —
+     * with what they had left to tell, or after it. What it is told as on
+     * its own.
+     */
+    const settled = async (): Promise<string> => {
+      barriers += 1;
+      const folder = `sync-barrier-${String(barriers)}`;
+      const editor = await allowedAt(folder, diagram('barrier'));
+      const target = `file:///c/${folder}/images/barrier.svg`;
+      vscodeStub._test.writtenFiles.set(target, '<svg>edited</svg>');
+      vscodeStub._test.writtenBytes.delete(target);
+      const { warn } = vscodeStub._test.notifications;
+      const from = warn.length;
+      vscodeStub._test.saveDocument(editor.document);
+      await until(() => warnedSince(from).some((message) => message.includes('barrier')), 'the barrier told');
+      return (
+        `SVG auto export skipped barrier. ${folder}/images/barrier.svg changed after it was exported, so it is not overwritten. ` +
+        'Export the diagram as SVG to overwrite it, which asks first.'
+      );
+    };
+
+    afterEach(() => {
+      for (const document of opened.splice(0)) {
+        vscodeStub._test.openDocuments.splice(vscodeStub._test.openDocuments.indexOf(document), 1);
+      }
+      vscodeStub._test.setConfiguration('autoExport.enabled', undefined);
+    });
+
+    it('exports the SVG file of the diagram once its document was not saved again for a while, as saved last, and tells nothing', async () => {
+      const text = (label: string): string => `# Design\n\n${diagram('orders', label)}\n\n${diagram('billing', 'pay')}`;
+      const editor = await allowedAt('sync-save', text('hi'), 3);
+      // The other diagram of the document is exported, but not allowed.
+      editor.selection.active.line = 9;
+      await exportSvg(editor);
+      turnOn();
+      const orders = 'file:///c/sync-save/images/orders.svg';
+      const billing = 'file:///c/sync-save/images/billing.svg';
+      const before = { orders: bytesOf(orders), billing: bytesOf(billing) };
+      const { info, warn, error } = vscodeStub._test.notifications;
+      const told = { info: info.length, warn: warn.length, error: error.length };
+      const logs = vscodeStub._test.logs.length;
+
+      // Saved again and again, as Auto Save does while typing.
+      for (const label of ['one', 'two', 'three']) {
+        editor.document.setText(text(label));
+        vscodeStub._test.saveDocument(editor.document);
+      }
+      await until(() => bytesOf(orders) !== before.orders, 'exported on save');
+      // Its SVG file, open as text and saved, is not one of its files.
+      vscodeStub._test.saveDocument(makeEditor(orders, vscodeStub._test.writtenFiles.get(orders)!, 0, { languageId: 'xml' }).document);
+      const barrier = await settled();
+
+      expect(vscodeStub._test.writtenFiles.get(orders)).toContain('three');
+      expect(bytesOf(billing)).toBe(before.billing);
+      // Once, not for each save.
+      expect(syncLogsSince(logs).filter((line) => !line.includes('barrier'))).toEqual(['info: Exported sync-save/images/orders.svg for orders on save.']);
+      expect([...info.slice(told.info), ...warnedSince(told.warn), ...error.slice(told.error)].filter((message) => !message.includes('barrier'))).toEqual(
+        []
+      );
+      expect(warnedSince(told.warn)).toEqual([barrier]);
+      // Recorded as its export again, so the next save writes it again.
+      expect(recordOf(orders)?.sha256).toBe(createHash('sha256').update(vscodeStub._test.writtenBytes.get(orders)!).digest('hex'));
+      editor.document.setText(text('four'));
+      vscodeStub._test.saveDocument(editor.document);
+      await until(() => vscodeStub._test.writtenFiles.get(orders)?.includes('four') === true, 'exported on the next save');
+    });
+
+    it('exports nothing while automatic export is off, and starts at the next save once it is turned on', async () => {
+      const editor = await allowedAt('sync-off', diagram('orders'));
+      const target = 'file:///c/sync-off/images/orders.svg';
+      const before = bytesOf(target);
+      const logs = vscodeStub._test.logs.length;
+
+      editor.document.setText(diagram('orders', 'saved while off'));
+      vscodeStub._test.saveDocument(editor.document);
+      // Turned on, it waits for the next save.
+      turnOn();
+      await settled();
+
+      expect(bytesOf(target)).toBe(before);
+      expect(syncLogsSince(logs).filter((line) => line.includes('orders'))).toEqual([]);
+      vscodeStub._test.saveDocument(editor.document);
+      await until(() => bytesOf(target) !== before, 'exported on the next save');
+      expect(vscodeStub._test.writtenFiles.get(target)).toContain('saved while off');
+    });
+
+    it('exports nothing for a save in Restricted Mode, though the workspace is trusted before it would start, nor for one due when automatic export is turned off, if turned on again before it starts', async () => {
+      const editor = await allowedAt('sync-stopped', diagram('orders'));
+      turnOn();
+      const target = 'file:///c/sync-stopped/images/orders.svg';
+      const before = bytesOf(target);
+      const logs = vscodeStub._test.logs.length;
+      editor.document.setText(diagram('orders', 'changed'));
+
+      vscodeStub.workspace.isTrusted = false;
+      try {
+        vscodeStub._test.saveDocument(editor.document);
+      } finally {
+        // Trusted at once, well before the save would be exported: the next save is.
+        vscodeStub._test.grantTrust();
+      }
+      await settled();
+      expect(bytesOf(target)).toBe(before);
+
+      vscodeStub._test.saveDocument(editor.document);
+      // Due, not started yet.
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      vscodeStub._test.setConfiguration('autoExport.enabled', false);
+      turnOn();
+      await settled();
+
+      expect(bytesOf(target)).toBe(before);
+      expect(syncLogsSince(logs).filter((line) => line.includes('orders'))).toEqual([]);
+    });
+
+    it('writes nothing once disabled for the diagram while it is exported', async () => {
+      const editor = await allowedAt('sync-taken-back', diagram('orders'));
+      turnOn();
+      const target = 'file:///c/sync-taken-back/images/orders.svg';
+      const before = bytesOf(target);
+      const logs = vscodeStub._test.logs.length;
+      editor.document.setText(diagram('orders', 'changed'));
+      const readFile = vscodeStub.workspace.fs.readFile;
+      let looked = false;
+      // Disabled as the export looks at the file it is to write.
+      vscodeStub.workspace.fs.readFile = async (uri) => {
+        if (uri.toString() === target && !looked) {
+          looked = true;
+          expect((await disable(editor)).info).toEqual(['SVG auto export is disabled for orders. Its SVG file is left as it is.']);
+        }
+        return readFile(uri);
+      };
+      try {
+        vscodeStub._test.saveDocument(editor.document);
+        await until(() => looked, 'looked at the file');
+        await settled();
+      } finally {
+        vscodeStub.workspace.fs.readFile = readFile;
+      }
+
+      expect(bytesOf(target)).toBe(before);
+      expect(syncLogsSince(logs).filter((line) => line.includes('orders'))).toEqual([]);
+    });
+
+    it('leaves the SVG file as it is while the document has unsaved changes, telling nothing, and exports it once they are saved', async () => {
+      const editor = await allowedAt('sync-dirty', diagram('orders'));
+      turnOn();
+      const target = 'file:///c/sync-dirty/images/orders.svg';
+      const before = bytesOf(target);
+      const { warn } = vscodeStub._test.notifications;
+      const warns = warn.length;
+      const logs = vscodeStub._test.logs.length;
+
+      vscodeStub._test.saveDocument(editor.document);
+      // Typing goes on before the export starts.
+      editor.document.setText(diagram('orders', 'unsaved'));
+      Object.assign(editor.document, { isDirty: true });
+      const barrier = await settled();
+
+      expect(bytesOf(target)).toBe(before);
+      expect(syncLogsSince(logs).filter((line) => line.includes('orders'))).toEqual([
+        'info: SVG auto export skipped orders this time. sync-dirty/doc.md has unsaved changes: it is exported once they are saved.',
+      ]);
+      expect(warnedSince(warns)).toEqual([barrier]);
+      Object.assign(editor.document, { isDirty: false });
+      vscodeStub._test.saveDocument(editor.document);
+      await until(() => vscodeStub._test.writtenFiles.get(target)?.includes('unsaved') === true, 'exported once saved');
+    });
+
+    it('leaves an SVG file edited since it was exported as it is, and tells so once, offering to export the diagram by hand', async () => {
+      const editor = await allowedAt('sync-edited', diagram('orders'));
+      turnOn();
+      const target = 'file:///c/sync-edited/images/orders.svg';
+      vscodeStub._test.writtenFiles.set(target, '<svg>edited</svg>');
+      vscodeStub._test.writtenBytes.delete(target);
+      const { warn } = vscodeStub._test.notifications;
+      const warns = warn.length;
+      const calls = vscodeStub._test.commandCalls.length;
+      vscodeStub._test.notificationReply = 'Export as SVG';
+
+      vscodeStub._test.saveDocument(editor.document);
+      await until(() => warnedSince(warns).length > 0, 'told');
+      await until(() => vscodeStub._test.commandCalls.slice(calls).some(({ id }) => id === 'plantumlLocal.exportSvg'), 'offered to export it');
+      vscodeStub._test.notificationReply = null;
+
+      expect(warnedSince(warns)).toEqual([
+        'SVG auto export skipped orders. sync-edited/images/orders.svg changed after it was exported, so it is not overwritten. ' +
+          'Export the diagram as SVG to overwrite it, which asks first.',
+      ]);
+      expect(vscodeStub._test.commandCalls.slice(calls)).toContainEqual({
+        id: 'plantumlLocal.exportSvg',
+        args: [{ uri: 'file:///c/sync-edited/doc.md', line: 0 }],
+      });
+      expect(vscodeStub._test.writtenFiles.get(target)).toBe('<svg>edited</svg>');
+      // Saved again, it is not told again.
+      const again = warn.length;
+      vscodeStub._test.saveDocument(editor.document);
+      const barrier = await settled();
+      expect(warnedSince(again)).toEqual([barrier]);
+      expect(vscodeStub._test.writtenFiles.get(target)).toBe('<svg>edited</svg>');
+    });
+
+    it('leaves an SVG file open with unsaved changes as it is, and tells so once, offering the output', async () => {
+      const editor = await allowedAt('sync-svg-dirty', diagram('orders'));
+      turnOn();
+      const target = 'file:///c/sync-svg-dirty/images/orders.svg';
+      const before = bytesOf(target);
+      // The SVG file open as text, edited and not saved.
+      const svg = makeEditor(target, '<svg>typing</svg>', 0, { languageId: 'xml' }).document;
+      Object.assign(svg, { isDirty: true });
+      vscodeStub._test.openDocuments.push(svg);
+      opened.push(svg);
+      const { warn } = vscodeStub._test.notifications;
+      const warns = warn.length;
+      const calls = vscodeStub._test.commandCalls.length;
+      const outputShown = (): boolean => vscodeStub._test.commandCalls.slice(calls).some(({ id }) => id.startsWith('workbench.action.output.show.'));
+      vscodeStub._test.notificationReply = 'Show Output';
+      try {
+        vscodeStub._test.saveDocument(editor.document);
+        await until(outputShown, 'offered the output');
+      } finally {
+        vscodeStub._test.notificationReply = null;
+      }
+
+      expect(warnedSince(warns)).toEqual([
+        'SVG auto export skipped orders. sync-svg-dirty/images/orders.svg is open with unsaved changes, so it is not overwritten. Save or revert it.',
+      ]);
+      expect(bytesOf(target)).toBe(before);
+      // Saved again, it is not told again.
+      const again = warn.length;
+      vscodeStub._test.saveDocument(editor.document);
+      const barrier = await settled();
+      expect(warnedSince(again)).toEqual([barrier]);
+      expect(bytesOf(target)).toBe(before);
+    });
+
+    it('does not make an SVG file that is gone again, offering to export the diagram', async () => {
+      const editor = await allowedAt('sync-missing', diagram('orders'));
+      turnOn();
+      const target = 'file:///c/sync-missing/images/orders.svg';
+      await vscodeStub.workspace.fs.delete(vscodeStub.Uri.parse(target));
+      const { warn } = vscodeStub._test.notifications;
+      const warns = warn.length;
+      const calls = vscodeStub._test.commandCalls.length;
+      vscodeStub._test.notificationReply = 'Export as SVG';
+
+      vscodeStub._test.saveDocument(editor.document);
+      await until(() => vscodeStub._test.commandCalls.slice(calls).some(({ id }) => id === 'plantumlLocal.exportSvg'), 'offered to export it');
+      vscodeStub._test.notificationReply = null;
+
+      expect(warnedSince(warns)).toEqual([
+        'SVG auto export skipped orders. sync-missing/images/orders.svg is not there, and saving does not make it again. Export the diagram as SVG to make it.',
+      ]);
+      expect(vscodeStub._test.writtenFiles.has(target)).toBe(false);
+    });
+
+    it('leaves the SVG file as it is when the diagram as saved does not draw, offering the problems, or the output when they are not listed', async () => {
+      const broken = ['```plantuml orders', '@startuml', 'this is invalid ;;; [[[', '@enduml', '```'].join('\n');
+      const { warn } = vscodeStub._test.notifications;
+      /** The panels shown by a notice's button since `from`: the Problems panel, or the Output panel. */
+      const panelsSince = (from: number): string[] =>
+        vscodeStub._test.commandCalls
+          .slice(from)
+          .map(({ id }) => id)
+          .filter((id) => id === 'workbench.actions.view.problems' || id.startsWith('workbench.action.output.show.'));
+      for (const [folder, listed] of [
+        ['sync-broken', true],
+        ['sync-broken-unlisted', false],
+      ] as const) {
+        const editor = await allowedAt(folder, diagram('orders'));
+        turnOn();
+        vscodeStub._test.setConfiguration('diagnostics.enabled', listed ? undefined : false);
+        const target = `file:///c/${folder}/images/orders.svg`;
+        const svg = vscodeStub._test.writtenFiles.get(target);
+        const warns = warn.length;
+        const calls = vscodeStub._test.commandCalls.length;
+        vscodeStub._test.notificationReply = listed ? 'Show Problems' : 'Show Output';
+        try {
+          editor.document.setText(broken);
+          vscodeStub._test.saveDocument(editor.document);
+          await until(() => panelsSince(calls).length > 0, `offered what to look at in ${folder}`);
+        } finally {
+          vscodeStub._test.notificationReply = null;
+          vscodeStub._test.setConfiguration('diagnostics.enabled', undefined);
+        }
+
+        // The line of the document it is on.
+        expect(warnedSince(warns)).toEqual([
+          'SVG auto export skipped orders. PlantUML error on line 3: Syntax error. Detected diagram type: Sequence diagram. Check the syntax for that type.',
+        ]);
+        expect(panelsSince(calls)).toEqual([listed ? 'workbench.actions.view.problems' : expect.stringMatching(/^workbench\.action\.output\.show\./)]);
+        expect(vscodeStub._test.writtenFiles.get(target)).toBe(svg);
+      }
+    });
+
+    it('tells of several diagrams stopped at once in one notice, naming them', async () => {
+      const first = await allowedAt('sync-many-1', diagram('orders'));
+      const second = await allowedAt('sync-many-2', diagram('billing', 'pay'));
+      turnOn();
+      for (const target of ['file:///c/sync-many-1/images/orders.svg', 'file:///c/sync-many-2/images/billing.svg']) {
+        vscodeStub._test.writtenFiles.set(target, '<svg>edited</svg>');
+        vscodeStub._test.writtenBytes.delete(target);
+      }
+      const { warn } = vscodeStub._test.notifications;
+      const warns = warn.length;
+      const logs = vscodeStub._test.logs.length;
+
+      vscodeStub._test.saveDocument(first.document);
+      vscodeStub._test.saveDocument(second.document);
+      await until(() => warnedSince(warns).length > 0, 'told');
+
+      // By name, whichever ended first.
+      expect(warnedSince(warns)).toEqual(['SVG auto export stopped for 2 diagrams: billing, orders. See the Output panel for why.']);
+      expect(syncLogsSince(logs)).toEqual([
+        'warn: SVG auto export skipped orders. sync-many-1/images/orders.svg changed after it was exported, so it is not overwritten. ' +
+          'Export the diagram as SVG to overwrite it, which asks first.',
+        'warn: SVG auto export skipped billing. sync-many-2/images/billing.svg changed after it was exported, so it is not overwritten. ' +
+          'Export the diagram as SVG to overwrite it, which asks first.',
+      ]);
+    });
+
+    it('names five diagrams at most in that notice, by name, the rest left to an ellipsis', async () => {
+      const names = ['n1', 'n2', 'n3', 'n4', 'n5', 'n6'];
+      const editors: TextEditorStub[] = [];
+      for (const name of names) {
+        editors.push(await allowedAt(`sync-six-${name}`, diagram(name)));
+      }
+      turnOn();
+      for (const name of names) {
+        const target = `file:///c/sync-six-${name}/images/${name}.svg`;
+        vscodeStub._test.writtenFiles.set(target, '<svg>edited</svg>');
+        vscodeStub._test.writtenBytes.delete(target);
+      }
+      const { warn } = vscodeStub._test.notifications;
+      const warns = warn.length;
+
+      // Saved last first: the order they end in, which the file system's answers
+      // can shuffle besides, is not the order they are named in.
+      for (const editor of [...editors].reverse()) {
+        vscodeStub._test.saveDocument(editor.document);
+      }
+      await until(() => warnedSince(warns).length > 0, 'told');
+
+      expect(warnedSince(warns)).toEqual(['SVG auto export stopped for 6 diagrams: n1, n2, n3, n4, n5, …. See the Output panel for why.']);
+    });
+
+    it('ends the permission of a diagram taken out of its document, automatic export on or not, and of one given its name twice, in Restricted Mode too', async () => {
+      const removed = await allowedAt('sync-gone', diagram('orders'));
+      const doubled = await allowedAt('sync-doubled', diagram('billing', 'pay'));
+      const { warn } = vscodeStub._test.notifications;
+      let warns = warn.length;
+
+      removed.document.setText('# Design\n');
+      vscodeStub._test.saveDocument(removed.document);
+      await until(() => warnedSince(warns).length > 0, 'told');
+      expect(warnedSince(warns)).toEqual([
+        'SVG auto export ended for orders. The diagram is no longer in sync-gone/doc.md. A diagram given its name later is not exported on save until that is allowed again.',
+      ]);
+      expect(stored()?.permits.map(({ key }) => key.name)).toEqual(['billing']);
+
+      turnOn();
+      vscodeStub.workspace.isTrusted = false;
+      warns = warn.length;
+      doubled.document.setText(`${diagram('billing', 'pay')}\n\n${diagram('billing', 'again')}`);
+      vscodeStub._test.saveDocument(doubled.document);
+      await until(() => warnedSince(warns).length > 0, 'told');
+      vscodeStub.workspace.isTrusted = true;
+      expect(warnedSince(warns)).toEqual([
+        'SVG auto export ended for billing. More than one diagram in sync-doubled/doc.md has its name. Give each its own name, then allow it again.',
+      ]);
+      expect(stored()?.permits).toEqual([]);
+
+      // Given its name again, the diagram is not exported under the permission that ended.
+      const target = 'file:///c/sync-gone/images/orders.svg';
+      const before = bytesOf(target);
+      removed.document.setText(diagram('orders', 'back'));
+      vscodeStub._test.saveDocument(removed.document);
+      await settled();
+      expect(bytesOf(target)).toBe(before);
+    });
+
+    it('ends the permission once the SVG file or the palette it was given for changes, writing neither file', async () => {
+      const editor = await allowedAt('sync-terms', diagram('orders'));
+      turnOn();
+      const { warn } = vscodeStub._test.notifications;
+      const warns = warn.length;
+      const writes = vscodeStub._test.fileWrites.length;
+      vscodeStub._test.setConfiguration('exportDirectory', 'diagrams');
+      vscodeStub._test.setConfiguration('exportTheme', 'dark');
+      try {
+        vscodeStub._test.saveDocument(editor.document);
+        await until(() => warnedSince(warns).length > 0, 'told');
+      } finally {
+        vscodeStub._test.setConfiguration('exportDirectory', undefined);
+        vscodeStub._test.setConfiguration('exportTheme', undefined);
+      }
+
+      expect(warnedSince(warns)).toEqual([
+        'SVG auto export ended for orders. What it was allowed under changed: the SVG file, the palette. Allow it again to go on.',
+      ]);
+      expect(stored()?.permits).toEqual([]);
+      // Neither where it was, nor where it would be now.
+      expect(vscodeStub._test.fileWrites.slice(writes)).toEqual([]);
+      expect(vscodeStub._test.writtenFiles.has('file:///c/sync-terms/diagrams/orders.svg')).toBe(false);
+    });
   });
 });
 

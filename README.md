@@ -56,7 +56,7 @@ Your diagram source is processed locally and is not sent to a rendering service.
 - **Go to Diagram**: *Go to Diagram in Document…* lists the diagram blocks of a Markdown file — with the heading above each, its kind and its title or first line — and moves the cursor to the one picked
 - **Diagram Dependencies**: *Show Diagram Dependencies* lists in the Explorer what each diagram of the editor asked for when last drawn — the files read, not found or refused, each under the file that asked — its include lines that no request matches, and the files of the bundled libraries read; with a file in the editor, the diagrams of open documents that read it
 - **Colours**: A swatch beside each colour a diagram sets — a `skinparam` value, an element's colour, a `<style>` property — opens VS Code's colour picker, which writes the pick back as `#RRGGBB`
-- **Export**: Diagrams can be written to SVG files — one, a whole document or a whole folder — or to PNG files, one or a whole folder, and referenced from the Markdown, for hosts such as GitHub that do not draw PlantUML; *Check Export Freshness* lists which images of a file are still what an export would write
+- **Export**: Diagrams can be written to SVG files — one, a whole document or a whole folder — or to PNG files, one or a whole folder, and referenced from the Markdown, for hosts such as GitHub that do not draw PlantUML; *Check Export Freshness* lists which images of a file are still what an export would write, and a diagram you allow is exported again as SVG each time its files are saved
 - **Multi-Diagram Pages**: Any number of diagrams per page; renders are serialised so results never mix
 - **Dark-Mode Aware**: Diagrams re-render to match your colour theme, or pin the palette via settings
 - **Full-Width Text Support**: Japanese and other full-width characters are measured and laid out correctly
@@ -943,6 +943,8 @@ reference whose target is `images/orders-api.svg#plantuml-local`.
 | `PlantUML Local: Export All Diagrams in Folder as SVG` | Writes every **named** block of the Markdown and PlantUML files in a folder (below) |
 | `PlantUML Local: Export All Diagrams in Folder as PNG` | The same, as PNGs |
 | `PlantUML Local: Check Export Freshness` | Lists the images exported from the file, and whether each is still what an export would write, without writing anything (below) |
+| `PlantUML Local: Enable SVG Auto Export for Diagram` | Allows the SVG file of the diagram under the cursor to be exported again each time its files are saved ([below](#exporting-a-diagram-again-on-save)) |
+| `PlantUML Local: Disable SVG Auto Export for Diagram` | Takes that back, for the diagram under the cursor or for those picked from a list |
 
 The first five are also in the editor's right-click menu: the single exports
 and the copy appear with the cursor inside a block, the other two whenever the
@@ -1128,11 +1130,91 @@ without a name is not checked, since an export under a name you type is not
 recorded.
 
 Two things to keep in mind. The SVG is a snapshot: after editing a block,
-re-run the command (*Check Export Freshness* lists the images that need it;
-commit the `images/` directory alongside the document, or the references point
-at nothing). And this flow is for hosts that do
+re-run the command, or let [saving do it](#exporting-a-diagram-again-on-save)
+for the diagrams you allow (*Check Export Freshness* lists the images that
+need it; commit the `images/` directory alongside the document, or the
+references point at nothing). And this flow is for hosts that do
 *not* render PlantUML — one that does, like GitLab, renders the block itself
 and would show the referenced image as a second copy.
+
+### Exporting a diagram again on save
+
+A diagram you allow is exported again as SVG each time its document, or a file
+it includes, is saved in VS Code — Auto Save included — so the file committed
+beside the document keeps up with it. It takes two things, neither of which
+writes anything on its own:
+
+- *Enable SVG Auto Export for Diagram*, with the cursor in the diagram, allows
+  that one diagram once you confirm. The question names the diagram, its
+  document, the workspace folder, the SVG file and the palette, and says when
+  the file is written, where the permission is kept and what ends it.
+- `plantumlLocal.autoExport.enabled`, off by default, turns exporting on save
+  on. It is read from your User settings only — from the Remote settings in a
+  remote window — and is not synced: a value in the settings of a workspace or
+  a folder is not used, so a repository cannot turn it on.
+
+The next save after both are given is the first that exports the diagram.
+Turned off, saving exports nothing and the permissions are kept; turned on
+again, it waits for the next save too. *Disable SVG Auto Export for Diagram*
+takes permissions back — the diagram's at the cursor, or those you pick from
+a list, the document's first — and leaves the SVG files as they are; it works
+in Restricted Mode too.
+
+A permission is given only in a trusted workspace, for a diagram with a name
+of its own in a Markdown or PlantUML file saved in a workspace folder,
+exported in the light or dark palette rather than the preview's, and only when
+the diagram, drawn from its saved files alone, draws without errors and the
+same way each time: not while a file it includes has unsaved changes, nor with
+a formula or anything else the bundled engine leaves out, files it could not
+read, or `%date()` and the like. Its SVG file has to be there already as its
+export, unchanged since; a file no record names that holds just what the
+diagram draws — exported elsewhere and committed, say — is taken as its export
+once you allow it, which the question says first. Each refusal says why, with
+a button to the way out where there is one. A workspace keeps up to 128
+permissions, and the permissions are kept with its state in VS Code on this
+computer — in a remote window too, not on the remote machine — neither synced
+nor written to the repository.
+
+A diagram is exported half a second after its files were last saved, so a
+burst of saves exports it once, and one saved again while it is exported is
+exported once more afterwards. Diagrams are exported one at a time, after what
+the previews are waiting to draw. Each is drawn from the saved files alone and
+written as *Export Diagram as SVG* writes it, to its own SVG file only, and
+only while that file is as it was last exported: just before it is replaced,
+under the lock the export commands take, the file, its record, what the
+diagram was drawn from and the permission are looked at again. A file that
+holds the drawing already is left as it is, and an export by hand that wrote
+the file meanwhile is not undone. Nothing else is written — no image link, no
+other diagram's file. A file written says nothing beyond a line in the Output
+panel.
+
+Saving a file the diagram includes exports it too: a file its last export
+read, or a place it looked for one, found or not — so that creating a file
+the diagram did not find, and saving it, exports the diagram. So does a file
+an export that wrote nothing looked for since. A change on disk alone — a
+checkout, another editor — exports nothing; nor do starting VS Code or
+changing the colour theme. While the document or a file it includes has
+unsaved changes, the diagram waits for them to be saved and says nothing.
+
+Otherwise the SVG file is left as it is, and a notification says why: that
+the diagram does not draw (*Show Problems*, or *Show Output* when the Problems
+panel does not list it); that its SVG file is gone, which saving does not make
+again, or changed after it was exported (*Export as SVG*, which asks before
+overwriting); that it is open with unsaved changes; or the reasons a
+permission is refused. A diagram is told of once, not on every save, until it
+is exported again or stops for another reason, and several diagrams stopped
+at once are told of in one notification that names them, the reasons in the
+Output panel. Nothing is tried again until the next save.
+
+The permission ends once the diagram is no longer in its document, or another
+diagram there takes its name — looked at on each save of the document,
+automatic export on or not, so that a diagram given the name later is not
+exported under it — and once the SVG file, the workspace folder, where its
+included files are looked for, `plantumlLocal.includePaths`, the palette or
+the renderer is otherwise when it would be exported — an update of the
+extension that changes how diagrams are drawn, say. It ends too when a file
+written cannot be recorded as the diagram's export. A notification says so;
+*Enable SVG Auto Export for Diagram* gives it again.
 
 ---
 
@@ -1196,6 +1278,10 @@ and would show the referenced image as a second copy.
   listed under [Renaming a participant](#renaming-a-participant): not in a
   `.puml` file, not in a diagram that includes a file or uses the
   preprocessor, and not an element of another kind of diagram
+- Exporting on save writes SVG only, for diagrams allowed one at a time on the
+  computer VS Code runs on — on another computer, they are allowed again — and
+  only when VS Code saves a file: a change made on disk outside it exports
+  nothing
 - Highlighting cannot tell which diagram type a `@startuml` block will turn
   into, so it colours the syntax of all of them: a line the engine rejects in
   one diagram type can still be coloured. Nor can it tell which names
@@ -1217,6 +1303,7 @@ and would show the referenced image as a second copy.
 | `plantumlLocal.exportTheme` | `light` | Palette for exported SVGs and PNGs, and for diagrams copied from the `.puml` preview. `preview` follows the palette the preview currently uses. Can be set per folder |
 | `plantumlLocal.exportPngScale` | `2` | Scale of an exported PNG, and of a diagram copied from the `.puml` preview: 1, 2 or 4 times the diagram's own size. Can be set per folder |
 | `plantumlLocal.hideExportedImages` | `true` | Hide images marked `#plantuml-local` in the preview, so an exported diagram is not shown next to its block's render |
+| `plantumlLocal.autoExport.enabled` | `false` | Export the SVG file of each diagram allowed with *Enable SVG Auto Export for Diagram* again when its files are saved; see [Exporting a diagram again on save](#exporting-a-diagram-again-on-save). Read from User settings only (Remote settings in a remote window), not from a workspace's or folder's, and not synced |
 | `plantumlLocal.preview.updateMode` | `onChange` | When a changed diagram is drawn again in the previews: `onChange`, `onSave`, or `manual` (with *Clear Render Cache and Re-render*). Can be set per folder |
 | `plantumlLocal.diagnostics.enabled` | `true` | List the problems of the diagrams in open Markdown and PlantUML files in the Problems panel; can be set per folder |
 | `plantumlLocal.codeLens.enabled` | `true` | Show *Preview*, *Export SVG* and *Export PNG* above each diagram in Markdown and PlantUML files; `editor.codeLens` must be on as well. Can be set per folder |
@@ -1282,6 +1369,7 @@ external rendering service.
 - **Image-Only Panels**: The `.puml` preview, and the panel a PNG is drawn in, show the SVG as an image under a strict content security policy, so nothing in a diagram can run there
 - **Included Files Checked**: The engine reads no file itself; the extension hands it the file of a local `!include` only from the document's workspace folder, through no symbolic link or junction, and only as UTF-8 text with one of the extensions listed under [Including files](#including-files)
 - **Untrusted Workspaces**: No file is read for an `!include` until the workspace is trusted, and no processes are spawned
+- **Export on Save by Permission**: Saving writes a file only for a diagram you allowed by hand, one at a time, while `plantumlLocal.autoExport.enabled` — a setting no workspace can turn on — is on and the workspace is trusted, and only to the SVG file the export wrote for that diagram, unchanged since
 
 These controls reduce the extension's attack surface, but they have limits worth
 being explicit about: a worker thread is an isolation boundary for globals, not a

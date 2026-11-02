@@ -150,5 +150,20 @@ describe('ReadSnapshot', () => {
       await expect(shallow.load('common.puml', outer.id)).rejects.toThrow();
       expect(shallow.failures.at(-1)?.reason).toEqual({ kind: 'limit', limit: 'depth' });
     });
+
+    it('keeps every path the sessions looked at, found there or not, once each, in the order first looked at', async () => {
+      const snapshot = new ReadSnapshot(nothing);
+      const later = join(root, 'docs', 'later.puml');
+      const first = sessionOf(snapshot);
+      await expect(first.load('later.puml', null)).rejects.toThrow();
+      await first.load('common.puml', null);
+      // Another drawing of the same export looks at them again.
+      const second = sessionOf(snapshot);
+      await second.load('common.puml', null);
+      await second.load('nested.puml', null);
+
+      expect(snapshot.looked()).toEqual([later, common, join(root, 'docs', 'nested.puml')]);
+      expect(snapshot.looked()).toEqual([...new Set([...first.dependencies, ...second.dependencies])]);
+    });
   });
 });

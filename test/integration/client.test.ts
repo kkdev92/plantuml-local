@@ -140,6 +140,56 @@ describe('RendererClient', () => {
     client = null;
   });
 
+  describe('waiting for a turn', () => {
+    it('lets through at once when nothing is in flight', async () => {
+      client = new RendererClient(wedgeWorkerPath, log, 60_000);
+      await expect(client.whenIdle()).resolves.toBeUndefined();
+    });
+
+    it('waits for the renders in flight, and lets a caller drawing one after another ask for its next first', async () => {
+      client = new RendererClient(wedgeWorkerPath, log, 60_000);
+      const renderer = client;
+      const order: string[] = [];
+      // A caller drawing two diagrams in a row, as a preview does.
+      const previews = (async (): Promise<void> => {
+        order.push(await renderer.render('@startuml\nA\n@enduml', false));
+        order.push(await renderer.render('@startuml\nB\n@enduml', false));
+      })();
+      const turn = renderer.whenIdle().then(() => {
+        order.push('turn');
+      });
+      await Promise.all([previews, turn]);
+      expect(order).toEqual(['<svg>@startuml\nA\n@enduml</svg>', '<svg>@startuml\nB\n@enduml</svg>', 'turn']);
+    });
+
+    it('keeps waiting while a render hangs, and lets through once it has timed out', async () => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      client = new RendererClient(wedgeWorkerPath, log, 250);
+      const hung = client.render('@startuml\nHANG\n@enduml', false);
+      const timedOut = expect(hung).rejects.toThrow('Rendering timed out');
+      let through = false;
+      const turn = client.whenIdle().then(() => {
+        through = true;
+      });
+      await vi.advanceTimersByTimeAsync(100);
+      expect(through).toBe(false);
+      await vi.advanceTimersByTimeAsync(150);
+      await timedOut;
+      await turn;
+      expect(through).toBe(true);
+    });
+
+    it('lets through what waits once the client is disposed', async () => {
+      client = new RendererClient(hangWorkerPath, log, 60_000);
+      const pending = client.render('@startuml\nA -> B\n@enduml', false);
+      const turn = client.whenIdle();
+      client.dispose();
+      await expect(pending).rejects.toThrow('Extension deactivated');
+      await expect(turn).resolves.toBeUndefined();
+      client = null;
+    });
+  });
+
   describe('idle shutdown', () => {
     it('shuts the worker down once it has been idle, and restarts on demand', async () => {
       // The worker holds the engine, the WASM and any sprite library a

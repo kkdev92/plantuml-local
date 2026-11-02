@@ -3,6 +3,7 @@ import {
   Localization,
   Log,
   Notifications,
+  Operations,
   Workspace,
   checkRelativePath,
   createWebviewHtml,
@@ -25,11 +26,13 @@ import {
 import type MarkdownIt from 'markdown-it';
 import { randomBytes } from 'node:crypto';
 import { readFileSync } from 'node:fs';
+import { realpath } from 'node:fs/promises';
 import { basename, join, relative, sep } from 'node:path';
 import * as vscode from 'vscode';
 
 import {
   ANALYSIS_LIMITS,
+  AUTO_EXPORT_DELAY_MS,
   COMMANDS,
   CONFIG,
   CONTEXT_KEYS,
@@ -57,10 +60,12 @@ import {
   type PlantUmlBlock,
 } from './export/blocks';
 import { lookAtOutput, sameLook, type OutputLook, type OutputRefusal } from './export/auto-export';
+import { SaveSync, stopsToTell, watchedFiles, type SyncOutcome, type SyncStop } from './export/auto-sync';
 import { OutputBuffer } from './export/buffer';
 import {
   MAX_BULK_DIAGRAMS,
   PNG_SCALES,
+  commitAutoExport,
   drawAutoExport,
   drawDocument,
   exportAll,
@@ -71,6 +76,7 @@ import {
   prepareSvg,
   refuseSharedFiles,
   writeDocuments,
+  type AutoExportCommit,
   type AutoExportRefusal,
   type DrawingDeps,
   type DrawnDocument,
@@ -92,12 +98,13 @@ import {
   type OutputRead,
   type ReferenceProblem,
 } from './export/freshness';
-import { ExportLedger, artifactKey, type ArtifactRecord } from './export/history';
-import { canonicalJson, shippedRenderer } from './export/manifest';
+import { ExportLedger, artifactKey, sameKey, type ArtifactRecord, type RecordResult } from './export/history';
+import { RENDER_CONTRACT, canonicalJson, shippedRenderer, type Palette } from './export/manifest';
 import type { ExportRecords } from './export/ownership';
 import {
   PERMIT_LIMIT,
   PermitStore,
+  changedTerms,
   standingOf,
   type AutoExportPermit,
   type PermitResult,
@@ -200,11 +207,11 @@ import { describeIncludeFailure, type IncludeLabels } from './includes/describe'
 import { asWritten, definedWords, includeDirectives } from './includes/directives';
 import { DrawingRecords } from './includes/drawings';
 import { includeCompletions, includeDefinitions } from './includes/editor';
-import { accessFor, drawInDocuments, openSession, readingNow, type DrawDiagram } from './includes/host';
+import { accessFor, drawInDocuments, openSession, readingNow, type DrawDiagram, type Renderer as DiagramRenderer } from './includes/host';
 import { INCLUDE_EXTENSIONS } from './includes/path-policy';
 import { contextOf, type IncludeFailure } from './includes/session';
 import { ReadSnapshot } from './includes/snapshot';
-import { changeTo } from './includes/tracking';
+import { changeTo, pathKey } from './includes/tracking';
 import { IncludeWatcher } from './includes/watch';
 import { createPlantUmlPlugin, type PlantUmlPlugin, type UpdateMode } from './preview/plugin';
 import { RendererClient, defaultWorkerPath } from './render/client';
@@ -1141,7 +1148,7 @@ function viewDiagrams(document: vscode.TextDocument, labels: ProblemLabels, view
  * drawing says what it was drawn from.
  */
 function drawWith(
-  renderer: RendererClient,
+  renderer: DiagramRenderer,
   settings: SettingsReader,
   l10n: L10n,
   watch?: IncludeWatcher,
@@ -1480,6 +1487,11 @@ async function diagramsNow(uri: vscode.Uri, container: 'markdown' | 'plantuml-fi
   } catch {
     return [];
   }
+  return diagramsInText(uri, container, text);
+}
+
+/** The diagrams of `text`, the text of the document at `uri`: a Markdown document or a PlantUML file, as `container` says. */
+function diagramsInText(uri: vscode.Uri, container: 'markdown' | 'plantuml-file', text: string): PlantUmlBlock[] {
   return container === 'markdown'
     ? findPlantUmlBlocks(text)
     : findFileDiagrams(text, withoutExtension(uri.path.slice(uri.path.lastIndexOf('/') + 1)));
@@ -1530,7 +1542,7 @@ function staleInputsMessage(
  */
 function exporterDeps(
   context: OperationContext,
-  renderer: RendererClient,
+  renderer: DiagramRenderer,
   palettes: ThemePalettes,
   settings: SettingsReader,
   exports: ExportLedger,
@@ -2221,15 +2233,302 @@ function nameDiagramButton(context: OperationContext, document: vscode.TextDocum
 
 /** A button that exports `block`, a diagram of `document`, as SVG, as Export Diagram as SVG does: asking before it overwrites a file. */
 function exportSvgButton(context: OperationContext, document: vscode.TextDocument, block: PlantUmlBlock): NoticeAction {
+  return exportSvgAtButton(context, { uri: document.uri.toString(), line: block.openLine });
+}
+
+/** A button that exports the diagram at `line` of the document at `uri` as SVG, as {@link exportSvgButton} does. */
+function exportSvgAtButton(context: OperationContext, at: { uri: string; line: number }): NoticeAction {
   return {
     title: context.l10n.t('Export as SVG'),
-    run: () => context.commands.execute(COMMANDS.EXPORT_SVG, { uri: document.uri.toString(), line: block.openLine }),
+    run: () => context.commands.execute(COMMANDS.EXPORT_SVG, { uri: at.uri, line: at.line }),
   };
 }
 
 /** Whether the document open at `path`, a URI, has unsaved changes, as the export asks. */
 function isDirtyAt(path: string): boolean {
   return vscode.workspace.textDocuments.some((open) => open.isDirty && open.uri.toString() === path);
+}
+
+/**
+ * Why the SVG file of a diagram, `file` as the Explorer names it, was not
+ * exported again when the diagram's files were saved, in the display
+ * language.
+ */
+function syncOutputText(l10n: L10n, workspace: WorkspaceService, refusal: OutputRefusal, file: string): string {
+  switch (refusal.why) {
+    case 'missing':
+      return l10n.t('{0} is not there, and saving does not make it again. Export the diagram as SVG to make it.', file);
+    case 'dirty':
+      return l10n.t('{0} is open with unsaved changes, so it is not overwritten. Save or revert it.', file);
+    case 'edited':
+      return l10n.t('{0} changed after it was exported, so it is not overwritten. Export the diagram as SVG to overwrite it, which asks first.', file);
+    case 'unrecorded':
+      return l10n.t(
+        "{0} is not recorded as this diagram's export, so it is not overwritten. Export the diagram as SVG to overwrite it, which asks first.",
+        file
+      );
+    default:
+      return outputRefusalText(l10n, workspace, refusal, file);
+  }
+}
+
+/** Why a diagram's permission to be exported on save ended, `count` of it being in `document`, in the display language. */
+function goneText(l10n: L10n, document: string, count: number): string {
+  return count === 0
+    ? l10n.t('The diagram is no longer in {0}. A diagram given its name later is not exported on save until that is allowed again.', document)
+    : l10n.t('More than one diagram in {0} has its name. Give each its own name, then allow it again.', document);
+}
+
+/** Why `file`, written on save, could not be recorded as its diagram's export (`recorded` says), in the display language. */
+function untrackedText(l10n: L10n, recorded: RecordResult, file: string): string {
+  switch (recorded) {
+    case 'full':
+      return l10n.t('{0} was exported, but the export history of this workspace is full, so it could not be recorded as its export.', file);
+    case 'later-version':
+      return l10n.t(
+        '{0} was exported, but a later version of PlantUML Local keeps the export history of this workspace, so it could not be recorded as its export.',
+        file
+      );
+    default:
+      return l10n.t('{0} was exported, but could not be recorded as its export.', file);
+  }
+}
+
+/** What exporting a diagram's SVG on save needs, besides an operation's context. */
+interface SaveExportDeps {
+  /** Draws once what the previews asked for meanwhile is drawn. */
+  renderer: DiagramRenderer;
+  palettes: ThemePalettes;
+  settings: SettingsReader;
+  exports: ExportLedger;
+  permits: PermitStore;
+  workspace: WorkspaceService;
+  /** Whether the SVG of `permit` may be written now: automatic export on, the workspace trusted, the permission the one given, the extension running. */
+  allowed(permit: AutoExportPermit): boolean;
+  /**
+   * Keeps where an export of `permit` that wrote nothing looked for files
+   * (`looked`, real paths), so that saving one of them exports it again;
+   * null once it is exported, and its record says where.
+   */
+  tried(permit: AutoExportPermit, looked: readonly string[] | null): void;
+}
+
+/**
+ * Exports the SVG of the diagram the permission `generation` allows again,
+ * its files having been saved: drawn from the saved files alone, once what
+ * the previews asked for is drawn, and written only to the file recorded as
+ * the diagram's own export, unchanged since — looked at again once no
+ * export in this window is writing it. What shows the permission no longer
+ * holds — the diagram gone or doubled, a term of it otherwise, a file
+ * written but not recorded — ends it.
+ */
+async function exportOnSave(context: OperationContext, deps: SaveExportDeps, generation: string): Promise<SyncOutcome> {
+  const { l10n } = context;
+  const permit = deps.permits.all().find((each) => each.generation === generation);
+  if (permit === undefined || !deps.allowed(permit)) {
+    return { state: 'skipped' };
+  }
+  const { key, output } = permit;
+  const name = key.name;
+  const uri = vscode.Uri.parse(key.documentUri);
+  const documentName = deps.workspace.relativePath(uri);
+  const svgFile = deps.workspace.relativePath(vscode.Uri.parse(output));
+  const stop = (state: 'blocked' | 'conflict', reason: string, text: string, offer?: SyncStop['offer']): SyncOutcome => {
+    const message = l10n.t('SVG auto export skipped {0}. {1}', name, text);
+    context.logger.warn(message);
+    return { state, reason, name, message, ...(offer === undefined ? {} : { offer }) };
+  };
+  const end = async (reason: string, text: string): Promise<SyncOutcome> => {
+    await deps.permits.remove(key, generation, (error) => {
+      context.logger.warn(
+        l10n.t('Could not save the SVG auto export permissions. Details: {0}', error instanceof Error ? error.message : String(error))
+      );
+    });
+    const message = l10n.t('SVG auto export ended for {0}. {1}', name, text);
+    context.logger.warn(message);
+    return { state: 'disabled', reason, name, message };
+  };
+  // Not written this time, which the next save takes care of: nothing is told.
+  const later = (text: string): SyncOutcome => {
+    context.logger.info(l10n.t('SVG auto export skipped {0} this time. {1}', name, text));
+    return { state: 'stale' };
+  };
+
+  // The document as saved: an editor's text when it has no unsaved changes, else the file.
+  const open = vscode.workspace.textDocuments.find((document) => document.uri.toString() === key.documentUri);
+  if (open?.isDirty === true) {
+    return later(l10n.t('{0} has unsaved changes: it is exported once they are saved.', documentName));
+  }
+  let text: string;
+  try {
+    text = open?.getText() ?? new TextDecoder().decode(await vscode.workspace.fs.readFile(uri));
+  } catch (error: unknown) {
+    return error instanceof vscode.FileSystemError && error.code === 'FileNotFound'
+      ? end('gone', goneText(l10n, documentName, 0))
+      : stop('blocked', 'unreadable', l10n.t('{0} could not be read: {1}', documentName, error instanceof Error ? error.message : String(error)));
+  }
+  const found = diagramsInText(uri, key.container, text).filter((block) => block.nameBasis === key.nameBasis && block.name === name);
+  const block = found[0];
+  if (found.length !== 1 || block === undefined) {
+    return end(found.length === 0 ? 'gone' : 'doubled', goneText(l10n, documentName, found.length));
+  }
+
+  // The terms the permission was given under, as they are now.
+  const values = deps.settings.read({ resource: uri }).values;
+  const exportTheme = values[CONFIG.EXPORT_THEME];
+  const palette: Palette | null = exportTheme === 'light' || exportTheme === 'dark' ? exportTheme : null;
+  const directory = String(values[CONFIG.EXPORT_DIRECTORY]);
+  // Drawn from the saved files alone.
+  const snapshot = new ReadSnapshot(scanText, { savedOnly: true });
+  const exporter = exporterDeps(context, deps.renderer, deps.palettes, deps.settings, deps.exports, deps.workspace, uri, snapshot);
+  const planned = checkRelativePath(directory) === undefined ? planDiagram(exporter, key.documentUri, directory, block, name, 'svg') : null;
+  const plan = planned !== null && 'block' in planned ? planned : null;
+  const includePaths = (each: vscode.Uri): unknown => includePathsOf(deps.settings, each);
+  const { access } = await accessFor(uri, { includePaths });
+  const identity = await exporter.rendererIdentity();
+  if (identity === null) {
+    return stop('blocked', 'renderer', autoExportRefusalText(l10n, deps.workspace, { why: 'renderer' }));
+  }
+  const changed = changedTerms(permit, {
+    output: plan?.path ?? '',
+    root: vscode.workspace.getWorkspaceFolder(uri)?.uri.toString() ?? '',
+    context: contextOf(access),
+    includePaths: canonicalJson(includePaths(uri)),
+    renderer: { engine: identity.engine, build: identity.build, contract: RENDER_CONTRACT },
+    palette: palette ?? permit.palette,
+  });
+  if (palette === null) {
+    changed.push('palette');
+  }
+  if (changed.length > 0 || plan === null) {
+    return end(
+      'terms',
+      l10n.t('What it was allowed under changed: {0}. Allow it again to go on.', changed.map((term) => permitTermText(l10n, term)).join(', '))
+    );
+  }
+
+  const drawn = await drawAutoExport(exporter, key.documentUri, { ...plan, key });
+  // Drawing takes a while: taken back meanwhile, the permission has nothing more to say.
+  if (!deps.allowed(permit)) {
+    return { state: 'skipped' };
+  }
+  const looked = snapshot.looked();
+  const unsaved = snapshot.unsaved();
+  if (unsaved.length > 0) {
+    deps.tried(permit, looked);
+    return later(
+      l10n.t(
+        'Files it is drawn from have unsaved changes: {0}. It is exported once they are saved.',
+        unsaved.map((path) => deps.workspace.relativePath(vscode.Uri.file(path))).join(', ')
+      )
+    );
+  }
+  if (!('content' in drawn)) {
+    deps.tried(permit, looked);
+    const listed = open !== undefined && isDiagramFile(open) && values[CONFIG.DIAGNOSTICS_ENABLED] !== false;
+    return stop(
+      'blocked',
+      drawn.why === 'export' ? `export:${drawn.result.cause ?? 'none'}` : drawn.why,
+      autoExportRefusalText(l10n, deps.workspace, drawn),
+      drawn.why === 'export' && drawn.result.cause === 'source' ? { problems: listed } : undefined
+    );
+  }
+
+  // Only the diagram's own export, unchanged since, is written: nothing
+  // else is taken for it, and a file that is gone is not made again.
+  const exportAt = { export: { uri: key.documentUri, line: block.openLine } };
+  const outputLook = lookAtOutput(key, await readOutputFile(output, FRESHNESS_LIMITS.bytes), isDirtyAt(output), deps.exports.ownerOf(output), null);
+  if (!('sha256' in outputLook) || outputLook.owner === null) {
+    deps.tried(permit, looked);
+    const refusal: OutputRefusal = 'why' in outputLook ? outputLook : { why: 'unrecorded' };
+    const conflict = refusal.why === 'owner' || refusal.why === 'edited' || refusal.why === 'unrecorded';
+    return stop(
+      conflict ? 'conflict' : 'blocked',
+      `output:${refusal.why}`,
+      syncOutputText(l10n, deps.workspace, refusal, svgFile),
+      refusal.why === 'missing' || refusal.why === 'edited' || refusal.why === 'unrecorded' ? exportAt : undefined
+    );
+  }
+  let committed: AutoExportCommit;
+  try {
+    committed = await commitAutoExport(exporter, drawn, { sha256: outputLook.sha256, owner: outputLook.owner }, () => deps.allowed(permit));
+  } catch (error: unknown) {
+    deps.tried(permit, looked);
+    return stop('blocked', 'write', l10n.t('{0} could not be written: {1}', svgFile, error instanceof Error ? error.message : String(error)));
+  }
+  switch (committed.outcome) {
+    case 'written':
+      if (committed.recorded !== 'recorded') {
+        deps.tried(permit, looked);
+        return end('untracked', untrackedText(l10n, committed.recorded, svgFile));
+      }
+      deps.tried(permit, null);
+      context.logger.info(l10n.t('Exported {0} for {1} on save.', svgFile, name));
+      return { state: 'current', written: true };
+    case 'unchanged':
+      // Its record says where the files it was drawn from are looked for
+      // once it takes this drawing's.
+      deps.tried(permit, committed.recorded === null || committed.recorded === 'recorded' ? null : looked);
+      context.logger.info(l10n.t('{0} already holds {1} as saved.', svgFile, name));
+      return { state: 'current', written: false };
+    case 'ended':
+      return { state: 'skipped' };
+    case 'overtaken':
+      return later(l10n.t('{0} was exported meanwhile by another export of the diagram, which is left as it is.', svgFile));
+    case 'stale':
+      deps.tried(permit, looked);
+      return later(committed.message);
+    case 'dirty':
+      return stop('blocked', 'output:dirty', syncOutputText(l10n, deps.workspace, { why: 'dirty' }, svgFile));
+    case 'missing':
+      return stop('blocked', 'output:missing', syncOutputText(l10n, deps.workspace, { why: 'missing' }, svgFile), exportAt);
+    case 'changed':
+      return stop(
+        'conflict',
+        'output:changed',
+        l10n.t('{0} changed while it was exported, so it is not overwritten. Export the diagram as SVG to overwrite it, which asks first.', svgFile),
+        exportAt
+      );
+  }
+}
+
+/** How many diagrams a notice of SVG files not exported on save names; past that, it ends in an ellipsis. */
+const STOPS_NAMED = 5;
+
+/**
+ * Tells what stopped the SVG files exported on save: one diagram's in its
+ * own words, with what to do about it; more by their names, the words in
+ * the Output panel.
+ */
+async function tellStops(context: OperationContext, stops: readonly SyncStop[]): Promise<void> {
+  const [only] = stops;
+  if (only === undefined) {
+    return;
+  }
+  if (stops.length === 1) {
+    const offer = only.offer;
+    const action =
+      offer === undefined
+        ? outputButton(context)
+        : 'export' in offer
+          ? exportSvgAtButton(context, offer.export)
+          : offer.problems
+            ? problemsButton(context)
+            : outputButton(context);
+    await notifyWith(context, 'warn', only.message, [action]);
+    return;
+  }
+  // By name, not in the order the exports ended, which the file system's
+  // answers to the saves before them can shuffle: the same diagrams are
+  // named alike each time, past five the same five.
+  const names = stops.map((stop) => stop.name).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  const listed = names.slice(0, STOPS_NAMED).join(', ') + (names.length > STOPS_NAMED ? ', …' : '');
+  await notifyWith(
+    context,
+    'warn',
+    context.l10n.t('SVG auto export stopped for {0} diagrams: {1}. See the Output panel for why.', String(stops.length), listed),
+    [outputButton(context)]
+  );
 }
 
 /**
@@ -3985,6 +4284,154 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
           ? l10n.t('SVG auto export is disabled for {0}. Its SVG file is left as it is.', only.key.name)
           : l10n.t('SVG auto export is disabled for {0} diagrams. Their SVG files are left as they are.', String(chosen.length))
       );
+    },
+  });
+
+  module.raw.register({
+    id: 'plantuml.autoExport',
+    inject: {
+      operations: Operations,
+      renderer: Renderer,
+      palettes: Palettes,
+      settings: Settings.token,
+      exports: Exports,
+      permits: Permits,
+      workspace: Workspace,
+      l10n: Localization,
+    },
+    bind: ({ registrations, logger }, { operations, renderer, palettes, settings, exports, permits, workspace, l10n }): undefined => {
+      // Exports the SVG file of each diagram allowed to (Enable SVG Auto
+      // Export for Diagram) again once its document, or a file it includes,
+      // is saved — VS Code's save, Auto Save among them: an edit, a change on
+      // disk, starting up or a theme changing exports nothing. Only while
+      // automatic export is turned on, on this computer, and the workspace is
+      // trusted; turned on again, it starts at the next save.
+      let stopped = false;
+      const enabled = (): boolean => settings.read().values[CONFIG.AUTO_EXPORT_ENABLED] === true;
+      const tried = new Map<string, readonly string[]>();
+      const told = new Map<string, string>();
+      const deps: SaveExportDeps = {
+        renderer: {
+          // Behind what the previews asked for meanwhile, so that typing
+          // does not wait for exports.
+          draw: async (source, dark, load) => {
+            await renderer.whenIdle();
+            if (stopped) {
+              throw new Error('Extension deactivated');
+            }
+            return renderer.draw(source, dark, load);
+          },
+        },
+        palettes,
+        settings,
+        exports,
+        permits,
+        workspace,
+        allowed: (permit) =>
+          !stopped && enabled() && vscode.workspace.isTrusted && permits.of(permit.key)?.generation === permit.generation,
+        tried: (permit, looked): void => {
+          if (looked === null) {
+            tried.delete(permit.generation);
+          } else {
+            tried.set(permit.generation, looked);
+          }
+        },
+      };
+      const sync = new SaveSync(
+        AUTO_EXPORT_DELAY_MS,
+        (generation) => operations.run('plantumlLocal.autoExport', (context) => exportOnSave(context, deps, generation)),
+        (outcomes) => {
+          const stops = stopsToTell(outcomes, told);
+          if (stops.length > 0) {
+            void operations.run('plantumlLocal.autoExport.notice', (context) => tellStops(context, stops)).catch(() => undefined);
+          }
+        },
+        (generation, error) => {
+          const name = permits.all().find((permit) => permit.generation === generation)?.key.name ?? '';
+          const message = l10n.t('SVG auto export skipped {0}. {1}', name, error instanceof Error ? error.message : String(error));
+          logger.error(message, error);
+          return { state: 'blocked', reason: 'error', name, message };
+        }
+      );
+      // Where saving a file exports a diagram's SVG again: where its last
+      // export looked for the files it includes, and where one since that
+      // wrote nothing looked.
+      const watched = (permit: AutoExportPermit): Set<string> => {
+        const owner = exports.ownerOf(permit.output);
+        const input = owner !== null && sameKey(owner.key, permit.key) ? owner.input : undefined;
+        return watchedFiles(input, tried.get(permit.generation) ?? [], (path) => pathKey(path));
+      };
+      const onSave = async (document: vscode.TextDocument): Promise<void> => {
+        const all = permits.all();
+        if (stopped || all.length === 0 || document.uri.scheme !== 'file') {
+          return;
+        }
+        const saved = document.uri.toString();
+        // An SVG file exported on save, open as text and saved, is no
+        // diagram's file: writing it is not taken for a save either.
+        if (all.some((permit) => permit.output.toLowerCase() === saved.toLowerCase())) {
+          return;
+        }
+        // Looked at on every save, whether automatic export is on or not: a
+        // diagram removed, or one another now shares the name of, loses its
+        // permission, so that a diagram given the name later is not
+        // exported under it.
+        const text = document.getText();
+        for (const permit of all.filter((each) => each.key.documentUri === saved)) {
+          const { key } = permit;
+          const count = diagramsInText(document.uri, key.container, text).filter(
+            (block) => block.nameBasis === key.nameBasis && block.name === key.name
+          ).length;
+          if (count !== 1) {
+            await permits.remove(key, permit.generation, (error) => {
+              logger.warn(l10n.t('Could not save the SVG auto export permissions. Details: {0}', error instanceof Error ? error.message : String(error)));
+            });
+            const message = l10n.t('SVG auto export ended for {0}. {1}', key.name, goneText(l10n, workspace.relativePath(document.uri), count));
+            logger.warn(message);
+            sync.note(permit.generation, { state: 'disabled', reason: count === 0 ? 'gone' : 'doubled', name: key.name, message });
+          }
+        }
+        if (!enabled() || !vscode.workspace.isTrusted) {
+          return;
+        }
+        // A file is found by its real path, as the includes look for them.
+        const path = document.uri.fsPath;
+        const keys = new Set([pathKey(path), pathKey(await realpath(path).catch(() => path))]);
+        for (const permit of permits.all()) {
+          if (permit.key.documentUri === saved || [...watched(permit)].some((file) => keys.has(file))) {
+            sync.schedule(permit.generation);
+          }
+        }
+      };
+      registrations.own(
+        vscode.workspace.onDidSaveTextDocument((document) => {
+          void onSave(document);
+        })
+      );
+      // A permission taken back, or given again: what was due under the one before goes.
+      registrations.own(
+        permits.onDidChange(() => {
+          const live = new Set(permits.all().map((permit) => permit.generation));
+          sync.retain((generation) => live.has(generation));
+          for (const generation of [...tried.keys()]) {
+            if (!live.has(generation)) {
+              tried.delete(generation);
+            }
+          }
+        })
+      );
+      registrations.own(
+        settings.watch(CONFIG.AUTO_EXPORT_ENABLED, undefined, () => {
+          if (!enabled()) {
+            sync.retain(() => false);
+          }
+        })
+      );
+      registrations.defer(() => {
+        stopped = true;
+        sync.dispose();
+      });
+      return undefined;
     },
   });
 
