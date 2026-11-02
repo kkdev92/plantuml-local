@@ -89,6 +89,20 @@ describe('ReadSnapshot', () => {
     expect(snapshot.delivered(join(root, 'docs', 'never.puml'))).toBeUndefined();
   });
 
+  it('reads saved files only when asked to, and keeps each file noted as open with unsaved changes once, in the order noted', () => {
+    const other = join(root, 'docs', 'other.puml');
+    expect(new ReadSnapshot(nothing).savedOnly).toBe(false);
+    expect(new ReadSnapshot(nothing, {}).savedOnly).toBe(false);
+    const snapshot = new ReadSnapshot(nothing, { savedOnly: true });
+
+    expect(snapshot.savedOnly).toBe(true);
+    expect(snapshot.unsaved()).toEqual([]);
+    snapshot.noteUnsaved(other);
+    snapshot.noteUnsaved(common);
+    snapshot.noteUnsaved(other);
+    expect(snapshot.unsaved()).toEqual([other, common]);
+  });
+
   it('looks up where the diagrams of a document look for their files once', async () => {
     const snapshot = new ReadSnapshot(nothing);
     const look = vi.fn(() => Promise.resolve({ access, folder: root }));

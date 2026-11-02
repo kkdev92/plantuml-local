@@ -14,7 +14,7 @@ const fake = vi.hoisted(() => {
   const state = {
     trusted: true,
     folder: '',
-    open: [] as { uri: { scheme: string; fsPath: string }; getText(): string }[],
+    open: [] as { uri: { scheme: string; fsPath: string }; isDirty?: boolean; getText(): string }[],
   };
   const file = (fsPath: string): { scheme: string; fsPath: string; toString(): string } => ({
     scheme: 'file',
@@ -164,5 +164,63 @@ describe('drawInDocuments', () => {
       files: [],
     });
     expect(refused.inputs?.requests.map(({ outcome }) => outcome)).toEqual(['path:absolute', 'outside']);
+  });
+
+  describe('drawn from saved files alone', () => {
+    it('reads a file open with unsaved changes as saved, from disk, and notes it', async () => {
+      fake.state.open = [{ uri: fake.file(common), isDirty: true, getText: () => 'Edited -> Text\n' }];
+      const snapshot = new ReadSnapshot(nothing, { savedOnly: true });
+
+      const drawn = await drawInDocuments(asking('common.puml'), host, snapshot)(diagram, false, document);
+
+      expect(drawn.svg).toBe('<svg>Alice -> Bob\n</svg>');
+      expect(drawn.inputs?.files).toEqual([{ file: common, sha256: hash('Alice -> Bob\n'), origin: 'disk', findings: [] }]);
+      expect(snapshot.unsaved()).toEqual([common]);
+    });
+
+    it('reads a file open without unsaved changes as the editor has it, and notes nothing', async () => {
+      fake.state.open = [{ uri: fake.file(common), isDirty: false, getText: () => 'Saved -> As opened\n' }];
+      const snapshot = new ReadSnapshot(nothing, { savedOnly: true });
+
+      const drawn = await drawInDocuments(asking('common.puml'), host, snapshot)(diagram, false, document);
+
+      expect(drawn.inputs?.files).toEqual([{ file: common, sha256: hash('Saved -> As opened\n'), origin: 'editor', findings: [] }]);
+      expect(snapshot.unsaved()).toEqual([]);
+    });
+
+    it('notes a place found empty that an editor has a file for, with unsaved changes', async () => {
+      const gone = join(docs, 'gone.puml');
+      fake.state.open = [{ uri: fake.file(gone), isDirty: true, getText: () => 'New -> File\n' }];
+      const snapshot = new ReadSnapshot(nothing, { savedOnly: true });
+
+      const drawn = await drawInDocuments(asking('gone.puml'), host, snapshot)('@startuml\n!include gone.puml\n@enduml', false, document);
+
+      expect(drawn.inputs?.requests.map(({ outcome }) => outcome)).toEqual(['missing:searched']);
+      expect(snapshot.unsaved()).toEqual([gone]);
+    });
+
+    it('notes a file it read that an editor changed before the drawing ended, though the drawing failed', async () => {
+      const snapshot = new ReadSnapshot(nothing, { savedOnly: true });
+      const renderer: Renderer = {
+        draw: vi.fn(async (_source: string, _dark: boolean, load?: IncludeLoader) => {
+          await load?.('common.puml', null, 'include');
+          fake.state.open = [{ uri: fake.file(common), isDirty: true, getText: () => 'Edited -> Meanwhile\n' }];
+          throw new Error('the engine stopped');
+        }),
+      };
+
+      await expect(drawInDocuments(renderer, host, snapshot)(diagram, false, document)).rejects.toThrow('the engine stopped');
+      expect(snapshot.unsaved()).toEqual([common]);
+    });
+
+    it('reads a file open with unsaved changes as the editor has it, and notes nothing, for an export asked for', async () => {
+      fake.state.open = [{ uri: fake.file(common), isDirty: true, getText: () => 'Edited -> Text\n' }];
+      const snapshot = new ReadSnapshot(nothing);
+
+      const drawn = await drawInDocuments(asking('common.puml'), host, snapshot)(diagram, false, document);
+
+      expect(drawn.inputs?.files).toEqual([{ file: common, sha256: hash('Edited -> Text\n'), origin: 'editor', findings: [] }]);
+      expect(snapshot.unsaved()).toEqual([]);
+    });
   });
 });

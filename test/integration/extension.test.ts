@@ -6,7 +6,7 @@ import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import MarkdownIt from 'markdown-it';
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { createContextStub, type ContextStub } from './helpers/context-stub';
 import {
@@ -6945,3 +6945,462 @@ describe('viewer (dist)', () => {
     });
   });
 });
+
+describe('allowing SVG auto export (dist)', () => {
+  const ENABLE = 'plantumlLocal.enableSvgAutoExport';
+  const DISABLE = 'plantumlLocal.disableSvgAutoExport';
+  /** A named diagram that says `label`. */
+  const diagram = (name: string, label = 'hi'): string => ['```plantuml ' + name, '@startuml', `Alice -> Bob : ${label}`, '@enduml', '```'].join('\n');
+  interface StoredPermit {
+    key: { documentUri: string; name: string; format: string };
+    output: string;
+    root: string;
+    context: unknown;
+    includePaths: string;
+    renderer: { engine: string; build: string; contract: number };
+    palette: string;
+    generation: string;
+  }
+  /** The permissions as stored, or undefined when none were. */
+  const stored = (): { schemaVersion: number; permits: StoredPermit[] } | undefined =>
+    (context.workspaceState.get('svgAutoExport') as { value: { schemaVersion: number; permits: StoredPermit[] } } | undefined)?.value;
+  /** A permission for a diagram of its own, as this version stores one. */
+  const permitFor = (index: number): StoredPermit & { key: Record<string, unknown> } => ({
+    key: {
+      documentUri: `file:///c/auto-many/d${String(index)}.md`,
+      container: 'markdown',
+      nameBasis: 'fence',
+      name: `d${String(index)}`,
+      childId: null,
+      page: null,
+      format: 'svg',
+    },
+    output: `file:///c/auto-many/images/d${String(index)}.svg`,
+    root: 'file:///c',
+    context: null,
+    includePaths: '[]',
+    renderer: { engine: '1.2026.9', build: 'a'.repeat(64), contract: 1 },
+    palette: 'light',
+    generation: index.toString(16).padStart(32, '0'),
+  });
+  const run = async (id: string, editor: TextEditorStub | undefined): Promise<void> => {
+    vscodeStub._test.setActiveEditor(editor);
+    await vscodeStub._test.registeredCommands.get(id)?.();
+  };
+  /** Exports the diagram at the cursor of `editor` as SVG. */
+  const exportSvg = (editor: TextEditorStub): Promise<void> => run('plantumlLocal.exportSvg', editor);
+  /**
+   * Allows SVG auto export for the diagram at the cursor of `editor`,
+   * answering the question with `reply`: the questions asked, and the
+   * messages shown besides.
+   */
+  const enable = async (
+    editor: TextEditorStub,
+    reply: string | null = 'Allow'
+  ): Promise<{ modals: { message: string; detail: string | undefined; buttons: string[] }[]; info: string[]; warn: string[]; error: string[] }> => {
+    const { info, warn, error } = vscodeStub._test.notifications;
+    const before = { modals: vscodeStub._test.modals.length, info: info.length, warn: warn.length, error: error.length };
+    vscodeStub._test.messageReply = reply;
+    try {
+      await run(ENABLE, editor);
+    } finally {
+      vscodeStub._test.messageReply = null;
+    }
+    const modals = vscodeStub._test.modals.slice(before.modals);
+    // A question is a warning too: not counted twice.
+    const questions = new Set(modals.map((modal) => modal.message));
+    return {
+      modals,
+      info: info.slice(before.info),
+      warn: warn.slice(before.warn).filter((message) => !questions.has(message)),
+      error: error.slice(before.error),
+    };
+  };
+  /** Disables SVG auto export with `editor` the active one, picking `reply` if asked: the lists shown, and the messages. */
+  const disable = async (
+    editor: TextEditorStub | undefined,
+    reply: string | null = null
+  ): Promise<{ shown: { title: string | undefined; labels: string[] }[]; info: string[]; warn: string[] }> => {
+    const { info, warn } = vscodeStub._test.notifications;
+    const before = { picks: vscodeStub._test.quickPicksShown.length, info: info.length, warn: warn.length };
+    vscodeStub._test.quickPickReply = reply;
+    try {
+      await run(DISABLE, editor);
+    } finally {
+      vscodeStub._test.quickPickReply = null;
+    }
+    return { shown: vscodeStub._test.quickPicksShown.slice(before.picks), info: info.slice(before.info), warn: warn.slice(before.warn) };
+  };
+  const refusal = (name: string, reason: string): string => `SVG auto export cannot be allowed for ${name}. ${reason}`;
+  const turnedOff = 'Automatic export is turned off on this computer: nothing is exported until it is turned on in Settings.';
+  const allowedButOff = (name: string): string =>
+    `SVG auto export is allowed for ${name}, but automatic export is turned off on this computer. Turn it on in Settings to start.`;
+
+  afterEach(async () => {
+    await context.workspaceState.update('svgAutoExport', undefined);
+    vscodeStub.workspace.isTrusted = true;
+    vscodeStub._test.notificationReply = null;
+  });
+
+  it('allows it for a diagram exported as SVG, after saying what it does, and writes no file', async () => {
+    const editor = makeEditor('file:///c/auto-allow/doc.md', `# Design\n\n${diagram('orders')}`, 3);
+    await exportSvg(editor);
+    const writes = vscodeStub._test.fileWrites.length;
+    const logs = vscodeStub._test.logs.length;
+
+    const { modals, info, warn } = await enable(editor);
+
+    expect(modals).toEqual([
+      {
+        message: 'Allow SVG auto export for orders?',
+        detail: [
+          [
+            'Diagram: orders',
+            'Document: auto-allow/doc.md',
+            'Workspace folder: /c',
+            'SVG file: /c/auto-allow/images/orders.svg',
+            'Palette: light',
+          ].join('\n'),
+          'Each time the document or a file it includes is saved, the SVG file is exported again: drawn from the saved files alone, ' +
+            'and only while the diagram draws without errors, the same way each time, and the file is as it was last exported. ' +
+            'Otherwise the file is left as it is, and you are told.',
+          'The permission is kept with the state of this workspace in VS Code on this computer, not on the remote machine in a remote window, ' +
+            'and is neither synced nor written to the repository. It ends once the SVG file, the workspace folder, where included files are ' +
+            'looked for, the plantumlLocal.includePaths setting, the palette or the renderer changes: allow it again then.',
+          turnedOff,
+        ].join('\n\n'),
+        buttons: ['Allow'],
+      },
+    ]);
+    expect(warn).toEqual([]);
+    expect(info).toEqual([allowedButOff('orders')]);
+    expect(stored()).toEqual({
+      schemaVersion: 1,
+      permits: [
+        {
+          key: { documentUri: 'file:///c/auto-allow/doc.md', container: 'markdown', nameBasis: 'fence', name: 'orders', childId: null, page: null, format: 'svg' },
+          output: 'file:///c/auto-allow/images/orders.svg',
+          root: 'file:///c',
+          context: expect.anything() as unknown,
+          includePaths: expect.any(String) as unknown,
+          renderer: rendererOf(recordOf('file:///c/auto-allow/images/orders.svg')),
+          palette: 'light',
+          generation: expect.stringMatching(/^[0-9a-f]{32}$/) as unknown,
+        },
+      ],
+    });
+    expect(vscodeStub._test.fileWrites).toHaveLength(writes);
+    expect(vscodeStub._test.logs.slice(logs).map((line) => line.replace(/ \{"application":.*\}$/, ''))).toContain(
+      'info: SVG auto export is allowed for orders in auto-allow/doc.md, to file:///c/auto-allow/images/orders.svg.'
+    );
+  });
+
+  it('says a diagram is allowed already under the same terms, and asks again to replace one given in another palette', async () => {
+    const editor = makeEditor('file:///c/auto-again/doc.md', diagram('orders'), 1);
+    await exportSvg(editor);
+    await enable(editor);
+    const first = stored()?.permits[0]?.generation;
+
+    expect(await enable(editor)).toEqual({
+      modals: [],
+      info: ['SVG auto export is already allowed for orders, but automatic export is turned off on this computer. Turn it on in Settings to start.'],
+      warn: [],
+      error: [],
+    });
+    vscodeStub._test.setConfiguration('autoExport.enabled', true);
+    try {
+      expect((await enable(editor)).info).toEqual(['SVG auto export is already allowed for orders.']);
+      vscodeStub._test.setConfiguration('exportTheme', 'dark');
+      const { modals, info } = await enable(editor);
+      expect(modals[0]?.detail).toContain('Palette: dark');
+      expect(modals[0]?.detail?.split('\n\n').at(-1)).toBe('This replaces the permission given before, which differs in the palette.');
+      expect(info).toEqual(['SVG auto export is allowed for orders: saving its files exports auto-again/images/orders.svg again.']);
+      expect(stored()?.permits).toMatchObject([{ palette: 'dark' }]);
+      expect(stored()?.permits[0]?.generation).not.toBe(first);
+    } finally {
+      vscodeStub._test.setConfiguration('exportTheme', undefined);
+      vscodeStub._test.setConfiguration('autoExport.enabled', undefined);
+    }
+  });
+
+  it('gives none when the question is not answered', async () => {
+    const editor = makeEditor('file:///c/auto-declined/doc.md', diagram('orders'), 1);
+    await exportSvg(editor);
+
+    const { modals, info, warn } = await enable(editor, null);
+
+    expect(modals).toHaveLength(1);
+    expect([info, warn]).toEqual([[], []]);
+    expect(stored()).toBeUndefined();
+  });
+
+  it('refuses in Restricted Mode, offering to manage trust', async () => {
+    const editor = makeEditor('file:///c/auto-trust/doc.md', diagram('orders'), 1);
+    await exportSvg(editor);
+    vscodeStub.workspace.isTrusted = false;
+    vscodeStub._test.notificationReply = 'Manage Workspace Trust';
+    const calls = vscodeStub._test.commandCalls.length;
+
+    const { modals, warn } = await enable(editor);
+
+    expect(modals).toEqual([]);
+    expect(warn).toEqual(['SVG auto export is unavailable in Restricted Mode. Trust this workspace to use it.']);
+    expect(vscodeStub._test.commandCalls.slice(calls).map(({ id }) => id)).toContain('workbench.trust.manage');
+    expect(stored()).toBeUndefined();
+  });
+
+  it('refuses a diagram without a name of its own, offering to name it where it is', async () => {
+    const text = ['# Design', '', '```plantuml', '@startuml', 'Alice -> Bob : hi', '@enduml', '```'].join('\n');
+    const editor = makeEditor('file:///c/auto-unnamed/doc.md', text, 3);
+    vscodeStub._test.notificationReply = 'Name Diagram…';
+    const calls = vscodeStub._test.commandCalls.length;
+    const shown = vscodeStub._test.shownDocuments.length;
+
+    const { modals, warn } = await enable(editor);
+
+    expect(modals).toEqual([]);
+    expect(warn).toEqual(['Name the diagram first: SVG auto export is only for a diagram with a name of its own, which ties it to its SVG file.']);
+    expect(vscodeStub._test.shownDocuments.slice(shown)).toEqual([{ uri: 'file:///c/auto-unnamed/doc.md', line: 2 }]);
+    expect(vscodeStub._test.commandCalls.slice(calls)).toContainEqual({
+      id: 'plantumlLocal.assignDiagramName',
+      args: ['file:///c/auto-unnamed/doc.md', 2, 1],
+    });
+  });
+
+  it("refuses a diagram drawn in the preview's palette, or with unsaved changes, before drawing it", async () => {
+    const editor = makeEditor('file:///c/auto-refused/doc.md', diagram('orders'), 1);
+    await exportSvg(editor);
+    vscodeStub._test.setConfiguration('exportTheme', 'preview');
+    try {
+      expect((await enable(editor)).warn).toEqual([
+        refusal('orders', "It would be drawn in the preview's palette: set plantumlLocal.exportTheme to light or dark to use it."),
+      ]);
+    } finally {
+      vscodeStub._test.setConfiguration('exportTheme', undefined);
+    }
+    Object.assign(editor.document, { isDirty: true });
+
+    const { modals, warn } = await enable(editor);
+
+    expect(modals).toEqual([]);
+    expect(warn).toEqual([refusal('orders', 'Save auto-refused/doc.md first: what is exported on save is drawn from saved files only.')]);
+    expect(stored()).toBeUndefined();
+  });
+
+  it('refuses a diagram not exported yet, or whose SVG file changed since, offering to export it', async () => {
+    const editor = makeEditor('file:///c/auto-missing/doc.md', diagram('orders'), 1);
+    const target = 'file:///c/auto-missing/images/orders.svg';
+    vscodeStub._test.notificationReply = 'Export as SVG';
+    const calls = vscodeStub._test.commandCalls.length;
+
+    expect((await enable(editor)).warn).toEqual([
+      refusal('orders', 'auto-missing/images/orders.svg is not there. Export the diagram as SVG first: saving only keeps an exported file up to date.'),
+    ]);
+    expect(vscodeStub._test.commandCalls.slice(calls)).toContainEqual({
+      id: 'plantumlLocal.exportSvg',
+      args: [{ uri: 'file:///c/auto-missing/doc.md', line: 0 }],
+    });
+    vscodeStub._test.notificationReply = null;
+    await exportSvg(editor);
+    vscodeStub._test.writtenFiles.set(target, '<svg>edited</svg>');
+    vscodeStub._test.writtenBytes.delete(target);
+
+    expect((await enable(editor)).warn).toEqual([
+      refusal('orders', 'auto-missing/images/orders.svg changed after it was exported. Export the diagram as SVG first, which asks before overwriting it.'),
+    ]);
+    expect(stored()).toBeUndefined();
+  });
+
+  it("refuses a diagram whose SVG file is another diagram's export, or open with unsaved changes", async () => {
+    const first = makeEditor('file:///c/auto-shared/first.md', diagram('orders'), 1);
+    const second = makeEditor('file:///c/auto-shared/second.md', diagram('orders', 'other'), 1);
+    const target = 'file:///c/auto-shared/images/orders.svg';
+    await exportSvg(first);
+
+    expect((await enable(second)).warn).toEqual([
+      refusal(
+        'orders',
+        'auto-shared/images/orders.svg is recorded as the image of orders in auto-shared/first.md. Give this diagram another name, or use separate export folders.'
+      ),
+    ]);
+    const open = Object.assign(makeEditor(target, vscodeStub._test.writtenFiles.get(target)!, 0, { languageId: 'xml' }).document, { isDirty: true });
+    vscodeStub._test.openDocuments.push(open);
+    try {
+      expect((await enable(first)).warn).toEqual([
+        refusal('orders', 'auto-shared/images/orders.svg is open with unsaved changes. Save or revert it first.'),
+      ]);
+    } finally {
+      vscodeStub._test.openDocuments.splice(vscodeStub._test.openDocuments.indexOf(open), 1);
+    }
+    expect(stored()).toBeUndefined();
+  });
+
+  it('takes an SVG file no record names that holds just what the diagram draws for its export once allowed, and no other', async () => {
+    // The same diagram exported from another folder draws the same bytes.
+    const source = makeEditor('file:///c/auto-source/doc.md', diagram('orders'), 1);
+    await exportSvg(source);
+    const bytes = vscodeStub._test.writtenBytes.get('file:///c/auto-source/images/orders.svg')!;
+    const editor = makeEditor('file:///c/auto-adopt/doc.md', diagram('orders'), 1);
+    const target = 'file:///c/auto-adopt/images/orders.svg';
+    vscodeStub._test.writtenFiles.set(target, '<svg>by hand</svg>');
+
+    expect((await enable(editor)).warn).toEqual([
+      refusal(
+        'orders',
+        "auto-adopt/images/orders.svg is not recorded as this diagram's export, and holds something else. Export the diagram as SVG first, which asks before overwriting it."
+      ),
+    ]);
+    vscodeStub._test.writtenFiles.set(target, Buffer.from(bytes).toString('utf8'));
+    vscodeStub._test.writtenBytes.set(target, Uint8Array.from(bytes));
+    const adopted =
+      "auto-adopt/images/orders.svg holds just what the diagram draws, but is not recorded as its export. Allowing records it as the diagram's export, and saving the diagram's files then overwrites it.";
+
+    const declined = await enable(editor, null);
+    expect(declined.modals[0]?.detail?.split('\n\n')).toContain(adopted);
+    expect(recordOf(target)).toBeUndefined();
+    expect(stored()).toBeUndefined();
+
+    const writes = vscodeStub._test.fileWrites.length;
+    const { modals, info } = await enable(editor);
+    expect(modals[0]?.detail?.split('\n\n')).toContain(adopted);
+    expect(info).toEqual([allowedButOff('orders')]);
+    const record = recordOf(target);
+    expect(record?.key).toMatchObject({ documentUri: 'file:///c/auto-adopt/doc.md', name: 'orders', format: 'svg' });
+    expect(record?.sha256).toBe(createHash('sha256').update(bytes).digest('hex'));
+    expect(isInputManifest(record?.input, record!.key)).toBe(true);
+    expect(stored()?.permits.map(({ key, output }) => [key.name, output])).toEqual([['orders', target]]);
+    expect(vscodeStub._test.fileWrites).toHaveLength(writes);
+  });
+
+  it('gives none when the SVG file it would take cannot be recorded as the export, and says so', async () => {
+    const source = makeEditor('file:///c/auto-source2/doc.md', diagram('orders'), 1);
+    await exportSvg(source);
+    const bytes = vscodeStub._test.writtenBytes.get('file:///c/auto-source2/images/orders.svg')!;
+    const editor = makeEditor('file:///c/auto-unrecorded/doc.md', diagram('orders'), 1);
+    const target = 'file:///c/auto-unrecorded/images/orders.svg';
+    vscodeStub._test.writtenFiles.set(target, Buffer.from(bytes).toString('utf8'));
+    vscodeStub._test.writtenBytes.set(target, Uint8Array.from(bytes));
+    const update = context.workspaceState.update.bind(context.workspaceState);
+    const failing = vi
+      .spyOn(context.workspaceState, 'update')
+      .mockImplementation((key, value) => (key === 'exportHistory' ? Promise.reject(new Error('The state could not be saved.')) : update(key, value)));
+    const logs = vscodeStub._test.logs.length;
+    let shown: Awaited<ReturnType<typeof enable>>;
+    try {
+      shown = await enable(editor);
+    } finally {
+      failing.mockRestore();
+    }
+
+    expect(shown.modals).toHaveLength(1);
+    expect(shown.info).toEqual([]);
+    expect(shown.error).toEqual([
+      'SVG auto export was not allowed for orders: auto-unrecorded/images/orders.svg could not be recorded as its export. See the Output panel for why.',
+    ]);
+    expect(vscodeStub._test.logs.slice(logs).some((line) => line.includes('The state could not be saved.'))).toBe(true);
+    expect(recordOf(target)).toBeUndefined();
+    expect(stored()).toBeUndefined();
+  });
+
+  it('gives none when the SVG file changed while asking', async () => {
+    const editor = makeEditor('file:///c/auto-meanwhile/doc.md', diagram('orders'), 1);
+    const target = 'file:///c/auto-meanwhile/images/orders.svg';
+    await exportSvg(editor);
+    const show = vscodeStub.window.showWarningMessage;
+    vscodeStub.window.showWarningMessage = async (...args: unknown[]): Promise<unknown> => {
+      const answer = await show(...args);
+      if ((args[1] as { modal?: boolean } | undefined)?.modal === true) {
+        vscodeStub._test.writtenFiles.set(target, '<svg>edited meanwhile</svg>');
+        vscodeStub._test.writtenBytes.delete(target);
+      }
+      return answer;
+    };
+    try {
+      const { modals, warn } = await enable(editor);
+      expect(modals).toHaveLength(1);
+      expect(warn).toEqual(['orders or its SVG file changed while asking, so SVG auto export was not allowed. Run the command again.']);
+    } finally {
+      vscodeStub.window.showWarningMessage = show;
+    }
+    expect(stored()).toBeUndefined();
+  });
+
+  it('gives no diagram past the 128th a permission, offering to disable another', async () => {
+    await context.workspaceState.update('svgAutoExport', {
+      v: 1,
+      value: { schemaVersion: 1, permits: Array.from({ length: 128 }, (_, index) => permitFor(index)) },
+    });
+    const editor = makeEditor('file:///c/auto-full/doc.md', diagram('orders'), 1);
+    await exportSvg(editor);
+    vscodeStub._test.notificationReply = 'Disable SVG Auto Export…';
+    const calls = vscodeStub._test.commandCalls.length;
+
+    const { modals, warn } = await enable(editor);
+
+    expect(modals).toEqual([]);
+    expect(warn).toEqual([
+      refusal('orders', 'SVG auto export is allowed for 128 diagrams in this workspace, the most it can be. Disable it for another diagram first.'),
+    ]);
+    expect(vscodeStub._test.commandCalls.slice(calls).map(({ id }) => id)).toContain(DISABLE);
+    expect(stored()?.permits).toHaveLength(128);
+  });
+
+  it('leaves the permissions of a later version as they are', async () => {
+    const later = { v: 1, value: { schemaVersion: 2, permits: [{ anything: true }] } };
+    await context.workspaceState.update('svgAutoExport', later);
+    const editor = makeEditor('file:///c/auto-later/doc.md', diagram('orders'), 1);
+    await exportSvg(editor);
+    const message = 'A later version of PlantUML Local keeps the SVG auto export permissions of this workspace, so they are left as they are.';
+
+    expect((await enable(editor)).warn).toEqual([message]);
+    expect((await disable(editor)).warn).toEqual([message]);
+    expect(context.workspaceState.get('svgAutoExport')).toBe(later);
+  });
+
+  it('disables it for the diagram at the cursor, without trust, and leaves its SVG file as it is', async () => {
+    const editor = makeEditor('file:///c/auto-off/doc.md', `${diagram('orders')}\n\n${diagram('billing', 'pay')}`, 1);
+    await exportSvg(editor);
+    await enable(editor);
+    const svg = vscodeStub._test.writtenFiles.get('file:///c/auto-off/images/orders.svg');
+    vscodeStub.workspace.isTrusted = false;
+
+    const { shown, info } = await disable(editor);
+
+    expect(shown).toEqual([]);
+    expect(info).toEqual(['SVG auto export is disabled for orders. Its SVG file is left as it is.']);
+    expect(stored()?.permits).toEqual([]);
+    expect(vscodeStub._test.writtenFiles.get('file:///c/auto-off/images/orders.svg')).toBe(svg);
+  });
+
+  it('disables it for the diagrams picked from all of them, those of the active document first, when the cursor is on none', async () => {
+    const other = makeEditor('file:///c/auto-pick/other.md', diagram('billing', 'pay'), 1);
+    const editor = makeEditor('file:///c/auto-pick/doc.md', `# Design\n\n${diagram('orders')}`, 3);
+    for (const each of [other, editor]) {
+      await exportSvg(each);
+      await enable(each);
+    }
+    editor.selection.active.line = 0;
+
+    const { shown, info } = await disable(editor, 'billing');
+
+    expect(shown).toEqual([{ title: 'Disable SVG Auto Export', labels: ['orders', 'billing'] }]);
+    expect(info).toEqual(['SVG auto export is disabled for billing. Its SVG file is left as it is.']);
+    expect(stored()?.permits.map(({ key }) => key.name)).toEqual(['orders']);
+    // Dismissed, nothing is taken out.
+    expect((await disable(editor, null)).info).toEqual([]);
+    expect(stored()?.permits.map(({ key }) => key.name)).toEqual(['orders']);
+  });
+
+  it('says when no diagram has it to disable', async () => {
+    expect((await disable(undefined)).info).toEqual(['SVG auto export is not allowed for any diagram in this workspace.']);
+  });
+});
+
+/** The renderer a record's inputs were drawn by, as a permission holds it. */
+function rendererOf(record: ArtifactRecord | undefined): { engine: string; build: string; contract: number } {
+  const renderer = record?.input?.renderer;
+  if (renderer === undefined) {
+    throw new Error('no record of what the image was drawn from');
+  }
+  return { engine: renderer.engine, build: renderer.build, contract: renderer.contract };
+}

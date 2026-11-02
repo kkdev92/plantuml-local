@@ -56,18 +56,22 @@ import {
   isValidBlockName,
   type PlantUmlBlock,
 } from './export/blocks';
+import { lookAtOutput, sameLook, type OutputLook, type OutputRefusal } from './export/auto-export';
 import { OutputBuffer } from './export/buffer';
 import {
   MAX_BULK_DIAGRAMS,
   PNG_SCALES,
+  drawAutoExport,
   drawDocument,
   exportAll,
   exportOne,
+  planDiagram,
   planDocument,
   preparePng,
   prepareSvg,
   refuseSharedFiles,
   writeDocuments,
+  type AutoExportRefusal,
   type DrawingDeps,
   type DrawnDocument,
   type ExportFormat,
@@ -78,6 +82,7 @@ import {
 } from './export/exporter';
 import { MAX_DOCUMENTS, findDocuments } from './export/folder';
 import {
+  FRESHNESS_LIMITS,
   checkFreshness,
   type FreshnessDeps,
   type FreshnessReason,
@@ -87,9 +92,18 @@ import {
   type OutputRead,
   type ReferenceProblem,
 } from './export/freshness';
-import { ExportLedger, type ArtifactRecord } from './export/history';
-import { shippedRenderer } from './export/manifest';
+import { ExportLedger, artifactKey, type ArtifactRecord } from './export/history';
+import { canonicalJson, shippedRenderer } from './export/manifest';
 import type { ExportRecords } from './export/ownership';
+import {
+  PERMIT_LIMIT,
+  PermitStore,
+  standingOf,
+  type AutoExportPermit,
+  type PermitResult,
+  type PermitTerm,
+  type PermitTerms,
+} from './export/permits';
 import { recheckInputs, type InputChange } from './export/recheck';
 import { findColors, hexOf, rgbOf } from './core/colors';
 import { splitLines } from './core/lines';
@@ -186,9 +200,9 @@ import { describeIncludeFailure, type IncludeLabels } from './includes/describe'
 import { asWritten, definedWords, includeDirectives } from './includes/directives';
 import { DrawingRecords } from './includes/drawings';
 import { includeCompletions, includeDefinitions } from './includes/editor';
-import { drawInDocuments, openSession, readingNow, type DrawDiagram } from './includes/host';
+import { accessFor, drawInDocuments, openSession, readingNow, type DrawDiagram } from './includes/host';
 import { INCLUDE_EXTENSIONS } from './includes/path-policy';
-import type { IncludeFailure } from './includes/session';
+import { contextOf, type IncludeFailure } from './includes/session';
 import { ReadSnapshot } from './includes/snapshot';
 import { changeTo } from './includes/tracking';
 import { IncludeWatcher } from './includes/watch';
@@ -252,6 +266,10 @@ export const Settings = defineSettings({
     [CONFIG.WORKSPACE_SYMBOLS_EXCLUDE]: setting.stringArray({ default: [], scope: 'resource' }),
     // Resource-scoped, so a folder can leave F2 to the Markdown rename: read per document.
     [CONFIG.RENAME_ENABLED]: setting.boolean({ default: true, scope: 'resource' }),
+    // Machine-scoped: set on each computer, never synced, and not taken from
+    // a workspace's settings. On its own it lets nothing be written: each
+    // diagram is allowed by hand as well (src/export/permits.ts).
+    [CONFIG.AUTO_EXPORT_ENABLED]: setting.boolean({ default: false, scope: 'machine' }),
   },
 });
 
@@ -273,6 +291,18 @@ const ExportedFiles = defineStorage<ExportRecords>({
  */
 const ExportHistory = defineStorage<unknown>({
   key: 'exportHistory',
+  scope: 'workspace',
+  defaultValue: null,
+});
+
+/**
+ * The diagrams whose SVG file may be exported again when their files are
+ * saved, each as allowed by hand, kept in the workspace's state on this
+ * computer (src/export/permits.ts). Taken as stored and checked permission
+ * by permission there, since a later version may have written it.
+ */
+const AutoExportPermits = defineStorage<unknown>({
+  key: 'svgAutoExport',
   scope: 'workspace',
   defaultValue: null,
 });
@@ -327,6 +357,25 @@ export const ExportFolderPng = defineCommandContract<readonly unknown[], void>({
  */
 export const CheckExportFreshness = defineCommandContract<readonly [], void>({
   id: COMMANDS.CHECK_EXPORT_FRESHNESS,
+});
+
+/**
+ * Allows the SVG file of the diagram under the cursor to be exported again
+ * when the diagram's files are saved, once it is shown to be one that can
+ * be and that is confirmed: a permission for that diagram alone
+ * (src/export/permits.ts). Writes no image.
+ */
+export const EnableSvgAutoExport = defineCommandContract<readonly unknown[], void>({
+  id: COMMANDS.ENABLE_SVG_AUTO_EXPORT,
+});
+
+/**
+ * Takes back the permission of the diagram under the cursor, or of those
+ * picked from all the workspace's, to have its SVG file exported again when
+ * its files are saved. The files are left as they are.
+ */
+export const DisableSvgAutoExport = defineCommandContract<readonly unknown[], void>({
+  id: COMMANDS.DISABLE_SVG_AUTO_EXPORT,
 });
 
 /**
@@ -498,6 +547,9 @@ const Renders: ServiceToken<SharedRender> = serviceToken<SharedRender>('plantuml
 
 /** The records of the exports in this window, and the files they are writing. */
 const Exports: ServiceToken<ExportLedger> = serviceToken<ExportLedger>('plantuml.exports');
+
+/** The diagrams whose SVG file may be exported again when their files are saved. */
+const Permits: ServiceToken<PermitStore> = serviceToken<PermitStore>('plantuml.permits');
 
 /** The last drawing of each diagram the shared renders drew for a document, with what it asked for. */
 const Drawings: ServiceToken<DrawingRecords> = serviceToken<DrawingRecords>('plantuml.drawings');
@@ -1617,6 +1669,41 @@ function exporterDeps(
 }
 
 /**
+ * The file at `path`, read through `vscode.workspace.fs`, as the export
+ * reads it: its bytes only when it is a file of at most `limit` bytes. A
+ * link, even a broken one, says so: where it leads is not looked at.
+ */
+async function readOutputFile(path: string, limit: number): Promise<OutputRead> {
+  const failed = (error: unknown): OutputRead =>
+    error instanceof vscode.FileSystemError && error.code === 'FileNotFound'
+      ? { kind: 'none' }
+      : { kind: 'failed', message: error instanceof Error ? error.message : String(error) };
+  const uri = vscode.Uri.parse(path);
+  let stat: vscode.FileStat;
+  try {
+    stat = await vscode.workspace.fs.stat(uri);
+  } catch (error: unknown) {
+    return failed(error);
+  }
+  if ((stat.type & vscode.FileType.SymbolicLink) !== 0) {
+    return { kind: 'link' };
+  }
+  if ((stat.type & vscode.FileType.File) === 0) {
+    return { kind: 'not-file' };
+  }
+  if (stat.size > limit) {
+    return { kind: 'too-large' };
+  }
+  try {
+    const bytes = await vscode.workspace.fs.readFile(uri);
+    // Grown since it was looked at: no more is made of it than of one that size.
+    return bytes.byteLength > limit ? { kind: 'too-large' } : { kind: 'bytes', bytes };
+  } catch (error: unknown) {
+    return failed(error);
+  }
+}
+
+/**
  * What a check of the images exported from `document` reads, and how: the
  * files through `vscode.workspace.fs`, which tells a link from a file, as
  * the export reads them; the records; and the files its diagrams include,
@@ -1630,42 +1717,13 @@ function freshnessDeps(
   document: vscode.Uri,
   signal: AbortSignal
 ): FreshnessDeps {
-  const failed = (error: unknown): OutputRead =>
-    error instanceof vscode.FileSystemError && error.code === 'FileNotFound'
-      ? { kind: 'none' }
-      : { kind: 'failed', message: error instanceof Error ? error.message : String(error) };
   return {
     resolve: (documentPath, relative) => vscode.Uri.joinPath(vscode.Uri.parse(documentPath), '..', relative).toString(),
     recordsOf: (path) => exports.recordsOf(path),
     ownerOf: (path) => exports.ownerOf(path),
     wroteBefore: (path, source, existing) => exports.wroteBefore(path, source, existing),
     isDirty: (path) => vscode.workspace.textDocuments.some((open) => open.isDirty && open.uri.toString() === path),
-    readOutput: async (path, limit): Promise<OutputRead> => {
-      const uri = vscode.Uri.parse(path);
-      let stat: vscode.FileStat;
-      try {
-        stat = await vscode.workspace.fs.stat(uri);
-      } catch (error: unknown) {
-        return failed(error);
-      }
-      // A link, even a broken one, says so: where it leads is not looked at.
-      if ((stat.type & vscode.FileType.SymbolicLink) !== 0) {
-        return { kind: 'link' };
-      }
-      if ((stat.type & vscode.FileType.File) === 0) {
-        return { kind: 'not-file' };
-      }
-      if (stat.size > limit) {
-        return { kind: 'too-large' };
-      }
-      try {
-        const bytes = await vscode.workspace.fs.readFile(uri);
-        // Grown since it was looked at: no more is made of it than of one that size.
-        return bytes.byteLength > limit ? { kind: 'too-large' } : { kind: 'bytes', bytes };
-      } catch (error: unknown) {
-        return failed(error);
-      }
-    },
+    readOutput: (path, limit) => readOutputFile(path, limit),
     rendererIdentity: () => shippedRenderer(__dirname, join(__dirname, '..', 'media', 'png', 'png.js'), HELP_ENGINE),
     isDark: () => exportsDark(settings, document),
     pngScale: () => exportPngScale(settings, document),
@@ -2061,6 +2119,119 @@ function untrackedMessage(l10n: L10n, result: ExportResult): string {
   }
 }
 
+/** What a term of a permission to export a diagram's SVG file on save is called, in the display language. */
+function permitTermText(l10n: L10n, term: PermitTerm): string {
+  switch (term) {
+    case 'output':
+      return l10n.t('the SVG file');
+    case 'root':
+      return l10n.t('the workspace folder');
+    case 'context':
+      return l10n.t('where included files are looked for');
+    case 'includePaths':
+      return l10n.t('the plantumlLocal.includePaths setting');
+    case 'renderer':
+      return l10n.t('the renderer');
+    case 'palette':
+      return l10n.t('the palette');
+  }
+}
+
+/** How many of the files a diagram was drawn without the reason names; past that, it ends in an ellipsis. */
+const UNREAD_NAMED = 3;
+
+/** Why a diagram, as drawn from its saved files, is not one to export on save, in the display language. */
+function autoExportRefusalText(l10n: L10n, workspace: WorkspaceService, refusal: AutoExportRefusal): string {
+  switch (refusal.why) {
+    case 'export':
+      return refusal.result.error ?? '';
+    case 'loss':
+      return refusal.notes.length > 0
+        ? refusal.notes.join(' ')
+        : l10n.t('The bundled engine draws it without some of its notation.');
+    case 'renderer':
+      return l10n.t('The renderer of this version could not be identified.');
+    case 'incomplete': {
+      const listed =
+        refusal.unread.slice(0, UNREAD_NAMED).join(', ') + (refusal.unread.length > UNREAD_NAMED ? ', …' : '');
+      return l10n.t('Files it includes could not be read: {0}.', listed);
+    }
+    case 'replay': {
+      const named = [...new Set(refusal.reasons.map((each) => replayReasonText(l10n, workspace, each)))];
+      const listed = named.slice(0, REPLAY_NAMED).join(', ') + (named.length > REPLAY_NAMED ? ', …' : '');
+      return refusal.replay === 'volatile'
+        ? l10n.t('It uses {0}, which can draw it differently each time.', listed)
+        : l10n.t('It uses {0}, so what it draws cannot be told from what it was drawn from.', listed);
+    }
+  }
+}
+
+/**
+ * Why the SVG file of a diagram, `file` as the Explorer names it, is not
+ * one to export on save, in the display language.
+ */
+function outputRefusalText(l10n: L10n, workspace: WorkspaceService, refusal: OutputRefusal, file: string): string {
+  switch (refusal.why) {
+    case 'missing':
+      return l10n.t('{0} is not there. Export the diagram as SVG first: saving only keeps an exported file up to date.', file);
+    case 'not-file':
+      return l10n.t('Something other than a file is at {0}.', file);
+    case 'link':
+      return l10n.t('{0} is a link, which is not followed.', file);
+    case 'too-large':
+      return l10n.t('{0} is larger than 64 MiB, the most that is read to check it.', file);
+    case 'unreadable':
+      return l10n.t('{0} could not be read: {1}', file, refusal.message);
+    case 'dirty':
+      return l10n.t('{0} is open with unsaved changes. Save or revert it first.', file);
+    case 'owner':
+      return l10n.t(
+        '{0} is recorded as the image of {1} in {2}. Give this diagram another name, or use separate export folders.',
+        file,
+        refusal.owner.key.name,
+        workspace.relativePath(vscode.Uri.parse(refusal.owner.key.documentUri))
+      );
+    case 'edited':
+      return l10n.t('{0} changed after it was exported. Export the diagram as SVG first, which asks before overwriting it.', file);
+    case 'unrecorded':
+      return l10n.t(
+        "{0} is not recorded as this diagram's export, and holds something else. Export the diagram as SVG first, which asks before overwriting it.",
+        file
+      );
+  }
+}
+
+/**
+ * A button that asks for a name for `block`, a diagram of `document`, as
+ * its light bulb does, with the document open at the line the name goes
+ * on. Edited since `block` was found, the name is not written: the line may
+ * start another diagram by then.
+ */
+function nameDiagramButton(context: OperationContext, document: vscode.TextDocument, block: PlantUmlBlock): NoticeAction {
+  const version = document.version;
+  return {
+    title: context.l10n.t('Name Diagram…'),
+    run: async (): Promise<void> => {
+      const start = new vscode.Position(block.openLine, 0);
+      await vscode.window.showTextDocument(document, { selection: new vscode.Range(start, start) });
+      await context.commands.execute(COMMANDS.ASSIGN_DIAGRAM_NAME, document.uri.toString(), block.openLine, version);
+    },
+  };
+}
+
+/** A button that exports `block`, a diagram of `document`, as SVG, as Export Diagram as SVG does: asking before it overwrites a file. */
+function exportSvgButton(context: OperationContext, document: vscode.TextDocument, block: PlantUmlBlock): NoticeAction {
+  return {
+    title: context.l10n.t('Export as SVG'),
+    run: () => context.commands.execute(COMMANDS.EXPORT_SVG, { uri: document.uri.toString(), line: block.openLine }),
+  };
+}
+
+/** Whether the document open at `path`, a URI, has unsaved changes, as the export asks. */
+function isDirtyAt(path: string): boolean {
+  return vscode.workspace.textDocuments.some((open) => open.isDirty && open.uri.toString() === path);
+}
+
 /**
  * The bulk export with progress, shared by both Export All commands. Null
  * when replacing existing files is declined, and after saying so when the
@@ -2386,6 +2557,7 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
   module.settings.add(Settings);
   module.storage.add(ExportedFiles);
   module.storage.add(ExportHistory);
+  module.storage.add(AutoExportPermits);
 
   module.services.singleton(Renderer, {
     inject: { logger: Log, settings: Settings.token, l10n: Localization },
@@ -2410,6 +2582,11 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
   module.services.singleton(Exports, {
     inject: { history: ExportHistory.token, earlier: ExportedFiles.token },
     create: ({ history, earlier }) => new ExportLedger(history, () => earlier.get()),
+  });
+
+  module.services.singleton(Permits, {
+    inject: { permits: AutoExportPermits.token },
+    create: ({ permits }) => new PermitStore(permits),
   });
 
   module.services.singleton(IncludeWatch, () => new IncludeWatcher());
@@ -3387,6 +3564,427 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
       }
       logFreshness(context, workspace, textDocument, found);
       await showFreshness(context, workspace, document, found);
+    },
+  });
+
+  module.commands.handle(EnableSvgAutoExport, {
+    inject: {
+      renderer: Renderer,
+      palettes: Palettes,
+      settings: Settings.token,
+      exports: Exports,
+      permits: Permits,
+      workspace: Workspace,
+    },
+    execute: async (
+      context: OperationContext,
+      args,
+      { renderer, palettes, settings, exports, permits, workspace }
+    ): Promise<void> => {
+      const { l10n } = context;
+      // Exporting on save writes files: not in a workspace not trusted to.
+      if (!vscode.workspace.isTrusted) {
+        await notifyWith(
+          context,
+          'warn',
+          l10n.t('SVG auto export is unavailable in Restricted Mode. Trust this workspace to use it.'),
+          [{ title: l10n.t('Manage Workspace Trust'), run: (): Promise<unknown> => context.commands.execute('workbench.trust.manage') }]
+        );
+        return;
+      }
+      // The `.puml` preview names its file and the line of the diagram it
+      // shows; that and the cursor are all that is taken from outside.
+      const document = await pickDocument(context, workspace, true, exportTarget(args[0]), {
+        none: l10n.t('Open a Markdown or PlantUML file to allow SVG auto export for one of its diagrams.'),
+        title: l10n.t('Select the Markdown file of the diagram to export on save'),
+      });
+      if (document === null) {
+        return;
+      }
+      const { textDocument } = document;
+      const uri = textDocument.uri;
+      const folder = vscode.workspace.getWorkspaceFolder(uri);
+      if (
+        textDocument.isUntitled ||
+        uri.scheme !== 'file' ||
+        !isDiagramFile(textDocument) ||
+        folder === undefined ||
+        folder.uri.scheme !== 'file'
+      ) {
+        void context.notify.warn(l10n.t('SVG auto export is only for diagrams in Markdown or PlantUML files saved in a workspace folder.'));
+        return;
+      }
+      const block = await diagramAtCursor(context, document);
+      if (block === null) {
+        return;
+      }
+      // Its name is what ties the diagram to its file, across edits.
+      const name = block.name;
+      if (name === null || block.nameBasis === null || !isValidBlockName(name)) {
+        await notifyWith(
+          context,
+          'warn',
+          l10n.t('Name the diagram first: SVG auto export is only for a diagram with a name of its own, which ties it to its SVG file.'),
+          [nameDiagramButton(context, textDocument, block)]
+        );
+        return;
+      }
+      const refuse = (reason: string, actions: readonly NoticeAction[] = []): Promise<void> =>
+        notifyWith(context, 'warn', l10n.t('SVG auto export cannot be allowed for {0}. {1}', name, reason), actions);
+      // Drawn in a palette of its own, so that what is written does not
+      // change with the editor's theme. The setting is not changed for it.
+      const palette = settings.read({ resource: uri }).values[CONFIG.EXPORT_THEME];
+      if (palette !== 'light' && palette !== 'dark') {
+        await refuse(l10n.t("It would be drawn in the preview's palette: set plantumlLocal.exportTheme to light or dark to use it."), [
+          settingsButton(context, CONFIG.EXPORT_THEME),
+        ]);
+        return;
+      }
+      const directory = exportDirectory(context, settings, uri);
+      if (directory === null) {
+        return;
+      }
+      // Drawn from the saved files alone, as it would be when they are saved.
+      const snapshot = new ReadSnapshot(scanText, { savedOnly: true });
+      const deps = exporterDeps(context, renderer, palettes, settings, exports, workspace, uri, snapshot);
+      const planned = planDiagram(deps, document.path, directory, block, name, 'svg');
+      if (!('block' in planned) || planned.key === null) {
+        await refuse(deps.invalidNameMessage);
+        return;
+      }
+      const key = planned.key;
+      const output = planned.path;
+      const file = output.toLowerCase();
+      const shared = diagramsOf(textDocument, document.text).some(
+        (other) =>
+          other.openLine !== block.openLine &&
+          other.name !== null &&
+          isValidBlockName(other.name) &&
+          deps.resolve(document.path, `${directory}/${other.name}.svg`).toLowerCase() === file
+      );
+      if (shared) {
+        await refuse(deps.sameFileMessage);
+        return;
+      }
+      const unsaved = (paths: readonly string[]): string =>
+        l10n.t('Save {0} first: what is exported on save is drawn from saved files only.', paths.join(', '));
+      if (textDocument.isDirty) {
+        await refuse(unsaved([workspace.relativePath(uri)]));
+        return;
+      }
+      const laterVersion = l10n.t(
+        'A later version of PlantUML Local keeps the SVG auto export permissions of this workspace, so they are left as they are.'
+      );
+      if (!permits.writable()) {
+        void context.notify.warn(laterVersion);
+        return;
+      }
+      const disableButton: NoticeAction = {
+        title: l10n.t('Disable SVG Auto Export…'),
+        run: () => context.commands.execute(COMMANDS.DISABLE_SVG_AUTO_EXPORT),
+      };
+      const full = l10n.t(
+        'SVG auto export is allowed for {0} diagrams in this workspace, the most it can be. Disable it for another diagram first.',
+        String(PERMIT_LIMIT)
+      );
+      const given = permits.of(key);
+      if (given === null && permits.all().length >= PERMIT_LIMIT) {
+        await refuse(full, [disableButton]);
+        return;
+      }
+
+      const drawn = await drawAutoExport(deps, document.path, { ...planned, key });
+      const unsavedFiles = snapshot.unsaved();
+      if (unsavedFiles.length > 0) {
+        await refuse(unsaved(unsavedFiles.map((path) => workspace.relativePath(vscode.Uri.file(path)))));
+        return;
+      }
+      if (!('content' in drawn)) {
+        context.logger.warn(l10n.t('SVG auto export cannot be allowed for {0}. {1}', name, autoExportRefusalText(l10n, workspace, drawn)));
+        await refuse(
+          autoExportRefusalText(l10n, workspace, drawn),
+          drawn.why === 'export' && drawn.result.cause === 'source' ? [problemsOrOutput(context, settings, document)] : []
+        );
+        return;
+      }
+      const bytes = typeof drawn.content === 'string' ? new TextEncoder().encode(drawn.content) : drawn.content;
+      const svgFile = workspace.relativePath(vscode.Uri.parse(output));
+      const lookAt = async (): Promise<OutputLook | OutputRefusal> =>
+        lookAtOutput(key, await readOutputFile(output, FRESHNESS_LIMITS.bytes), isDirtyAt(output), exports.ownerOf(output), bytes);
+      const looked = await lookAt();
+      if (!('sha256' in looked)) {
+        await refuse(
+          outputRefusalText(l10n, workspace, looked, svgFile),
+          looked.why === 'missing' || looked.why === 'edited' || looked.why === 'unrecorded'
+            ? [exportSvgButton(context, textDocument, block)]
+            : []
+        );
+        return;
+      }
+
+      const includePaths = (each: vscode.Uri): unknown => includePathsOf(settings, each);
+      const { access } = await accessFor(uri, { includePaths });
+      const terms: PermitTerms = {
+        output,
+        root: folder.uri.toString(),
+        context: contextOf(access),
+        includePaths: canonicalJson(includePaths(uri)),
+        renderer: { engine: drawn.input.renderer.engine, build: drawn.input.renderer.build, contract: drawn.input.renderer.contract },
+        palette,
+      };
+      const standing = standingOf(given, terms);
+      const enabled = settings.read().values[CONFIG.AUTO_EXPORT_ENABLED] === true;
+      const turnOn = settingsButton(context, CONFIG.AUTO_EXPORT_ENABLED);
+      if (standing.standing === 'same' && !looked.adopt) {
+        await notifyWith(
+          context,
+          'info',
+          enabled
+            ? l10n.t('SVG auto export is already allowed for {0}.', name)
+            : l10n.t(
+                'SVG auto export is already allowed for {0}, but automatic export is turned off on this computer. Turn it on in Settings to start.',
+                name
+              ),
+          enabled ? [] : [turnOn]
+        );
+        return;
+      }
+
+      const detail = [
+        [
+          l10n.t('Diagram: {0}', name),
+          l10n.t('Document: {0}', workspace.relativePath(uri)),
+          l10n.t('Workspace folder: {0}', folder.uri.fsPath),
+          l10n.t('SVG file: {0}', vscode.Uri.parse(output).fsPath),
+          l10n.t('Palette: {0}', palette === 'dark' ? l10n.t('dark') : l10n.t('light')),
+        ].join('\n'),
+        l10n.t(
+          'Each time the document or a file it includes is saved, the SVG file is exported again: drawn from the saved files alone, and only while the diagram draws without errors, the same way each time, and the file is as it was last exported. Otherwise the file is left as it is, and you are told.'
+        ),
+        l10n.t(
+          'The permission is kept with the state of this workspace in VS Code on this computer, not on the remote machine in a remote window, and is neither synced nor written to the repository. It ends once the SVG file, the workspace folder, where included files are looked for, the plantumlLocal.includePaths setting, the palette or the renderer changes: allow it again then.'
+        ),
+        ...(looked.adopt
+          ? [
+              l10n.t(
+                "{0} holds just what the diagram draws, but is not recorded as its export. Allowing records it as the diagram's export, and saving the diagram's files then overwrites it.",
+                svgFile
+              ),
+            ]
+          : []),
+        ...(standing.standing === 'changed'
+          ? [
+              l10n.t(
+                'This replaces the permission given before, which differs in {0}.',
+                standing.changed.map((term) => permitTermText(l10n, term)).join(', ')
+              ),
+            ]
+          : []),
+        ...(enabled
+          ? []
+          : [l10n.t('Automatic export is turned off on this computer: nothing is exported until it is turned on in Settings.')]),
+      ];
+      // VS Code adds a Cancel button to a modal, which answers undefined.
+      const answer = await context.notify.warn(l10n.t('Allow SVG auto export for {0}?', name), {
+        modal: true,
+        detail: detail.join('\n\n'),
+        actions: [{ title: l10n.t('Allow'), value: 'allow' as const }],
+      });
+      if (answer !== 'allow') {
+        return;
+      }
+
+      // Looked at again once no export in this window is writing the file:
+      // what the answer was about, unchanged, or no permission is given.
+      const permit: AutoExportPermit = { key, ...terms, generation: randomBytes(16).toString('hex') };
+      const result = await exports.lock(
+        output,
+        async (): Promise<'changed' | 'history-full' | 'history-later-version' | 'unrecorded' | PermitResult> => {
+          const again = await lookAt();
+          if (
+            !vscode.workspace.isTrusted ||
+            textDocument.isDirty ||
+            textDocument.version !== document.version ||
+            !('sha256' in again) ||
+            !sameLook(again, looked) ||
+            permits.of(key)?.generation !== given?.generation
+          ) {
+            return 'changed';
+          }
+          if (looked.adopt) {
+            // Taken for the export of what it was drawn from, which has to
+            // be as it was drawn.
+            const reading = await readingNow(uri, { includePaths });
+            if ((await recheckInputs(drawn.drawnFrom, block.raw, reading.access, reading.openText)).length > 0) {
+              return 'changed';
+            }
+            const recorded = await exports.record(key, output, bytes, drawn.input, (error) => {
+              context.logger.warn(
+                l10n.t(
+                  'Could not save export history for {0}. You may be asked before overwriting this file next time. Details: {1}',
+                  output,
+                  error instanceof Error ? error.message : String(error)
+                )
+              );
+            });
+            if (recorded !== 'recorded') {
+              return recorded === 'not-saved' ? 'unrecorded' : recorded === 'full' ? 'history-full' : 'history-later-version';
+            }
+          }
+          return permits.add(permit, (error) => {
+            context.logger.warn(
+              l10n.t(
+                'Could not save the SVG auto export permissions. Details: {0}',
+                error instanceof Error ? error.message : String(error)
+              )
+            );
+          });
+        }
+      );
+      switch (result) {
+        case 'saved': {
+          const allowed = enabled
+            ? l10n.t('SVG auto export is allowed for {0}: saving its files exports {1} again.', name, svgFile)
+            : l10n.t(
+                'SVG auto export is allowed for {0}, but automatic export is turned off on this computer. Turn it on in Settings to start.',
+                name
+              );
+          context.logger.info(l10n.t('SVG auto export is allowed for {0} in {1}, to {2}.', name, workspace.relativePath(uri), output));
+          await notifyWith(context, 'info', allowed, enabled ? [] : [turnOn]);
+          return;
+        }
+        case 'changed':
+          void context.notify.warn(
+            l10n.t('{0} or its SVG file changed while asking, so SVG auto export was not allowed. Run the command again.', name)
+          );
+          return;
+        case 'full':
+          await refuse(full, [disableButton]);
+          return;
+        case 'later-version':
+          void context.notify.warn(laterVersion);
+          return;
+        case 'not-saved':
+          await notifyWith(
+            context,
+            'error',
+            l10n.t('SVG auto export was not allowed for {0}: the permission could not be saved. See the Output panel for why.', name),
+            [outputButton(context)]
+          );
+          return;
+        case 'history-full':
+          void context.notify.warn(
+            l10n.t(
+              'SVG auto export was not allowed for {0}: the export history of this workspace is full, so {1} could not be recorded as its export.',
+              name,
+              svgFile
+            )
+          );
+          return;
+        case 'history-later-version':
+          void context.notify.warn(
+            l10n.t(
+              'SVG auto export was not allowed for {0}: a later version of PlantUML Local keeps the export history of this workspace, so {1} could not be recorded as its export.',
+              name,
+              svgFile
+            )
+          );
+          return;
+        case 'unrecorded':
+          await notifyWith(
+            context,
+            'error',
+            l10n.t('SVG auto export was not allowed for {0}: {1} could not be recorded as its export. See the Output panel for why.', name, svgFile),
+            [outputButton(context)]
+          );
+          return;
+      }
+    },
+  });
+
+  module.commands.handle(DisableSvgAutoExport, {
+    inject: { permits: Permits, workspace: Workspace },
+    // Only takes back what was given: no file is read or written, so it
+    // needs no trust.
+    execute: async (context: OperationContext, args, { permits, workspace }): Promise<void> => {
+      const { l10n } = context;
+      if (!permits.writable()) {
+        void context.notify.warn(
+          l10n.t('A later version of PlantUML Local keeps the SVG auto export permissions of this workspace, so they are left as they are.')
+        );
+        return;
+      }
+      const all = permits.all();
+      if (all.length === 0) {
+        void context.notify.info(l10n.t('SVG auto export is not allowed for any diagram in this workspace.'));
+        return;
+      }
+      // The diagram under the cursor, or the one the `.puml` preview names,
+      // when it has a permission; else those picked from all of them.
+      const target = exportTarget(args[0]);
+      const editor = vscode.window.activeTextEditor;
+      const opened =
+        target === null
+          ? editor?.document
+          : vscode.workspace.textDocuments.find((each) => each.uri.toString() === target.uri.toString());
+      const line = target === null ? editor?.selection.active.line : target.line;
+      const block =
+        opened !== undefined && line !== undefined && isDiagramFile(opened)
+          ? blockAtLine(diagramsOf(opened, opened.getText()), line)
+          : null;
+      const key =
+        opened === undefined || block === null || block.name === null
+          ? null
+          : artifactKey(opened.uri.toString(), block, block.name, 'svg');
+      const atCursor = key === null ? null : permits.of(key);
+      let chosen: AutoExportPermit[];
+      if (atCursor !== null) {
+        chosen = [atCursor];
+      } else {
+        const current = editor?.document.uri.toString();
+        const items = [
+          ...all.filter((permit) => permit.key.documentUri === current),
+          ...all.filter((permit) => permit.key.documentUri !== current),
+        ].map((permit) => ({
+          label: permit.key.name,
+          description: workspace.relativePath(vscode.Uri.parse(permit.key.documentUri)),
+          detail: workspace.relativePath(vscode.Uri.parse(permit.output)),
+          permit,
+        }));
+        const picked = await context.ask.many(items, {
+          title: l10n.t('Disable SVG Auto Export'),
+          placeHolder: l10n.t('Select the diagrams whose SVG files are no longer to be exported on save'),
+          matchOnDescription: true,
+        });
+        if (picked === undefined || picked.length === 0) {
+          return;
+        }
+        chosen = picked.map((item) => item.permit);
+      }
+      let failed = false;
+      for (const permit of chosen) {
+        const removed = await permits.remove(permit.key, undefined, (error) => {
+          context.logger.warn(
+            l10n.t('Could not save the SVG auto export permissions. Details: {0}', error instanceof Error ? error.message : String(error))
+          );
+        });
+        failed ||= removed !== 'saved';
+      }
+      if (failed) {
+        await notifyWith(
+          context,
+          'error',
+          l10n.t('Could not disable SVG auto export: the permissions could not be saved. See the Output panel for why.'),
+          [outputButton(context)]
+        );
+        return;
+      }
+      const [only] = chosen;
+      await context.notify.info(
+        chosen.length === 1 && only !== undefined
+          ? l10n.t('SVG auto export is disabled for {0}. Its SVG file is left as it is.', only.key.name)
+          : l10n.t('SVG auto export is disabled for {0} diagrams. Their SVG files are left as they are.', String(chosen.length))
+      );
     },
   });
 

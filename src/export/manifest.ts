@@ -288,7 +288,8 @@ const isLine = (value: unknown): boolean => typeof value === 'number' && Number.
 const UNAVAILABLE: ReadonlySet<unknown> = new Set(['untrusted', 'untitled', 'not-on-disk', 'outside-workspace', 'setting']);
 const KINDS: ReadonlySet<unknown> = new Set([null, 'include', 'includesub', 'theme']);
 
-function isContext(value: unknown): boolean {
+/** Whether `value` says where local includes were looked for, as a manifest records it. */
+export function isIncludeContext(value: unknown): value is IncludeContext {
   if (value === null) {
     return true;
   }
@@ -373,7 +374,7 @@ export function isInputManifest(value: unknown, key: ArtifactKey): value is Inpu
     hasFields(input, ['source', 'render']) &&
     isHash(input['source']) &&
     isHash(input['render']) &&
-    isContext(context) &&
+    isIncludeContext(context) &&
     isResources(resources) &&
     hasFields(renderer, ['engine', 'build', 'raster', 'contract']) &&
     isString(renderer['engine']) &&

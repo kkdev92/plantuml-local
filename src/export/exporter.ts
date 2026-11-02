@@ -10,6 +10,7 @@ import { digestOf, OutputBuffer, sameDigest, type Digest, type Held, type SpoolD
 import { artifactKey, sameKey, type ArtifactKey, type ArtifactRecord, type RecordResult } from './history';
 import { canonicalJson, inputManifest, type InputManifest, type RendererIdentity } from './manifest';
 import type { DrawnFrom } from './recheck';
+import type { ReplayReason } from './replay';
 
 /**
  * Renders diagrams to SVG files next to the document, or one to a PNG.
@@ -485,7 +486,7 @@ function pngSource(deps: DrawingDeps, name: string, svg: string, dark: boolean, 
  * file it goes to and what the file is recorded as, or why it cannot be
  * exported.
  */
-function planDiagram(
+export function planDiagram(
   deps: Pick<ExporterDeps, 'resolve' | 'invalidNameMessage'>,
   documentPath: string,
   directory: string,
@@ -659,6 +660,78 @@ export async function prepareSvg(deps: DrawingDeps, block: PlantUmlBlock): Promi
     return { name, path: null, error: deps.svgTooLargeMessage(bytes), cause: 'text' };
   }
   return { svg: rendered.svg, notes: notationNotes(deps, block.source) };
+}
+
+/**
+ * Why a diagram's SVG is not exported again on its own when its files are
+ * saved, as drawn from them: it cannot be exported at all, as `result`
+ * says; the engine drew it without some of its notation; the renderer
+ * cannot be told, so neither can what it was drawn from; files it asked
+ * for were not delivered, `unread` as they were asked for; or its text may
+ * draw it otherwise another time.
+ */
+export type AutoExportRefusal =
+  | { why: 'export'; result: ExportResult }
+  | { why: 'loss'; notes: readonly string[] }
+  | { why: 'renderer' }
+  | { why: 'incomplete'; unread: readonly string[] }
+  | { why: 'replay'; replay: 'volatile' | 'unclassified'; reasons: readonly ReplayReason[] };
+
+/** A diagram's SVG drawn as Export Diagram as SVG writes it, with what it was drawn from. */
+export interface AutoExportDrawing {
+  name: string;
+  /** The file it goes to. */
+  path: string;
+  /** The document the diagram is in. */
+  document: string;
+  key: ArtifactKey;
+  content: string | Uint8Array;
+  input: InputManifest;
+  /** What it was drawn from, to look at again before it is written (src/export/recheck.ts). */
+  drawnFrom: DrawnFrom;
+}
+
+/**
+ * Draws a diagram planned as an SVG as Export Diagram as SVG draws it —
+ * the same bytes — for exporting it with no one asked: or says why it is
+ * not to be. Only a diagram the engine draws in full, from inputs all
+ * delivered and that draw it the same each time, is. A palette other than
+ * the one asked for, which a theme can call for, is no loss.
+ */
+export async function drawAutoExport(
+  deps: ExporterDeps,
+  documentPath: string,
+  planned: PlannedDiagram & { key: ArtifactKey }
+): Promise<AutoExportDrawing | AutoExportRefusal> {
+  const drawn = await renderPlanned(deps, documentPath, planned, 'svg');
+  if (!('content' in drawn)) {
+    return { why: 'export', result: drawn };
+  }
+  const notes = drawn.notes ?? [];
+  if (notes.length > 0) {
+    return { why: 'loss', notes };
+  }
+  const { input, drawnFrom } = drawn;
+  if (input === undefined || drawnFrom === undefined) {
+    return { why: 'renderer' };
+  }
+  if (input.completeness === 'known-loss') {
+    return { why: 'loss', notes };
+  }
+  if (input.completeness === 'unknown') {
+    // Each named once: a local file by the path the diagram wrote, a file
+    // of a bundled library as an include of it is written.
+    const { requests, libraries } = input.resources;
+    const unread = [
+      ...requests.filter(({ outcome }) => outcome !== 'read').map(({ path }) => path),
+      ...libraries.filter(({ found }) => !found).map(({ library, key }) => `<${library}/${key}>`),
+    ];
+    return { why: 'incomplete', unread: [...new Set(unread)] };
+  }
+  if (input.replay.class !== 'stable-inputs') {
+    return { why: 'replay', replay: input.replay.class, reasons: input.replay.reasons };
+  }
+  return { name: drawn.name, path: drawn.path, document: drawn.document, key: planned.key, content: drawn.content, input, drawnFrom };
 }
 
 /** A file a drawing goes to, looked at before any is written. */

@@ -27,6 +27,11 @@ import type { CandidateReader, IncludeAccess } from './session';
  * is what the engine was given, by where the text came from, and by what
  * its text holds that may draw the diagram differently another time
  * (`scan`): worked out once, at the first read.
+ *
+ * What draws a diagram from its saved files alone — an SVG exported when
+ * its files are saved — reads with `savedOnly`: a file open in an editor
+ * with unsaved changes is not read from the editor, and is noted instead
+ * (src/includes/host.ts), for the drawing to be thrown away.
  */
 
 /** Where a document's diagrams look for their local includes, and its workspace folder's path as opened. */
@@ -39,8 +44,27 @@ export class ReadSnapshot {
   private readonly reads = new Map<string, Promise<MeasuredRead>>();
   private readonly files = new Map<string, DeliveredFile & { text: string; bytes: number }>();
   private readonly accesses = new Map<string, Promise<DocumentAccess>>();
+  private readonly unsavedFiles = new Set<string>();
 
-  constructor(private readonly scan: (text: string) => readonly ReplayFinding[]) {}
+  /** Whether the files are read as saved: a document open with unsaved changes is noted rather than read from the editor. */
+  readonly savedOnly: boolean;
+
+  constructor(
+    private readonly scan: (text: string) => readonly ReplayFinding[],
+    options: { savedOnly?: boolean } = {}
+  ) {
+    this.savedOnly = options.savedOnly === true;
+  }
+
+  /** Notes that the file at `path`, which the drawing looked at, is open with unsaved changes. */
+  noteUnsaved(path: string): void {
+    this.unsavedFiles.add(path);
+  }
+
+  /** The files noted as open with unsaved changes, in the order noted. */
+  unsaved(): string[] {
+    return [...this.unsavedFiles];
+  }
 
   /** What `look` gave for `document` the first time this export asked. */
   access(document: string, look: () => Promise<DocumentAccess>): Promise<DocumentAccess> {

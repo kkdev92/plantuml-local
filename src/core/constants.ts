@@ -28,6 +28,8 @@ export const COMMANDS = {
   EXPORT_FOLDER_SVG: `${EXTENSION_ID}.exportFolderSvg`,
   EXPORT_FOLDER_PNG: `${EXTENSION_ID}.exportFolderPng`,
   CHECK_EXPORT_FRESHNESS: `${EXTENSION_ID}.checkExportFreshness`,
+  ENABLE_SVG_AUTO_EXPORT: `${EXTENSION_ID}.enableSvgAutoExport`,
+  DISABLE_SVG_AUTO_EXPORT: `${EXTENSION_ID}.disableSvgAutoExport`,
   ASSIGN_DIAGRAM_NAME: `${EXTENSION_ID}.assignDiagramName`,
   ADD_MISSING_END: `${EXTENSION_ID}.addMissingEnd`,
   INSERT_TEMPLATE: `${EXTENSION_ID}.insertTemplate`,
@@ -91,6 +93,7 @@ export const CONFIG = {
   WORKSPACE_SYMBOLS_ENABLED: 'workspaceSymbols.enabled',
   WORKSPACE_SYMBOLS_EXCLUDE: 'workspaceSymbols.exclude',
   RENAME_ENABLED: 'rename.enabled',
+  AUTO_EXPORT_ENABLED: 'autoExport.enabled',
 } as const;
 
 /**

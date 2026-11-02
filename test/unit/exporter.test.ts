@@ -6,10 +6,12 @@ import { findFileDiagrams, findPlantUmlBlocks } from '../../src/export/blocks';
 import { OUTPUT_BUFFER_LIMIT, OutputBuffer } from '../../src/export/buffer';
 import {
   addBackground,
+  drawAutoExport,
   drawDocument,
   exportAll,
   exportOne,
   isPngOfSize,
+  planDiagram,
   planDocument,
   PNG_LIMITS,
   preparePng,
@@ -18,15 +20,17 @@ import {
   SVG_TEXT_LIMIT,
   svgSize,
   writeDocuments,
+  type AutoExportDrawing,
   type Drawing,
   type ExporterDeps,
   type ExportFormat,
+  type PlannedDiagram,
   type ReplaceTarget,
 } from '../../src/export/exporter';
-import { ExportLedger, type RecordResult } from '../../src/export/history';
+import { ExportLedger, type ArtifactKey, type RecordResult } from '../../src/export/history';
 import { isInputManifest, type RendererIdentity } from '../../src/export/manifest';
 import { sha256, type ExportRecords } from '../../src/export/ownership';
-import type { DiagramRender, DrawnInputs } from '../../src/core/types';
+import type { DiagramRender, DrawingLog, DrawnInputs } from '../../src/core/types';
 
 /** What the renderer hands the exporter for `svg`: no local include failed. */
 const rendered = (svg: string): DiagramRender => ({ svg, failedIncludes: new Map(), dependencies: [] });
@@ -1783,5 +1787,142 @@ describe('what a drawing was drawn from, looked at again before it is written', 
     expect(deps.record).not.toHaveBeenCalled();
     expect(deps.ledger.ownerOf(target)?.input?.resources.files[0]?.sha256).toBe('a'.repeat(64));
     expect(deps.staleInputs).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('drawing a diagram to export on save', () => {
+  /** A drawing taken with the reads of an export: what it asked for, and what it was drawn from. */
+  const withInputs = (svg: string, log: DrawingLog = { requests: [], libraries: [] }, inputs: Partial<DrawnInputs> = {}): DiagramRender => ({
+    ...rendered(svg),
+    log,
+    inputs: { context: null, requests: [], files: [], ...inputs },
+  });
+  const drawing = (log?: DrawingLog, inputs?: Partial<DrawnInputs>): Partial<ExporterDeps> => ({
+    render: vi.fn((source: string) => Promise.resolve(withInputs(`<svg width="40" height="20" viewBox="0 0 40 20">${source}</svg>`, log, inputs))),
+  });
+  const hashed = (text: string): string => sha256(new TextEncoder().encode(text));
+  /** The first block of a Markdown text, planned as an SVG under the name it has. */
+  const planned = (deps: ExporterDeps, text: string): PlannedDiagram & { key: ArtifactKey } => {
+    const [block] = findPlantUmlBlocks(text);
+    const plan = planDiagram(deps, DOC, 'images', block!, block!.name!, 'svg');
+    if (!('key' in plan) || plan.key === null) {
+      throw new Error('not planned under a name of its own');
+    }
+    return { ...plan, key: plan.key };
+  };
+
+  it('draws the bytes Export Diagram as SVG writes, with what they were drawn from, and writes nothing', async () => {
+    const text = '```plantuml orders\nAlice -> Bob\n```';
+    const deps = makeDeps(drawing());
+
+    const drawn = (await drawAutoExport(deps, DOC, planned(deps, text))) as AutoExportDrawing;
+    expect(deps.writeFile).not.toHaveBeenCalled();
+    expect(deps.record).not.toHaveBeenCalled();
+    await exportOne(deps, DOC, 'images', findPlantUmlBlocks(text)[0]!, 'orders');
+
+    expect(drawn).toMatchObject({
+      name: 'orders',
+      path: '/repo/docs/images/orders.svg',
+      document: DOC,
+      key: { documentUri: DOC, name: 'orders', format: 'svg' },
+      drawnFrom: { source: hashed('Alice -> Bob\n'), context: null, requests: [], files: [] },
+    });
+    expect(textOf(drawn.content)).toBe(textOf(deps.disk.get('/repo/docs/images/orders.svg')));
+    expect(drawn.input).toEqual(deps.ledger.ownerOf('/repo/docs/images/orders.svg')?.input);
+    expect(drawn.input).toMatchObject({ completeness: 'complete', replay: { class: 'stable-inputs' } });
+  });
+
+  it('draws a diagram a theme draws in the other palette, which loses nothing', async () => {
+    const deps = makeDeps({ ...drawing(), resolvePalette: () => Promise.resolve(true) });
+
+    const drawn = await drawAutoExport(deps, DOC, planned(deps, '```plantuml orders\n!theme cyborg\nAlice -> Bob\n```'));
+
+    expect(drawn).toMatchObject({ input: { options: { palette: { asked: 'light', drawn: 'dark' } } } });
+  });
+
+  it('draws none that cannot be exported at all, and says why as the export does', async () => {
+    const deps = makeDeps(drawing());
+
+    expect(await drawAutoExport(deps, DOC, planned(deps, '```plantuml orders\n!include https://example.com/part.iuml\n```'))).toEqual({
+      why: 'export',
+      result: { name: 'orders', path: null, error: 'remote references are not supported', cause: 'source' },
+    });
+    expect(deps.render).not.toHaveBeenCalled();
+  });
+
+  it('draws none the engine drew without some of its notation', async () => {
+    const deps = makeDeps(drawing());
+
+    expect(await drawAutoExport(deps, DOC, planned(deps, '```plantuml orders\nAlice -> Bob : <math>x^2</math>\n```'))).toEqual({
+      why: 'loss',
+      notes: ['formula <math>'],
+    });
+  });
+
+  it('draws none when what drew it cannot be told, or the drawing does not say what it was drawn from', async () => {
+    const text = '```plantuml orders\nAlice -> Bob\n```';
+    const untold = makeDeps({ ...drawing(), rendererIdentity: () => Promise.resolve(null) });
+    const silent = makeDeps();
+
+    expect(await drawAutoExport(untold, DOC, planned(untold, text))).toEqual({ why: 'renderer' });
+    expect(await drawAutoExport(silent, DOC, planned(silent, text))).toEqual({ why: 'renderer' });
+  });
+
+  it('draws none when a file it asked for was not delivered, and names each such file once, as it was asked for', async () => {
+    const request = (path: string, outcome: string): DrawnInputs['requests'][number] => ({
+      path,
+      from: null,
+      kind: 'include',
+      outcome,
+      file: outcome === 'read' ? `/repo/docs/${path}` : null,
+      looked: [`/repo/docs/${path}`],
+    });
+    const deps = makeDeps(
+      drawing(
+        {
+          requests: [],
+          libraries: [
+            { library: 'c4', key: 'c4_context', found: true },
+            { library: 'c4', key: 'c4_missing', found: false },
+            { library: 'c4', key: 'c4_missing', found: false },
+          ],
+        },
+        {
+          requests: [request('part.iuml', 'read'), request('gone.iuml', 'missing'), request('big.iuml', 'limit:bytes'), request('gone.iuml', 'missing')],
+          files: [{ file: '/repo/docs/part.iuml', sha256: 'a'.repeat(64), origin: 'disk', findings: [] }],
+        }
+      )
+    );
+
+    expect(await drawAutoExport(deps, DOC, planned(deps, '```plantuml orders\n!include part.iuml\n```'))).toEqual({
+      why: 'incomplete',
+      unread: ['gone.iuml', 'big.iuml', '<c4/c4_missing>'],
+    });
+  });
+
+  it('draws none whose text, or a file it includes, may draw it otherwise another time', async () => {
+    const dated = makeDeps(drawing());
+    const counted = makeDeps(drawing());
+    const included = makeDeps(
+      drawing(undefined, {
+        files: [{ file: '/repo/docs/part.iuml', sha256: 'a'.repeat(64), origin: 'disk', findings: [{ replay: 'volatile', what: 'function:now', line: 2 }] }],
+      })
+    );
+
+    expect(await drawAutoExport(dated, DOC, planned(dated, '```plantuml orders\nAlice -> Bob : %date()\n```'))).toMatchObject({
+      why: 'replay',
+      replay: 'volatile',
+      reasons: [{ replay: 'volatile', what: 'function:date', file: null }],
+    });
+    expect(await drawAutoExport(counted, DOC, planned(counted, '```plantuml orders\nAlice -> Bob : %strlen("ab")\n```'))).toMatchObject({
+      why: 'replay',
+      replay: 'unclassified',
+      reasons: [{ replay: 'unclassified', what: 'function:strlen', file: null }],
+    });
+    expect(await drawAutoExport(included, DOC, planned(included, '```plantuml orders\n!include part.iuml\n```'))).toMatchObject({
+      why: 'replay',
+      replay: 'volatile',
+      reasons: [{ replay: 'volatile', what: 'function:now', line: 2, file: '/repo/docs/part.iuml' }],
+    });
   });
 });
