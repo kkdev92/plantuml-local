@@ -11,6 +11,9 @@
 ' named by its id: images/checkout.svg and so on, beside this file. Export
 ' Diagram as PNG writes the one under the cursor, and Check Export
 ' Freshness lists whether each image is still what an export would write.
+' With plantumlLocal.autoExport.enabled on, Enable SVG Auto Export for
+' Diagram lets the one under the cursor be exported again as SVG each time
+' this file is saved.
 ' Go to Symbol in Workspace (Ctrl+T) finds the three by their ids, and what
 ' they declare, from any file of the workspace.
 
