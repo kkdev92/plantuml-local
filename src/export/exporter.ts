@@ -81,7 +81,7 @@ export interface ExporterDeps extends SpoolDeps {
    * has changed since. Null when nothing has, or the drawing does not say
    * what it was drawn from.
    */
-  staleInputs(drawing: Drawing): Promise<string | null>;
+  staleInputs(drawing: Pick<Drawing, 'document' | 'key' | 'drawnFrom'>): Promise<string | null>;
   /** Runs `task` once no other export in this window is writing the file at `path`. */
   lock<T>(path: string, task: () => Promise<T>): Promise<T>;
   /**
@@ -732,6 +732,87 @@ export async function drawAutoExport(
     return { why: 'replay', replay: input.replay.class, reasons: input.replay.reasons };
   }
   return { name: drawn.name, path: drawn.path, document: drawn.document, key: planned.key, content: drawn.content, input, drawnFrom };
+}
+
+/**
+ * What became of a diagram's SVG exported again with no one asked, given
+ * its turn: written, and what became of its record; left as it was, as it
+ * held the drawing already, its record taking what the drawing was drawn
+ * from when that differs (null when it does not); or not written, as
+ * automatic export ended meanwhile, or since the file was looked at it was
+ * opened with unsaved changes, removed, written by another export of the
+ * diagram (`overtaken`), which is newer, or changed otherwise — its bytes
+ * or its record — or what the drawing was drawn from changed, as
+ * `message` says.
+ */
+export type AutoExportCommit =
+  | { outcome: 'written'; recorded: RecordResult }
+  | { outcome: 'unchanged'; recorded: RecordResult | null }
+  | { outcome: 'ended' }
+  | { outcome: 'dirty' }
+  | { outcome: 'missing' }
+  | { outcome: 'overtaken' }
+  | { outcome: 'changed' }
+  | { outcome: 'stale'; message: string };
+
+/**
+ * Writes `drawing`, a diagram's SVG exported again with no one asked, once
+ * no other export in this window is writing its file — the lock an export
+ * by hand takes — if all is still as it was looked at: automatic export
+ * `allowed` still, the file there with no unsaved changes, its bytes and
+ * record those of `looked` (the diagram's own export, unchanged since), and
+ * what the drawing was drawn from unchanged. A file removed meanwhile is
+ * not made again: an export by hand makes it.
+ */
+export function commitAutoExport(
+  deps: Pick<ExporterDeps, 'lock' | 'isDirty' | 'readExisting' | 'ownerOf' | 'staleInputs' | 'writeFile' | 'record'>,
+  drawing: AutoExportDrawing,
+  looked: { sha256: string; owner: ArtifactRecord },
+  allowed: () => boolean
+): Promise<AutoExportCommit> {
+  return deps.lock(drawing.path, async (): Promise<AutoExportCommit> => {
+    if (!allowed()) {
+      return { outcome: 'ended' };
+    }
+    if (deps.isDirty(drawing.path)) {
+      return { outcome: 'dirty' };
+    }
+    const now = await deps.readExisting(drawing.path);
+    if (now === null) {
+      return { outcome: 'missing' };
+    }
+    const existing = digestOf(now);
+    const owner = deps.ownerOf(drawing.path);
+    if (existing.sha256 !== looked.sha256 || !sameRecord(owner, looked.owner)) {
+      // Still the diagram's own export, as recorded: another export of it,
+      // by hand say, wrote it meanwhile, from what was there then.
+      const own = owner !== null && sameKey(owner.key, drawing.key) && owner.sha256 === existing.sha256;
+      return { outcome: own ? 'overtaken' : 'changed' };
+    }
+    const stale = await deps.staleInputs(drawing);
+    if (stale !== null) {
+      return { outcome: 'stale', message: stale };
+    }
+    // Asked again after the reads, which take time: the permission can be
+    // taken back meanwhile, automatic export turned off, the file opened
+    // and edited.
+    if (!allowed()) {
+      return { outcome: 'ended' };
+    }
+    if (deps.isDirty(drawing.path)) {
+      return { outcome: 'dirty' };
+    }
+    const content = bytesOf(drawing.content);
+    if (sameDigest(existing, digestOf(content))) {
+      const recorded =
+        canonicalJson(looked.owner.input ?? null) === canonicalJson(drawing.input)
+          ? null
+          : await deps.record(drawing.key, drawing.path, now, drawing.input);
+      return { outcome: 'unchanged', recorded };
+    }
+    await deps.writeFile(drawing.path, content, true);
+    return { outcome: 'written', recorded: await deps.record(drawing.key, drawing.path, content, drawing.input) };
+  });
 }
 
 /** A file a drawing goes to, looked at before any is written. */

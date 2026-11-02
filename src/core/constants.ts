@@ -174,6 +174,13 @@ export const DIAGNOSTICS_DEBOUNCE_MS = 500;
 export const VIEWER_DEBOUNCE_MS = 300;
 
 /**
+ * How long after the last save of a diagram's files its SVG file is
+ * exported again, when that is allowed, in milliseconds: saves in quick
+ * succession — Save All, or Auto Save while typing — export it once.
+ */
+export const AUTO_EXPORT_DELAY_MS = 500;
+
+/**
  * Hard ceiling for a single render, in milliseconds.
  *
  * Renders normally finish in well under a second (the first one pays

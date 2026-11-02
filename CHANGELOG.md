@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **A diagram you allow is exported again as SVG each time its files are
+  saved.** *Enable SVG Auto Export for Diagram* allows the diagram at the
+  cursor, after a question that names the diagram, its document, the
+  workspace folder, the SVG file and the palette, and says when the file is
+  written and what ends the permission; *Disable SVG Auto Export for
+  Diagram* takes permissions back and leaves the files as they are. Saving
+  exports only while `plantumlLocal.autoExport.enabled`, off by default, is
+  on: it is read from User or Remote settings only, not from a workspace's,
+  and is not synced. A permission is given in a trusted workspace for a
+  named diagram of a saved Markdown or PlantUML file, in the light or dark
+  palette, that draws without errors and the same way each time from its
+  saved files, and whose SVG file is its own export, unchanged since; a file
+  no record names that holds just what the diagram draws can be taken as its
+  export. Up to 128 permissions are kept with the workspace's state on this
+  computer, neither synced nor written to the repository. Half a second
+  after the diagram's document, or a file it includes, was last saved in
+  VS Code, the diagram is drawn from the saved files alone, after what the
+  previews are waiting to draw, and written only while its file is as it was
+  last exported, which is looked at again under the export's lock just
+  before it is replaced. A diagram whose file is left as it is — it does not
+  draw, or its file is gone, edited or open with unsaved changes — is told
+  of once, with a way on, and several in one notification; unsaved changes
+  of its files are waited for. A permission ends, and says so, once its
+  diagram leaves the document or shares its name there, or the SVG file, the
+  workspace folder, where includes are looked for, the include setting, the
+  palette or the renderer changes.
+
 ## [0.20.0] - 2026-11-02
 
 ### Added

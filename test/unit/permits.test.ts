@@ -328,4 +328,39 @@ describe('PermitStore', () => {
 
     expect(permits.all()).toEqual([permit('b')]);
   });
+
+  it('tells each change kept, once it can be read back, and nothing else', async () => {
+    const store = memory();
+    const permits = new PermitStore(store);
+    const seen: string[][] = [];
+    const listening = permits.onDidChange(() => {
+      seen.push(permits.all().map(({ key: { name } }) => name));
+    });
+
+    await permits.add(permit('a'));
+    await permits.add(permit('b'));
+    await permits.remove(key('a'));
+    // Nothing to take out, nothing kept: nothing to tell.
+    await permits.remove(key('a'));
+    store.set.mockRejectedValueOnce(new Error('disk full'));
+    await permits.add(permit('c'));
+    expect(seen).toEqual([['a'], ['a', 'b'], ['b']]);
+
+    listening.dispose();
+    await permits.add(permit('d'));
+    expect(seen).toHaveLength(3);
+  });
+
+  it('keeps a change though a listener fails, and tells the others', async () => {
+    const permits = new PermitStore(memory());
+    const after = vi.fn();
+    permits.onDidChange(() => {
+      throw new Error('listener');
+    });
+    permits.onDidChange(after);
+
+    expect(await permits.add(permit('a'))).toBe('saved');
+    expect(after).toHaveBeenCalledTimes(1);
+    expect(permits.all()).toEqual([permit('a')]);
+  });
 });

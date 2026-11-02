@@ -54,6 +54,8 @@ export class RendererClient {
   private worker: Worker | null = null;
   private nextId = 1;
   private idleTimer: NodeJS.Timeout | null = null;
+  private idleWaiters: (() => void)[] = [];
+  private idleCheck: NodeJS.Immediate | null = null;
   private readonly pending = new Map<
     number,
     {
@@ -89,11 +91,57 @@ export class RendererClient {
     });
   }
 
+  /**
+   * Resolves once no render is in flight: for work that is to wait its turn
+   * behind whatever was asked for meanwhile — an SVG exported on save
+   * behind the previews. Checked once the renders that finished have had
+   * their say, so that one drawing several diagrams in a row asks for its
+   * next before this resolves; a render asked for later waits at most for
+   * the one this lets through.
+   */
+  whenIdle(): Promise<void> {
+    if (this.pending.size === 0) {
+      return Promise.resolve();
+    }
+    return new Promise<void>((resolve) => {
+      this.idleWaiters.push(resolve);
+    });
+  }
+
   dispose(): void {
     this.stopIdleTimer();
     this.failAll('Extension deactivated');
     void this.worker?.terminate();
     this.worker = null;
+    // Nothing is drawn any more: what was waiting for a turn goes on, to find that out.
+    if (this.idleCheck !== null) {
+      clearImmediate(this.idleCheck);
+      this.idleCheck = null;
+    }
+    this.wakeIdle();
+  }
+
+  /** Lets through what waits for no render to be in flight, once none is still. */
+  private checkIdle(): void {
+    if (this.pending.size > 0 || this.idleWaiters.length === 0 || this.idleCheck !== null) {
+      return;
+    }
+    this.idleCheck = setImmediate(() => {
+      this.idleCheck = null;
+      if (this.pending.size === 0) {
+        this.wakeIdle();
+      }
+    });
+    // A wait for a turn must not hold the host open.
+    this.idleCheck.unref();
+  }
+
+  private wakeIdle(): void {
+    const waiters = this.idleWaiters;
+    this.idleWaiters = [];
+    for (const wake of waiters) {
+      wake();
+    }
   }
 
   private startTimer(id: number): NodeJS.Timeout {
@@ -141,6 +189,7 @@ export class RendererClient {
     this.pending.delete(id);
     clearTimeout(entry.timer);
     this.restartIdleTimer();
+    this.checkIdle();
     return entry;
   }
 

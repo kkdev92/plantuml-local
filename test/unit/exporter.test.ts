@@ -6,6 +6,7 @@ import { findFileDiagrams, findPlantUmlBlocks } from '../../src/export/blocks';
 import { OUTPUT_BUFFER_LIMIT, OutputBuffer } from '../../src/export/buffer';
 import {
   addBackground,
+  commitAutoExport,
   drawAutoExport,
   drawDocument,
   exportAll,
@@ -1924,5 +1925,137 @@ describe('drawing a diagram to export on save', () => {
       replay: 'volatile',
       reasons: [{ replay: 'volatile', what: 'function:now', line: 2, file: '/repo/docs/part.iuml' }],
     });
+  });
+});
+
+describe('writing a diagram exported on save', () => {
+  const PATH = '/repo/docs/images/orders.svg';
+  const drawing = (): Partial<ExporterDeps> => ({
+    render: vi.fn((source: string) =>
+      Promise.resolve({ ...rendered(`<svg width="40" height="20" viewBox="0 0 40 20">${source}</svg>`), inputs: { context: null, requests: [], files: [] } })
+    ),
+  });
+  /** A diagram exported by hand, and drawn again from `text` to export on save; and the file as looked at then. */
+  const exported = async (
+    text = '```plantuml orders\nAlice -> Bob : again\n```'
+  ): Promise<{ deps: ReturnType<typeof makeDeps>; drawn: AutoExportDrawing; looked: { sha256: string; owner: NonNullable<ReturnType<ExportLedger['ownerOf']>> } }> => {
+    const deps = makeDeps(drawing());
+    await exportOne(deps, DOC, 'images', findPlantUmlBlocks('```plantuml orders\nAlice -> Bob\n```')[0]!, 'orders');
+    const [block] = findPlantUmlBlocks(text);
+    const plan = planDiagram(deps, DOC, 'images', block!, 'orders', 'svg');
+    if (!('key' in plan) || plan.key === null) {
+      throw new Error('not planned under a name of its own');
+    }
+    const drawn = (await drawAutoExport(deps, DOC, { ...plan, key: plan.key })) as AutoExportDrawing;
+    const owner = deps.ledger.ownerOf(PATH);
+    if (owner === null) {
+      throw new Error('not recorded');
+    }
+    const bytes = deps.disk.get(PATH);
+    const looked = { sha256: sha256(typeof bytes === 'string' ? new TextEncoder().encode(bytes) : bytes!), owner };
+    deps.writeFile.mockClear();
+    deps.record.mockClear();
+    deps.staleInputs.mockClear();
+    return { deps, drawn, looked };
+  };
+  const always = (): boolean => true;
+
+  it('writes the drawing over the diagram\'s own export and records it, with what it was drawn from', async () => {
+    const { deps, drawn, looked } = await exported();
+
+    expect(await commitAutoExport(deps, drawn, looked, always)).toEqual({ outcome: 'written', recorded: 'recorded' });
+    expect(deps.writeFile).toHaveBeenCalledTimes(1);
+    expect(textOf(deps.disk.get(PATH))).toBe(textOf(drawn.content));
+    expect(deps.ledger.ownerOf(PATH)).toMatchObject({ sha256: sha256(new TextEncoder().encode(textOf(drawn.content))), input: drawn.input });
+  });
+
+  it('leaves a file that holds the drawing already, and records what it was drawn from only when that differs', async () => {
+    const { deps, drawn, looked } = await exported('```plantuml orders\nAlice -> Bob\n```');
+
+    expect(await commitAutoExport(deps, drawn, looked, always)).toEqual({ outcome: 'unchanged', recorded: null });
+    expect(deps.record).not.toHaveBeenCalled();
+    const told = { ...drawn, input: { ...drawn.input, fingerprint: 'f'.repeat(64) } };
+    expect(await commitAutoExport(deps, told, looked, always)).toEqual({ outcome: 'unchanged', recorded: 'recorded' });
+    expect(deps.writeFile).not.toHaveBeenCalled();
+    expect(deps.ledger.ownerOf(PATH)?.input).toEqual(told.input);
+  });
+
+  it('writes nothing once automatic export is no longer allowed, before the file is read or after', async () => {
+    const before = await exported();
+    expect(await commitAutoExport(before.deps, before.drawn, before.looked, () => false)).toEqual({ outcome: 'ended' });
+
+    const after = await exported();
+    const answers = [true, false];
+    expect(await commitAutoExport(after.deps, after.drawn, after.looked, () => answers.shift() ?? false)).toEqual({ outcome: 'ended' });
+    expect(after.deps.staleInputs).toHaveBeenCalledTimes(1);
+    for (const { deps } of [before, after]) {
+      expect(deps.writeFile).not.toHaveBeenCalled();
+      expect(deps.record).not.toHaveBeenCalled();
+    }
+  });
+
+  it('writes nothing to a file open with unsaved changes, removed, or changed since it was looked at', async () => {
+    const dirty = await exported();
+    dirty.deps.isDirty = (): boolean => true;
+    expect(await commitAutoExport(dirty.deps, dirty.drawn, dirty.looked, always)).toEqual({ outcome: 'dirty' });
+
+    const removed = await exported();
+    removed.deps.disk.delete(PATH);
+    expect(await commitAutoExport(removed.deps, removed.drawn, removed.looked, always)).toEqual({ outcome: 'missing' });
+    expect(removed.deps.disk.has(PATH)).toBe(false);
+
+    const edited = await exported();
+    edited.deps.disk.set(PATH, '<svg>edited</svg>');
+    expect(await commitAutoExport(edited.deps, edited.drawn, edited.looked, always)).toEqual({ outcome: 'changed' });
+    expect(textOf(edited.deps.disk.get(PATH))).toBe('<svg>edited</svg>');
+
+    const taken = await exported();
+    await taken.deps.ledger.record({ ...taken.looked.owner.key, name: 'other' }, PATH, new TextEncoder().encode(textOf(taken.deps.disk.get(PATH))));
+    expect(await commitAutoExport(taken.deps, taken.drawn, taken.looked, always)).toEqual({ outcome: 'changed' });
+
+    for (const { deps } of [dirty, removed, edited, taken]) {
+      expect(deps.writeFile).not.toHaveBeenCalled();
+    }
+  });
+
+  it('writes nothing to a file opened with unsaved changes after it is read', async () => {
+    const { deps, drawn, looked } = await exported();
+    const answers = [false, true];
+    deps.isDirty = (): boolean => answers.shift() ?? true;
+    expect(await commitAutoExport(deps, drawn, looked, always)).toEqual({ outcome: 'dirty' });
+    expect(deps.staleInputs).toHaveBeenCalledTimes(1);
+    expect(deps.writeFile).not.toHaveBeenCalled();
+    expect(deps.record).not.toHaveBeenCalled();
+  });
+
+  it('writes nothing once what the drawing was drawn from changed, and says what', async () => {
+    const { deps, drawn, looked } = await exported();
+    deps.staleInputs.mockImplementation(() => Promise.resolve('the diagram itself changed'));
+
+    expect(await commitAutoExport(deps, drawn, looked, always)).toEqual({ outcome: 'stale', message: 'the diagram itself changed' });
+    expect(deps.writeFile).not.toHaveBeenCalled();
+  });
+
+  it('waits for an export by hand writing the file, and then leaves what it wrote', async () => {
+    const { deps, drawn, looked } = await exported();
+    let release = (): void => undefined;
+    const held = deps.lock(PATH, async () => {
+      await new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      // The export by hand writes the diagram as it is in the editor, and records it.
+      const bytes = new TextEncoder().encode('<svg>by hand</svg>');
+      deps.disk.set(PATH, bytes);
+      await deps.ledger.record(looked.owner.key, PATH, bytes);
+    });
+    const committed = commitAutoExport(deps, drawn, looked, always);
+    await Promise.resolve();
+    expect(deps.writeFile).not.toHaveBeenCalled();
+    release();
+    await held;
+
+    expect(await committed).toEqual({ outcome: 'overtaken' });
+    expect(deps.writeFile).not.toHaveBeenCalled();
+    expect(textOf(deps.disk.get(PATH))).toBe('<svg>by hand</svg>');
   });
 });

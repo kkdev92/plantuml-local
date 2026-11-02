@@ -45,6 +45,7 @@ export class ReadSnapshot {
   private readonly files = new Map<string, DeliveredFile & { text: string; bytes: number }>();
   private readonly accesses = new Map<string, Promise<DocumentAccess>>();
   private readonly unsavedFiles = new Set<string>();
+  private readonly candidates = new Set<string>();
 
   /** Whether the files are read as saved: a document open with unsaved changes is noted rather than read from the editor. */
   readonly savedOnly: boolean;
@@ -66,6 +67,15 @@ export class ReadSnapshot {
     return [...this.unsavedFiles];
   }
 
+  /**
+   * Every path a drawing looked at for a file, found there or not, by its
+   * real path, in the order first looked at: where a file saved later
+   * would change what is drawn.
+   */
+  looked(): string[] {
+    return [...this.candidates];
+  }
+
   /** What `look` gave for `document` the first time this export asked. */
   access(document: string, look: () => Promise<DocumentAccess>): Promise<DocumentAccess> {
     let known = this.accesses.get(document);
@@ -82,6 +92,7 @@ export class ReadSnapshot {
    */
   reader(openText: (path: string) => string | undefined): CandidateReader {
     return async (root, candidate, maxBytes) => {
+      this.candidates.add(candidate);
       const key = `${root}\n${candidate}`;
       let read = this.reads.get(key);
       if (read === undefined) {
