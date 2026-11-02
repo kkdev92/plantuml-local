@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-11-02
+
 ### Added
 
 - **Check Export Freshness says whether exported images are still what an
@@ -1306,7 +1308,8 @@ First public release.
 - happy-dom's bundled self-signed TLS certificate (unused fetch machinery) is
   stripped from the worker bundle at build time.
 
-[Unreleased]: https://github.com/kkdev92/plantuml-local/compare/v0.19.0...HEAD
+[Unreleased]: https://github.com/kkdev92/plantuml-local/compare/v0.20.0...HEAD
+[0.20.0]: https://github.com/kkdev92/plantuml-local/compare/v0.19.0...v0.20.0
 [0.19.0]: https://github.com/kkdev92/plantuml-local/compare/v0.18.0...v0.19.0
 [0.18.0]: https://github.com/kkdev92/plantuml-local/compare/v0.17.1...v0.18.0
 [0.17.1]: https://github.com/kkdev92/plantuml-local/compare/v0.17.0...v0.17.1
