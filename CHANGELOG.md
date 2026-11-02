@@ -36,6 +36,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   workspace folder, where includes are looked for, the include setting, the
   palette or the renderer changes.
 
+### Fixed
+
+- **Exporting an image again leaves the editors showing it open.** An image
+  open in VS Code — an SVG as an image or as text, or a PNG — closed each
+  time its diagram was exported again: the new file was renamed over it with
+  VS Code's rename, which deletes the old file first. A file on disk is now
+  replaced in one step, and its editors show the new image. Where that
+  cannot be done — another program has the file open, say — the file is
+  replaced as before.
+
 ## [0.20.0] - 2026-11-02
 
 ### Added

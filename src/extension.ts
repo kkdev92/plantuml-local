@@ -26,7 +26,7 @@ import {
 import type MarkdownIt from 'markdown-it';
 import { randomBytes } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { realpath } from 'node:fs/promises';
+import { realpath, rename as renameOnDisk } from 'node:fs/promises';
 import { basename, join, relative, sep } from 'node:path';
 import * as vscode from 'vscode';
 
@@ -118,6 +118,7 @@ import { documentColumnOf, documentLineOf } from './core/positions';
 import { hasStartLine } from './core/shape';
 import { errorMessage, libraryNotBundled } from './core/messages';
 import { lineAfterEdits, planReferenceEdits, type ReferenceEdit } from './export/references';
+import { replaceFile } from './export/rename';
 import { scanText, type ReplayReason } from './export/replay';
 import {
   diagramAt,
@@ -1536,9 +1537,11 @@ function staleInputsMessage(
 /**
  * Resolves a path against the document's own folder and writes through
  * `vscode.workspace.fs`, so exporting works on remote and virtual file
- * systems rather than only on local disk. With `snapshot`, the reads of one
- * export, the diagrams are drawn from what it read first, and each file
- * written is recorded with what it was drawn from.
+ * systems rather than only on local disk; only a file replaced on disk is
+ * renamed over with the file system's own rename (src/export/rename.ts).
+ * With `snapshot`, the reads of one export, the diagrams are drawn from what
+ * it read first, and each file written is recorded with what it was drawn
+ * from.
  */
 function exporterDeps(
   context: OperationContext,
@@ -1551,6 +1554,25 @@ function exporterDeps(
   snapshot?: ReadSnapshot
 ): ExporterDeps {
   const draw = drawWith(renderer, settings, context.l10n, undefined, snapshot);
+  // What is at `uri`, or null when nothing is. Rejects when a folder is:
+  // renaming a file over a folder deletes the folder and all it holds.
+  const notAFolder = async (uri: vscode.Uri): Promise<vscode.FileStat | null> => {
+    let stat: vscode.FileStat;
+    try {
+      stat = await vscode.workspace.fs.stat(uri);
+    } catch (error: unknown) {
+      if (error instanceof vscode.FileSystemError && error.code === 'FileNotFound') {
+        return null;
+      }
+      throw error;
+    }
+    if ((stat.type & vscode.FileType.Directory) !== 0) {
+      throw new Error(
+        context.l10n.t('Cannot save to {0} because a folder with that name already exists.', workspace.relativePath(uri))
+      );
+    }
+    return stat;
+  };
   return {
     ...drawingDeps(context.l10n, (source, dark) => draw(source, dark, document.toString()), palettes, settings, document),
     invalidNameMessage: context.l10n.t(
@@ -1565,22 +1587,7 @@ function exporterDeps(
       vscode.Uri.joinPath(vscode.Uri.parse(documentPath), '..', relative).toString(),
     readExisting: async (path): Promise<Uint8Array | null> => {
       const uri = vscode.Uri.parse(path);
-      let stat: vscode.FileStat;
-      try {
-        stat = await vscode.workspace.fs.stat(uri);
-      } catch (error: unknown) {
-        if (error instanceof vscode.FileSystemError && error.code === 'FileNotFound') {
-          return null;
-        }
-        throw error;
-      }
-      // Renaming a file over a folder deletes the folder and all it holds.
-      if ((stat.type & vscode.FileType.Directory) !== 0) {
-        throw new Error(
-          context.l10n.t('Cannot save to {0} because a folder with that name already exists.', workspace.relativePath(uri))
-        );
-      }
-      return vscode.workspace.fs.readFile(uri);
+      return (await notAFolder(uri)) === null ? null : vscode.workspace.fs.readFile(uri);
     },
     ownerOf: (path) => exports.ownerOf(path),
     wroteBefore: (path, source, existing) => exports.wroteBefore(path, source, existing),
@@ -1623,7 +1630,25 @@ function exporterDeps(
       try {
         const bytes = typeof content === 'string' ? new TextEncoder().encode(content) : content;
         await vscode.workspace.fs.writeFile(temporary, bytes);
-        await vscode.workspace.fs.rename(temporary, target, { overwrite: replace });
+        if (replace && target.scheme === 'file') {
+          // In one step, so that the editors showing the file stay open.
+          await replaceFile({
+            rename: () => renameOnDisk(temporary.fsPath, target.fsPath),
+            windows: process.platform === 'win32',
+            wait: (ms) => new Promise<void>((resolve) => setTimeout(resolve, ms)),
+            now: () => Date.now(),
+            refuseFolder: async () => {
+              await notAFolder(target);
+            },
+            fallback: async () => {
+              await vscode.workspace.fs.rename(temporary, target, { overwrite: true });
+            },
+          });
+        } else {
+          // VS Code's rename elsewhere than on disk, and for a new file, where
+          // it writes over no file put there since it was looked at.
+          await vscode.workspace.fs.rename(temporary, target, { overwrite: replace });
+        }
       } catch (error: unknown) {
         await Promise.resolve(vscode.workspace.fs.delete(temporary)).catch(() => undefined);
         throw error;

@@ -1846,6 +1846,106 @@ describe('export (dist)', () => {
       expect(vscodeStub._test.notifications.error.at(-1)).toMatch(/^Could not export the diagram: /);
     });
 
+    describe('replacing a file on disk', () => {
+      // The bundle looks Node's rename up on this object each time it calls it.
+      const disk = require('node:fs/promises') as typeof import('node:fs/promises');
+      const exportLabel = async (folder: string, label: string): Promise<void> => {
+        vscodeStub._test.setActiveEditor(
+          makeEditor(`file:///c/${folder}/doc.md`, NAMED_BLOCK.replace('hi', label), 1)
+        );
+        await exportSvg();
+      };
+      const temporaries = (folder: string): string[] =>
+        [...vscodeStub._test.writtenFiles.keys()].filter(
+          (key) => key.startsWith(`file:///c/${folder}/`) && key.endsWith('.tmp')
+        );
+      const failure = (code: string): Error => Object.assign(new Error(`${code}: rename failed`), { code });
+
+      it("replaces its own file with the file system's rename, not VS Code's", async () => {
+        const target = 'file:///c/inplace/images/orders.svg';
+        const onDisk: string[][] = [];
+        // Moves the stub's file as the file system's rename would: in one step.
+        const renaming = vi.spyOn(disk, 'rename').mockImplementation(async (from, to) => {
+          onDisk.push([String(from), String(to)]);
+          const source = `file://${String(from)}`;
+          const bytes = vscodeStub._test.writtenBytes.get(source);
+          vscodeStub._test.writtenFiles.set(`file://${String(to)}`, vscodeStub._test.writtenFiles.get(source) ?? '');
+          vscodeStub._test.writtenBytes.set(`file://${String(to)}`, bytes ?? new Uint8Array());
+          vscodeStub._test.writtenFiles.delete(source);
+          vscodeStub._test.writtenBytes.delete(source);
+        });
+        try {
+          const renames = vscodeStub._test.fileRenames.length;
+          await exportLabel('inplace', 'first');
+          // A new file is made with VS Code's rename, which will not replace
+          // a file put there since it was looked at.
+          expect(onDisk).toEqual([]);
+          expect(vscodeStub._test.fileRenames.slice(renames)).toEqual([
+            { source: expect.stringMatching(/\.tmp$/), target, overwrite: false },
+          ]);
+
+          await exportLabel('inplace', 'second');
+
+          // VS Code's rename deletes the file first, and VS Code closes the
+          // editors showing a file it deletes.
+          expect(onDisk).toEqual([
+            [expect.stringMatching(/^\/c\/inplace\/images\/\.orders\.svg\.[0-9a-f]{8}\.tmp$/), '/c/inplace/images/orders.svg'],
+          ]);
+          expect(vscodeStub._test.fileRenames.slice(renames + 1)).toEqual([]);
+        } finally {
+          renaming.mockRestore();
+        }
+        expect(vscodeStub._test.writtenFiles.get(target)).toContain('second');
+        expect(temporaries('inplace')).toEqual([]);
+      });
+
+      it("leaves the file to VS Code's rename when the file system's rename cannot replace it", async () => {
+        const target = 'file:///c/inplace-refused/images/orders.svg';
+        await exportLabel('inplace-refused', 'first');
+        const renames = vscodeStub._test.fileRenames.length;
+
+        const renaming = vi.spyOn(disk, 'rename').mockRejectedValue(failure('EXDEV'));
+        try {
+          await exportLabel('inplace-refused', 'second');
+          expect(renaming).toHaveBeenCalledTimes(1);
+        } finally {
+          renaming.mockRestore();
+        }
+
+        expect(vscodeStub._test.fileRenames.slice(renames)).toEqual([
+          { source: expect.stringMatching(/\.tmp$/), target, overwrite: true },
+        ]);
+        expect(vscodeStub._test.writtenFiles.get(target)).toContain('second');
+        expect(temporaries('inplace-refused')).toEqual([]);
+      });
+
+      it("does not rename over a folder put in the file's place after it was looked at", async () => {
+        const target = 'file:///c/inplace-folder/images/orders.svg';
+        await exportLabel('inplace-folder', 'first');
+        const renames = vscodeStub._test.fileRenames.length;
+
+        const renaming = vi.spyOn(disk, 'rename').mockImplementation(async () => {
+          vscodeStub._test.writtenFiles.delete(target);
+          vscodeStub._test.writtenBytes.delete(target);
+          vscodeStub._test.writtenFiles.set(`${target}/inside.txt`, 'kept');
+          throw failure('EISDIR');
+        });
+        try {
+          await exportLabel('inplace-folder', 'second');
+        } finally {
+          renaming.mockRestore();
+        }
+
+        // VS Code's rename would have deleted the folder and what it holds.
+        expect(vscodeStub._test.fileRenames.slice(renames)).toEqual([]);
+        expect(vscodeStub._test.writtenFiles.get(`${target}/inside.txt`)).toBe('kept');
+        expect(vscodeStub._test.notifications.error.at(-1)).toBe(
+          'Could not export the diagram: Cannot save to inplace-folder/images/orders.svg because a folder with that name already exists.'
+        );
+        expect(temporaries('inplace-folder')).toEqual([]);
+      });
+    });
+
     it('offers to reveal the file it wrote in the Explorer view', async () => {
       const revealed = (): string[] =>
         vscodeStub._test.commandCalls

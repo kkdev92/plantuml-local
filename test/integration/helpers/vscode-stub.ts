@@ -861,6 +861,8 @@ export interface VscodeStub {
     failClipboard: boolean;
     /** URIs passed to `workspace.fs.writeFile`, in order. */
     fileWrites: string[];
+    /** What `workspace.fs.rename` was asked to rename, in order: VS Code's rename, not the disk's. */
+    fileRenames: { source: string; target: string; overwrite: boolean }[];
     /** Completion providers registered, in order. */
     completionProviders: CompletionRegistrationStub[];
     /** Folding range providers registered, in order. */
@@ -1011,6 +1013,7 @@ export function createVscodeStub(): VscodeStub {
   };
   const configurationListeners: ((event: unknown) => void)[] = [];
   const fileWrites: string[] = [];
+  const fileRenames: { source: string; target: string; overwrite: boolean }[] = [];
   const diagnostics = new Map<string, readonly DiagnosticStub[]>();
   type DocumentStub = TextEditorStub['document'];
   const openListeners: ((document: DocumentStub) => void)[] = [];
@@ -1929,6 +1932,7 @@ export function createVscodeStub(): VscodeStub {
           return writtenBytes.get(uri.toString()) ?? Buffer.from(content, 'utf8');
         },
         rename: async (source, target, options) => {
+          fileRenames.push({ source: source.toString(), target: target.toString(), overwrite: options?.overwrite === true });
           const content = writtenFiles.get(source.toString());
           if (hooks.failRename || content === undefined) {
             throw new FileSystemError(`cannot rename ${source.toString()}`, 'Unavailable');
@@ -2051,6 +2055,7 @@ export function createVscodeStub(): VscodeStub {
         hooks.failClipboard = value;
       },
       fileWrites,
+      fileRenames,
       completionProviders,
       foldingProviders,
       symbolProviders,
