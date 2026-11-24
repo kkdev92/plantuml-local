@@ -213,8 +213,8 @@ lists the file's diagrams when it holds several, and draws the diagram again as
 the file changes. Running the command again in the same file brings its panel
 back rather than opening another. *Open Diagram Preview* does the same in the
 editor's own group (or hold Alt on the button). A panel left open comes back
-when VS Code restarts, on the same diagram when that diagram has a name, and
-otherwise asking which one to show.
+when VS Code restarts. It restores a unique diagram ID, or a lone diagram
+named after the file. Otherwise, choose the diagram again from the list.
 
 ![A .puml file beside its diagram preview, with the Outline view listing its diagrams](images/puml-preview.png)
 
@@ -228,8 +228,11 @@ to fit that area in the panel; Esc leaves it without zooming. `Home` and `End`
 scroll to the top and the bottom of the diagram, with Shift to its left and
 right edges, and `C` to its centre; the panel's context menu has these too.
 None of these keys does anything while the list of diagrams has the focus.
-Each diagram keeps its zoom and position while it is redrawn, while
-the panel is hidden, and across a restart. The PNG button beside them exports
+The panel keeps each diagram’s zoom and position as you edit or hide the
+panel. For unnamed diagrams or duplicate IDs, it follows the opening line.
+If that line is replaced or the diagram becomes ambiguous, choose it again
+to start at Fit. Copy and export use the selected diagram’s current text,
+including edits waiting for a preview refresh. The PNG button beside them exports
 the diagram shown as *Export Diagram as PNG* does, at its own size and scale
 rather than the zoom of the panel, and in the palette of exports: light,
 whatever the editor theme, unless `plantumlLocal.exportTheme` says otherwise.

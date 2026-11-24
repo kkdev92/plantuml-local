@@ -109,11 +109,14 @@ function openPage(): Page {
     focused: () => document.activeElement?.id,
     stops: () => tools.map((button) => button.tabIndex),
     async show() {
+      window.dispatchEvent(new window.MessageEvent('message', { origin: ORIGIN,
+        data: { type: 'diagrams', items: ['Checkout'], selected: 0, keep: {}, listRevision: 1, targetToken: 1, generation: 1 },
+      }));
       window.dispatchEvent(
         new window.MessageEvent('message', {
           origin: ORIGIN,
           data: {
-            type: 'render',
+            type: 'render', targetToken: 1, generation: 1,
             svg: '<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="500"></svg>',
             label: 'Checkout',
             backdrop: '#ffffff',
@@ -135,6 +138,56 @@ function openPage(): Page {
 }
 
 describe('the viewer page', () => {
+  it('disables image actions during a switch and releases a superseded decode on clear', async () => {
+    const page = openPage();
+    await page.show();
+    const { window, byId } = page;
+    const post = (data: unknown) => window.dispatchEvent(new window.MessageEvent('message', { origin: ORIGIN, data }));
+    const list = { type: 'diagrams', items: ['A', 'B'], selected: 1, keep: {}, listRevision: 2, targetToken: 2, generation: 2 };
+    const disabled = () => ['export-png', 'copy-png', 'copy-svg'].every(id => byId(id).hasAttribute('disabled'));
+    expect(disabled()).toBe(false);
+    byId('diagrams').dispatchEvent(new window.Event('change'));
+    expect(disabled()).toBe(true);
+    post(list);
+    let finish!: () => void;
+    const decode = vi.spyOn(window.HTMLImageElement.prototype, 'decode').mockImplementation(() => new Promise<void>(resolve => { finish = resolve; }));
+    post({ type: 'render', targetToken: 2, generation: 2, key: 'B', label: 'B', svg: '<svg/>', backdrop: 'white' });
+    expect(disabled()).toBe(true);
+    post({ type: 'status', targetToken: 2, generation: 2, clear: true, text: 'Choose again', spoken: null });
+    finish();
+    await Promise.resolve();
+    expect(byId('diagram').hidden).toBe(true);
+    expect(disabled()).toBe(true);
+    decode.mockRestore();
+  });
+
+  it('correlates a pending clipboard promise with its page token and settles it on refusal or pagehide', async () => {
+    const page = openPage();
+    await page.show();
+    const { window, byId } = page;
+    let pending!: Promise<unknown>;
+    Object.assign(window, { ClipboardItem: class {
+      constructor(types: Record<string, Promise<unknown>>) { pending = types['image/png']!; }
+    } });
+    Object.defineProperty(window.navigator, 'clipboard', { value: { write: () => pending } });
+    const answer = (targetToken: number, id: number) => window.dispatchEvent(new window.MessageEvent('message', {
+      origin: ORIGIN, data: { type: 'copyFailed', message: 'Unavailable', targetToken, id },
+    }));
+    byId('copy-png').click();
+    const first = pending;
+    let settled = false;
+    first.catch(() => { settled = true; });
+    answer(99, 1);
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    answer(1, 1);
+    await expect(first).rejects.toThrow('Unavailable');
+    byId('copy-png').click();
+    const second = pending;
+    window.dispatchEvent(new window.Event('pagehide'));
+    await expect(second).rejects.toThrow('Not taken.');
+  });
+
   it('keeps each row of its zoom buttons, and of PNG and Copy, to the right when a narrow panel wraps them', () => {
     const page = openPage();
     const style = (id: string) => page.window.getComputedStyle(page.byId(id));

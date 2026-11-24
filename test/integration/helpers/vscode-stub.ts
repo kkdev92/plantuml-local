@@ -934,7 +934,7 @@ export interface VscodeStub {
     /** Opens `document`: adds it to `textDocuments` and fires the open listeners. */
     openDocument(document: TextEditorStub['document']): void;
     /** Fires the change listeners for `document`, as an edit would. */
-    changeDocument(document: TextEditorStub['document']): void;
+    changeDocument(document: TextEditorStub['document'], contentChanges?: unknown[]): void;
     /** Closes `document`: removes it from `textDocuments` and fires the close listeners. */
     closeDocument(document: TextEditorStub['document']): void;
     /** Fires the save listeners for `document`, as a save would. */
@@ -2122,9 +2122,9 @@ export function createVscodeStub(): VscodeStub {
           listener(document);
         }
       },
-      changeDocument: (document) => {
+      changeDocument: (document, contentChanges = [{}]) => {
         for (const listener of changeListeners) {
-          listener({ document, contentChanges: [{}] });
+          listener({ document, contentChanges });
         }
       },
       closeDocument: (document) => {

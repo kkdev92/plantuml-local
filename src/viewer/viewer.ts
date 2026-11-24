@@ -20,11 +20,12 @@
  * file's text.
  */
 
+import { ViewerSelection, type TextChange } from './selection';
 import { DIAGRAM_BACKDROP, EMOJI_UNAVAILABLE, hasRemoteReference } from '../core/constants';
 import { notationLabel, unsupportedKinds } from '../core/notation';
 import { diagramShape } from '../core/shape';
 import type { DiagramRender, IncludedStyle } from '../core/types';
-import { blockAtLine, findFileDiagrams, type PlantUmlBlock } from '../export/blocks';
+import { blockAtLine, type PlantUmlBlock } from '../export/blocks';
 import type { PngSource } from '../export/exporter';
 import { withIncludeReason } from '../includes/describe';
 import { changeTo } from '../includes/tracking';
@@ -77,16 +78,8 @@ export interface ViewerDeps {
   render(source: string, dark: boolean, document: string): Promise<DiagramRender>;
   resolvePalette(source: string, dark: boolean, included?: IncludedStyle): Promise<boolean>;
   isDark(): boolean;
-  /**
-   * Exports the diagram that starts on `line` of the file at `uri` as a
-   * PNG, as Export Diagram as PNG does at the cursor.
-   */
-  exportPng(uri: string, line: number): Promise<void>;
-  /**
-   * Copies the diagram that starts on `line` of the file at `uri` to the
-   * clipboard as SVG text, as Copy Diagram as SVG Text does at the cursor.
-   */
-  copySvgText(uri: string, line: number): Promise<void>;
+  exportPng(snapshot: ViewerSnapshot): Promise<void>;
+  copySvgText(snapshot: ViewerSnapshot): Promise<void>;
   /**
    * What copying `diagram` of the file at `uri` puts on the clipboard: the
    * PNG Export Diagram as PNG would write, for the page to draw, or why
@@ -96,30 +89,36 @@ export interface ViewerDeps {
   labels: ViewerLabels;
 }
 
-/** What the page may ask for. Anything else it sends is ignored. */
-export type ViewerRequest =
-  | { type: 'ready' }
-  | { type: 'select'; index: number }
-  | { type: 'exportPng' }
-  | { type: 'copySvg' }
-  | { type: 'copyPng'; id: number };
+export interface ViewerSnapshot {
+  text: string;
+  block: PlantUmlBlock;
+  blocks: PlantUmlBlock[];
+  targetToken: number;
+}
 
-/** Reads a message from the page, which is untrusted, against `count` diagrams. */
-export function parseRequest(message: unknown, count: number): ViewerRequest | null {
-  if (typeof message !== 'object' || message === null) {
+type ViewerRequest =
+  | { type: 'ready' }
+  | { type: 'select'; index: number; listRevision: number }
+  | { type: 'exportPng' | 'copySvg'; targetToken: number }
+  | { type: 'copyPng'; targetToken: number; id: number };
+
+const positive = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isSafeInteger(value) && value > 0;
+
+export function parseRequest(message: unknown): ViewerRequest | null {
+  if (typeof message !== 'object' || message === null || Array.isArray(message)) {
     return null;
   }
-  const { type, index, id } = message as { type?: unknown; index?: unknown; id?: unknown };
-  if (type === 'ready' || type === 'exportPng' || type === 'copySvg') {
-    return { type };
+  const { type, index, id, listRevision, targetToken } = message as Record<string, unknown>;
+  if (type === 'ready') {return { type };}
+  if (type === 'select' && positive(listRevision) && typeof index === 'number' && Number.isSafeInteger(index) && index >= 0) {
+    return { type, listRevision, index };
   }
-  if (type === 'select' && typeof index === 'number' && Number.isInteger(index)) {
-    return index >= 0 && index < count ? { type: 'select', index } : null;
+  if (!positive(targetToken)) {
+    return null;
   }
-  // The page numbers its copies, so that each answer finds its own.
-  if (type === 'copyPng' && typeof id === 'number' && Number.isSafeInteger(id) && id > 0) {
-    return { type, id };
-  }
+  if (type === 'exportPng' || type === 'copySvg') {return { type, targetToken };}
+  if (type === 'copyPng' && positive(id)) {return { type, targetToken, id };}
   return null;
 }
 
@@ -209,8 +208,11 @@ export function viewerBody(labels: ToolbarLabels, escape: (text: string) => stri
 
 /** One PlantUML file's viewer. */
 export class DiagramViewer {
-  /** The diagram shown: by its name when it has one, else by its position. */
-  private target: { name: string | null; index: number } = { name: null, index: 0 };
+  private readonly selection: ViewerSelection;
+  private targetToken = 0;
+  private lost = false;
+  private resetViews = false;
+  private renderedToken = -1;
   /** Counts draws, so an older render finishing late is dropped. */
   private generation = 0;
   /** Says the diagram is not drawn again since the file changed, or ''. */
@@ -225,57 +227,148 @@ export class DiagramViewer {
     private readonly fileName: string,
     /** The file's URI, which the page keeps so the panel can come back after a restart. */
     private readonly uri: string
-  ) {}
-
-  /**
-   * Makes the diagram named `name` the one shown, for a panel brought back
-   * after a restart. Without a name there is nothing to go by — the
-   * diagram had none — so the page asks for a choice rather than guessing.
-   */
-  restore(name: string | null): void {
-    this.target = { name, index: name === null ? -1 : 0 };
+  ) {
+    this.selection = new ViewerSelection(fileName);
   }
 
-  /**
-   * Makes the diagram of `text` at `line` (the cursor) the one shown, or
-   * the first one, without drawing it: a new page asks once it runs.
-   */
+  restore(state: Parameters<ViewerSelection['restore']>[0], text: string): void {
+    this.selection.read(text);
+    this.selection.restore(state);
+    this.resetViews = true;
+    this.invalidate();
+  }
+
+  private invalidate(): void {
+    this.targetToken++;
+    this.generation++;
+    this.dependencies = [];
+    this.renderedToken = -1;
+  }
+
+  dispose(): void {
+    this.invalidate();
+  }
+
   select(text: string, line: number | null): void {
-    const diagrams = findFileDiagrams(text, this.fileName);
-    const at = line === null ? null : blockAtLine(diagrams, line);
-    const index = at === null ? 0 : diagrams.indexOf(at);
-    this.target = { name: diagrams[index]?.name ?? null, index };
+    this.selection.read(text);
+    const at = line === null ? null : blockAtLine(this.selection.diagrams, line);
+    this.selection.choose(at ? this.selection.diagrams.indexOf(at) : 0);
+    this.selection.waiting = this.selection.diagrams.length === 0;
+    this.lost = false;
+    this.invalidate();
   }
 
-  /** Shows the diagram of `text` at `line`, drawing it. */
   async show(text: string, line: number | null): Promise<void> {
     this.select(text, line);
     await this.update(text);
   }
 
-  /** Handles a message from the page against the file's current `text`. */
+  /** Update identity synchronously even when drawing is deferred until a save. */
+  sync(text: string, changes?: readonly TextChange[], replaced = false): boolean {
+    const before = this.selection.current;
+    const waiting = this.selection.waiting;
+    this.selection.read(text, changes, replaced);
+    if (before !== this.selection.current) {
+      this.lost = !this.selection.current;
+      this.invalidate();
+    }
+    return waiting && !!this.selection.current;
+  }
+
+  /** A reopened document, or a changed version for which no edit event was delivered. */
+  reconcile(text: string): void {
+    this.sync(text, undefined, true);
+    void this.list();
+    if (!this.selection.current) {
+      void this.noSelection();
+    }
+  }
+
+  changed(text: string, changes: readonly TextChange[], replaced: boolean, note: string | null): boolean {
+    if (this.sync(text, changes, replaced)) {
+      void this.update(text);
+      return false;
+    }
+    void this.list();
+    if (!this.selection.current) {
+      void this.noSelection();
+      return false;
+    }
+    if (note !== null) {
+      void this.stale(note);
+    }
+    return note === null;
+  }
+
+  snapshot(token: number): ViewerSnapshot | null {
+    const current = this.selection.current;
+    if (token !== this.targetToken || token !== this.renderedToken || !current) {
+      return null;
+    }
+    return { text: this.selection.text, block: this.selection.diagrams[current.index]!, blocks: this.selection.diagrams, targetToken: token };
+  }
+
   async receive(message: unknown, text: string): Promise<void> {
-    const diagrams = findFileDiagrams(text, this.fileName);
-    const request = parseRequest(message, diagrams.length);
-    if (request?.type === 'exportPng' || request?.type === 'copySvg') {
-      const diagram = diagrams[this.indexIn(diagrams)];
-      if (diagram !== undefined) {
-        await (request.type === 'exportPng'
-          ? this.deps.exportPng(this.uri, diagram.openLine)
-          : this.deps.copySvgText(this.uri, diagram.openLine));
+    const request = parseRequest(message);
+    if (!request) {
+      return;
+    }
+    const before = this.selection.revision;
+    this.sync(text);
+    if (request.type === 'ready') {
+      this.selection.revision++;
+      this.invalidate();
+      const drawing = this.update(text);
+      this.resetViews = false;
+      await drawing;
+    } else if (request.type === 'select') {
+      if (request.listRevision !== this.selection.revision) {
+        await this.list();
+        return;
       }
-      return;
-    }
-    if (request?.type === 'copyPng') {
-      await this.copy(diagrams[this.indexIn(diagrams)], request.id);
-      return;
-    }
-    if (request?.type === 'select') {
-      this.target = { name: diagrams[request.index]?.name ?? null, index: request.index };
-    }
-    if (request !== null) {
+      if (request.index >= this.selection.diagrams.length) {
+        return;
+      }
+      this.selection.choose(request.index);
+      this.lost = false;
+      this.invalidate();
       await this.update(text);
+    } else {
+      if (before !== this.selection.revision) {
+        void this.list();
+        if (!this.selection.current) {
+          void this.noSelection();
+        }
+      }
+      const snapshot = this.snapshot(request.targetToken);
+      if (request.type === 'copyPng') {
+        await this.copy(snapshot?.block, request.id, request.targetToken);
+      } else if (snapshot) {
+        await (request.type === 'exportPng' ? this.deps.exportPng(snapshot) : this.deps.copySvgText(snapshot));
+      }
     }
+  }
+
+  private list(): Promise<boolean> {
+    const { labels } = this.deps;
+    const resetViews = this.resetViews;
+    return this.panel.post({
+      type: 'diagrams',
+      resetViews,
+      viewKey: this.selection.current?.key,
+      listRevision: this.selection.revision,
+      targetToken: this.targetToken,
+      generation: this.generation,
+      items: this.selection.diagrams.map((d, i) => labels.entry(d.name ?? labels.diagram(i + 1), d.openLine + 1)),
+      selected: this.selection.current?.index ?? -1,
+      keep: { uri: this.uri, stateVersion: 2, ...this.selection.saved() },
+    });
+  }
+
+  private noSelection(): Promise<void> {
+    const { labels } = this.deps;
+    const reason = !this.selection.diagrams.length ? labels.empty : this.lost ? labels.gone : labels.choose;
+    return this.status(reason, this.lost, true);
   }
 
   /**
@@ -303,30 +396,21 @@ export class DiagramViewer {
 
   /** Lists the diagrams of `text` and draws the one shown, again. */
   async update(text: string): Promise<void> {
+    this.sync(text);
     const generation = ++this.generation;
     this.note = '';
-    const diagrams = findFileDiagrams(text, this.fileName);
     const { labels } = this.deps;
-    const index = this.indexIn(diagrams);
-    const diagram = diagrams[index];
-
-    await this.panel.post({
-      type: 'diagrams',
-      items: diagrams.map((candidate, position) =>
-        labels.entry(candidate.name ?? labels.diagram(position + 1), candidate.openLine + 1)
-      ),
-      selected: diagram === undefined ? -1 : index,
-      keep: { uri: this.uri, name: diagram?.name ?? this.target.name },
-    });
-    if (diagram === undefined) {
-      // Not another diagram in its place: the one asked for has gone, or
-      // none was chosen yet.
-      const unchosen = this.target.name === null && this.target.index === -1;
-      const reason = diagrams.length === 0 ? labels.empty : unchosen ? labels.choose : labels.gone;
-      await this.status(reason, !unchosen, true);
+    const current = this.selection.current;
+    const index = current?.index ?? -1;
+    const diagram = this.selection.diagrams[index];
+    await this.list();
+    if (generation !== this.generation) {
       return;
     }
-    this.target = { name: diagram.name, index };
+    if (!diagram || !current) {
+      await this.noSelection();
+      return;
+    }
 
     if (hasRemoteReference(diagram.source)) {
       await this.status(labels.remoteReference, true, true);
@@ -339,6 +423,9 @@ export class DiagramViewer {
     }
 
     await this.status(labels.rendering, false, false, null);
+    if (generation !== this.generation) {
+      return;
+    }
     try {
       const asked = this.deps.isDark();
       const { result, palette: dark } = await drawReadable(
@@ -353,15 +440,21 @@ export class DiagramViewer {
       }
       this.dependencies = dependencies;
       const label = drawnTitle(svg) ?? diagram.name ?? labels.unnamed(index + 1, this.fileName);
+      this.renderedToken = this.targetToken;
       await this.panel.post({
         type: 'render',
+        targetToken: this.targetToken,
+        generation,
         svg,
         backdrop: dark ? DIAGRAM_BACKDROP.dark : DIAGRAM_BACKDROP.light,
         // Which diagram this is, so the page keeps each one's zoom apart.
-        key: diagram.name ?? `#${String(index)}`,
+        key: current.key,
         // What the image and the drawing area are called.
         label,
       });
+      if (generation !== this.generation) {
+        return;
+      }
       // The engine draws its errors: the drawing stays, and the reason is
       // named with the line of the file it points to. sourceLine counts
       // from 0 and the engine's line from 1.
@@ -396,7 +489,7 @@ export class DiagramViewer {
    * clipboard, or why nothing will be. The page waits for an answer either
    * way, so an error is answered too.
    */
-  private async copy(diagram: PlantUmlBlock | undefined, id: number): Promise<void> {
+  private async copy(diagram: PlantUmlBlock | undefined, id: number, targetToken: number): Promise<void> {
     let drawn: PngSource | { error: string };
     try {
       drawn = diagram === undefined ? { error: this.deps.labels.gone } : await this.deps.copyPng(this.uri, diagram);
@@ -405,16 +498,9 @@ export class DiagramViewer {
     }
     await this.panel.post(
       'error' in drawn
-        ? { type: 'copyFailed', id, message: drawn.error }
-        : { type: 'copy', id, svg: drawn.svg, width: drawn.width, height: drawn.height, background: drawn.background }
+        ? { type: 'copyFailed', id, targetToken, message: drawn.error }
+        : { type: 'copy', id, targetToken, svg: drawn.svg, width: drawn.width, height: drawn.height, background: drawn.background }
     );
-  }
-
-  /** Where the diagram shown is among `diagrams`: by its name, else its position. */
-  private indexIn(diagrams: readonly PlantUmlBlock[]): number {
-    return this.target.name === null
-      ? this.target.index
-      : diagrams.findIndex((diagram) => diagram.name === this.target.name);
   }
 
   /**
@@ -423,6 +509,9 @@ export class DiagramViewer {
    * while a drawing is under way, which a screen reader is not told of.
    */
   private async status(text: string, error: boolean, clear: boolean, spoken: string | null = text): Promise<void> {
-    await this.panel.post({ type: 'status', text, error, clear, spoken });
+    if (clear) {
+      this.renderedToken = -1;
+    }
+    await this.panel.post({ type: 'status', targetToken: this.targetToken, generation: this.generation, text, error, clear, spoken });
   }
 }

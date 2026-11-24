@@ -75,42 +75,82 @@ const of = (sent: unknown[], type: string): unknown[] =>
   sent.filter((message) => (message as { type: string }).type === type);
 
 describe('parseRequest', () => {
-  it('accepts a ready page, a choice among the diagrams, and the PNG, Copy and Copy SVG buttons', () => {
-    expect(parseRequest({ type: 'ready' }, 2)).toEqual({ type: 'ready' });
-    expect(parseRequest({ type: 'exportPng' }, 2)).toEqual({ type: 'exportPng' });
-    expect(parseRequest({ type: 'copySvg' }, 2)).toEqual({ type: 'copySvg' });
-    expect(parseRequest({ type: 'select', index: 1 }, 2)).toEqual({ type: 'select', index: 1 });
-    expect(parseRequest({ type: 'copyPng', id: 3 }, 2)).toEqual({ type: 'copyPng', id: 3 });
-  });
-
-  it('ignores anything else the page sends', () => {
-    for (const message of [
-      null,
-      'ready',
-      { type: 'select', index: 2 },
-      { type: 'select', index: -1 },
-      { type: 'select', index: 0.5 },
-      { type: 'select', index: '0' },
-      { type: 'copyPng' },
-      { type: 'copyPng', id: 0 },
-      { type: 'copyPng', id: 1.5 },
-      { type: 'copyPng', id: '1' },
-      { type: 'copyPng', id: Number.MAX_SAFE_INTEGER + 1 },
-      { type: 'open', path: '/etc/passwd' },
-    ]) {
-      expect(parseRequest(message, 2), JSON.stringify(message)).toBeNull();
+  it('requires positive safe tokens, copy IDs and list revisions', () => {
+    for (const message of [{ type: 'ready' }, { type: 'select', index: 0, listRevision: 2 },
+      { type: 'copySvg', targetToken: 1 }, { type: 'exportPng', targetToken: 2 }, { type: 'copyPng', id: 1, targetToken: 3 }]) {
+      expect(parseRequest(message)).toEqual(message);
+    }
+    for (const value of [undefined, 0, -1, '1', 0.5, Number.MAX_SAFE_INTEGER + 1]) {
+      expect(parseRequest({ type: 'select', index: 0, listRevision: value })).toBeNull();
+      expect(parseRequest({ type: 'copySvg', targetToken: value })).toBeNull();
+      expect(parseRequest({ type: 'copyPng', id: value, targetToken: 1 })).toBeNull();
+    }
+    for (const value of [null, [], 'ready', {}, { type: 'select', index: -1, listRevision: 1 }]) {
+      expect(parseRequest(value)).toBeNull();
     }
   });
 });
 
+function last(panel: ReturnType<typeof makePanel>, type: string) {
+  return of(panel.sent, type).at(-1) as { listRevision: number; targetToken: number; key: string };
+}
+
 describe('DiagramViewer', () => {
+  it('opens the duplicate ID explicitly chosen by the cursor', async () => {
+    const panel = makePanel();
+    const deps = makeDeps();
+    const viewer = new DiagramViewer(panel, deps, 'flows', 'file:///flows.puml');
+    const text = FLOWS.replace('@startuml\nC', '@startuml(id=orders)\nC');
+    await viewer.show(text, 5);
+    expect(deps.render.mock.lastCall?.[0]).toContain('C -> D');
+  });
+
+  it('rejects stale list choices and image actions without changing the displayed diagram', async () => {
+    const panel = makePanel(), deps = makeDeps();
+    const viewer = new DiagramViewer(panel, deps, 'flows', 'file:///flows.puml');
+    await viewer.show(FLOWS, 5);
+    const { listRevision, targetToken } = last(panel, 'diagrams');
+    const prefix = "' comment\n";
+    viewer.changed(prefix + FLOWS, [{ rangeOffset: 0, rangeLength: 0, text: prefix }], false, 'stale');
+    await viewer.receive({ type: 'select', listRevision, index: 0 }, prefix + FLOWS);
+    expect(last(panel, 'diagrams')).toMatchObject({ targetToken, selected: 1 });
+    expect(deps.render).toHaveBeenCalledTimes(1);
+    await viewer.receive({ type: 'copySvg', targetToken }, prefix + FLOWS);
+    expect(deps.copySvgText).toHaveBeenCalledWith(expect.objectContaining({ block: expect.objectContaining({ openLine: 5 }) }));
+
+    // Hold the host's list delivery while a newer choice renders.
+    const oldKey = last(panel, 'render').key;
+    let resume!: (ok: boolean) => void;
+    panel.post.mockImplementationOnce(() => new Promise<boolean>(resolve => { resume = resolve; }));
+    const old = viewer.update(prefix + FLOWS);
+    await viewer.show(prefix + FLOWS, 2);
+    resume(true);
+    await old;
+    expect(last(panel, 'render').key).not.toBe(oldKey);
+    await viewer.receive({ type: 'copyPng', id: 1, targetToken }, prefix + FLOWS);
+    expect(last(panel, 'copyFailed')).toMatchObject({ id: 1, targetToken });
+    expect(deps.copyPng).not.toHaveBeenCalled();
+  });
+
+  it('draws the first diagram typed in an empty manual preview only once', async () => {
+    const panel = makePanel(), deps = makeDeps();
+    const viewer = new DiagramViewer(panel, deps, 'flows', 'file:///flows.puml');
+    await viewer.show('', null);
+    viewer.changed(FLOWS, [{ rangeOffset: 0, rangeLength: 0, text: FLOWS }], false, 'stale');
+    await vi.waitFor(() => expect(of(panel.sent, 'render')).toHaveLength(1));
+    viewer.changed('', [{ rangeOffset: 0, rangeLength: FLOWS.length, text: '' }], false, 'stale');
+    viewer.changed(FLOWS, [{ rangeOffset: 0, rangeLength: 0, text: FLOWS }], false, 'stale');
+    expect(last(panel, 'diagrams')).toMatchObject({ selected: -1 });
+    expect(deps.render).toHaveBeenCalledTimes(1);
+  });
+
   it('lists the diagrams and draws the one at the cursor, on its palette', async () => {
     const panel = makePanel();
     const viewer = new DiagramViewer(panel, makeDeps({ isDark: () => true }), 'flows', 'file:///flows.puml');
 
     await viewer.show(FLOWS, 5);
 
-    expect(of(panel.sent, 'diagrams')).toEqual([
+    expect(of(panel.sent, 'diagrams')).toMatchObject([
       {
         type: 'diagrams',
         items: ['orders (line 1)', 'Diagram 2 (line 5)'],
@@ -118,19 +158,19 @@ describe('DiagramViewer', () => {
         keep: { uri: 'file:///flows.puml', name: null },
       },
     ]);
-    expect(of(panel.sent, 'render')).toEqual([
+    expect(of(panel.sent, 'render')).toMatchObject([
       {
         type: 'render',
         svg: '<svg>@startuml\nC -> D : unnamed\n@enduml</svg>',
         backdrop: '#1b1b1b',
-        // Unnamed: the page keeps its zoom by its position.
-        key: '#1',
+        // A panel-local key keeps this diagram's view apart from its list position.
+        key: expect.any(String),
         // And a screen reader knows it by its place in the file.
         label: 'Diagram 2 of flows',
       },
     ]);
     // The last word is an empty status: drawn and current.
-    expect(panel.sent.at(-1)).toEqual({ type: 'status', text: '', error: false, clear: false, spoken: 'rendered Diagram 2 of flows' });
+    expect(panel.sent.at(-1)).toMatchObject({ type: 'status', text: '', error: false, clear: false, spoken: 'rendered Diagram 2 of flows' });
   });
 
   it('waits for the page before drawing a diagram it was told to show', async () => {
@@ -149,44 +189,46 @@ describe('DiagramViewer', () => {
     const panel = makePanel();
     const deps = makeDeps();
     const viewer = new DiagramViewer(panel, deps, 'flows', 'file:///flows.puml');
-    viewer.select(FLOWS, null);
+    await viewer.show(FLOWS, null);
 
-    await viewer.receive({ type: 'select', index: 1 }, FLOWS);
+    await viewer.receive({ type: 'select', listRevision: last(panel, 'diagrams').listRevision, index: 1 }, FLOWS);
     expect(deps.render).toHaveBeenLastCalledWith('@startuml\nC -> D : unnamed\n@enduml', false, 'file:///flows.puml');
 
-    panel.sent.length = 0;
-    await viewer.receive({ type: 'select', index: 7 }, FLOWS);
+    const count = panel.sent.length;
+    await viewer.receive({ type: 'select', listRevision: last(panel, 'diagrams').listRevision, index: 7 }, FLOWS);
     await viewer.receive({ type: 'reveal', line: 3 }, FLOWS);
-    expect(panel.sent).toEqual([]);
+    expect(panel.sent).toHaveLength(count);
   });
 
   it('exports the diagram shown when the page asks, and none in place of one that has gone', async () => {
+    const panel = makePanel();
     const deps = makeDeps();
-    const viewer = new DiagramViewer(makePanel(), deps, 'flows', 'file:///flows.puml');
-    viewer.select(FLOWS, 5);
+    const viewer = new DiagramViewer(panel, deps, 'flows', 'file:///flows.puml');
+    await viewer.show(FLOWS, 5);
 
-    await viewer.receive({ type: 'exportPng' }, FLOWS);
-    expect(deps.exportPng).toHaveBeenLastCalledWith('file:///flows.puml', 4);
-    await viewer.receive({ type: 'select', index: 0 }, FLOWS);
-    await viewer.receive({ type: 'exportPng' }, FLOWS);
-    expect(deps.exportPng).toHaveBeenLastCalledWith('file:///flows.puml', 0);
+    await viewer.receive({ type: 'exportPng', targetToken: last(panel, 'render').targetToken }, FLOWS);
+    expect(deps.exportPng).toHaveBeenLastCalledWith(expect.objectContaining({ block: expect.objectContaining({ openLine: 4 }) }));
+    await viewer.receive({ type: 'select', listRevision: last(panel, 'diagrams').listRevision, index: 0 }, FLOWS);
+    await viewer.receive({ type: 'exportPng', targetToken: last(panel, 'render').targetToken }, FLOWS);
+    expect(deps.exportPng).toHaveBeenLastCalledWith(expect.objectContaining({ block: expect.objectContaining({ openLine: 0 }) }));
 
-    await viewer.receive({ type: 'exportPng' }, FLOWS.replace('(id=orders)', '(id=renamed)'));
+    await viewer.receive({ type: 'exportPng', targetToken: last(panel, 'render').targetToken }, FLOWS.replace('(id=orders)', '(id=renamed)'));
     expect(deps.exportPng).toHaveBeenCalledTimes(2);
   });
 
   it('copies the diagram shown as SVG text when the page asks, and none in place of one that has gone', async () => {
+    const panel = makePanel();
     const deps = makeDeps();
-    const viewer = new DiagramViewer(makePanel(), deps, 'flows', 'file:///flows.puml');
-    viewer.select(FLOWS, 5);
-    await viewer.receive({ type: 'copySvg' }, FLOWS);
-    expect(deps.copySvgText).toHaveBeenLastCalledWith('file:///flows.puml', 4);
+    const viewer = new DiagramViewer(panel, deps, 'flows', 'file:///flows.puml');
+    await viewer.show(FLOWS, 5);
+    await viewer.receive({ type: 'copySvg', targetToken: last(panel, 'render').targetToken }, FLOWS);
+    expect(deps.copySvgText).toHaveBeenLastCalledWith(expect.objectContaining({ block: expect.objectContaining({ openLine: 4 }) }));
     expect(deps.exportPng).not.toHaveBeenCalled();
-    await viewer.receive({ type: 'select', index: 0 }, FLOWS);
-    await viewer.receive({ type: 'copySvg' }, FLOWS);
-    expect(deps.copySvgText).toHaveBeenLastCalledWith('file:///flows.puml', 0);
+    await viewer.receive({ type: 'select', listRevision: last(panel, 'diagrams').listRevision, index: 0 }, FLOWS);
+    await viewer.receive({ type: 'copySvg', targetToken: last(panel, 'render').targetToken }, FLOWS);
+    expect(deps.copySvgText).toHaveBeenLastCalledWith(expect.objectContaining({ block: expect.objectContaining({ openLine: 0 }) }));
     // The named diagram shown is gone: nothing is copied in its place.
-    await viewer.receive({ type: 'copySvg' }, FLOWS.replace('(id=orders)', '(id=renamed)'));
+    await viewer.receive({ type: 'copySvg', targetToken: last(panel, 'render').targetToken }, FLOWS.replace('(id=orders)', '(id=renamed)'));
     expect(deps.copySvgText).toHaveBeenCalledTimes(2);
   });
 
@@ -194,12 +236,12 @@ describe('DiagramViewer', () => {
     const panel = makePanel();
     const deps = makeDeps();
     const viewer = new DiagramViewer(panel, deps, 'flows', 'file:///flows.puml');
-    viewer.select(FLOWS, 0);
+    await viewer.show(FLOWS, 0);
 
-    await viewer.receive({ type: 'copyPng', id: 7 }, FLOWS);
+    await viewer.receive({ type: 'copyPng', targetToken: last(panel, 'render').targetToken, id: 7 }, FLOWS);
 
     expect(deps.copyPng).toHaveBeenCalledWith('file:///flows.puml', expect.objectContaining({ name: 'orders', openLine: 0 }));
-    expect(panel.sent).toEqual([
+    expect(of(panel.sent, 'copy')).toMatchObject([
       {
         type: 'copy',
         id: 7,
@@ -209,8 +251,8 @@ describe('DiagramViewer', () => {
         background: '#FFFFFF',
       },
     ]);
-    // Copying draws nothing in the panel.
-    expect(deps.render).not.toHaveBeenCalled();
+    // Only the initial preview was drawn.
+    expect(deps.render).toHaveBeenCalledTimes(1);
   });
 
   it('answers a copy that cannot be made with the reason, as for a diagram that has gone or an error', async () => {
@@ -222,13 +264,13 @@ describe('DiagramViewer', () => {
         .mockRejectedValueOnce(new Error('worker stopped')),
     });
     const viewer = new DiagramViewer(panel, deps, 'flows', 'file:///flows.puml');
-    viewer.select(FLOWS, 0);
+    await viewer.show(FLOWS, 0);
 
-    await viewer.receive({ type: 'copyPng', id: 1 }, FLOWS);
-    await viewer.receive({ type: 'copyPng', id: 2 }, FLOWS);
-    await viewer.receive({ type: 'copyPng', id: 3 }, FLOWS.replace('(id=orders)', '(id=renamed)'));
+    await viewer.receive({ type: 'copyPng', targetToken: last(panel, 'render').targetToken, id: 1 }, FLOWS);
+    await viewer.receive({ type: 'copyPng', targetToken: last(panel, 'render').targetToken, id: 2 }, FLOWS);
+    await viewer.receive({ type: 'copyPng', targetToken: last(panel, 'render').targetToken, id: 3 }, FLOWS.replace('(id=orders)', '(id=renamed)'));
 
-    expect(panel.sent).toEqual([
+    expect(of(panel.sent, 'copyFailed')).toMatchObject([
       { type: 'copyFailed', id: 1, message: 'too large' },
       { type: 'copyFailed', id: 2, message: 'worker stopped' },
       { type: 'copyFailed', id: 3, message: 'gone' },
@@ -261,7 +303,7 @@ describe('DiagramViewer', () => {
     const deps = makeDeps();
     const viewer = new DiagramViewer(panel, deps, 'flows', 'file:///flows.puml');
 
-    viewer.restore('orders');
+    viewer.restore({ name: 'orders' }, `@startuml\nfirst\n@enduml\n${FLOWS}`);
     await viewer.receive({ type: 'ready' }, `@startuml\nfirst\n@enduml\n${FLOWS}`);
 
     expect(deps.render).toHaveBeenCalledWith('@startuml(id=orders)\nA -> B : orders\n@enduml', false, 'file:///flows.puml');
@@ -272,15 +314,15 @@ describe('DiagramViewer', () => {
     const deps = makeDeps();
     const viewer = new DiagramViewer(panel, deps, 'flows', 'file:///flows.puml');
 
-    viewer.restore(null);
+    viewer.restore({ name: null }, FLOWS);
     await viewer.receive({ type: 'ready' }, FLOWS);
 
     expect(deps.render).not.toHaveBeenCalled();
     expect(of(panel.sent, 'diagrams')[0]).toMatchObject({ selected: -1 });
-    expect(panel.sent.at(-1)).toEqual({ type: 'status', text: 'choose', error: false, clear: true, spoken: 'choose' });
+    expect(panel.sent.at(-1)).toMatchObject({ type: 'status', text: 'choose', error: false, clear: true, spoken: 'choose' });
 
     // Picking one from the list draws it.
-    await viewer.receive({ type: 'select', index: 1 }, FLOWS);
+    await viewer.receive({ type: 'select', listRevision: last(panel, 'diagrams').listRevision, index: 1 }, FLOWS);
     expect(deps.render).toHaveBeenCalledWith('@startuml\nC -> D : unnamed\n@enduml', false, 'file:///flows.puml');
   });
 
@@ -294,7 +336,7 @@ describe('DiagramViewer', () => {
     await viewer.update('@startuml(id=billing)\nE -> F\n@enduml');
 
     expect(deps.render).not.toHaveBeenCalled();
-    expect(panel.sent.at(-1)).toEqual({ type: 'status', text: 'gone', error: true, clear: true, spoken: 'gone' });
+    expect(panel.sent.at(-1)).toMatchObject({ type: 'status', text: 'gone', error: true, clear: true, spoken: 'gone' });
   });
 
   it('explains what the engine cannot draw instead of drawing it', async () => {
@@ -307,7 +349,7 @@ describe('DiagramViewer', () => {
       await new DiagramViewer(panel, deps, 'one', 'file:///one.puml').show(source, 0);
 
       expect(deps.render, reason).not.toHaveBeenCalled();
-      expect(panel.sent.at(-1)).toEqual({ type: 'status', text: reason, error: true, clear: true, spoken: reason });
+      expect(panel.sent.at(-1)).toMatchObject({ type: 'status', text: reason, error: true, clear: true, spoken: reason });
     }
   });
 
@@ -320,7 +362,7 @@ describe('DiagramViewer', () => {
     await viewer.show(source, 6);
 
     expect(of(panel.sent, 'render')).toHaveLength(1);
-    expect(panel.sent.at(-1)).toEqual({
+    expect(panel.sent.at(-1)).toMatchObject({
       type: 'status',
       text: 'engine: Syntax Error? (Assumed diagram type: sequence) @ 7',
       error: true,
@@ -338,7 +380,7 @@ describe('DiagramViewer', () => {
 
     await viewer.show(['@startuml', '!include shared.puml', 'Alice -> Bob', '@enduml'].join('\n'), 0);
 
-    expect(panel.sent.at(-1)).toEqual({
+    expect(panel.sent.at(-1)).toMatchObject({
       type: 'status',
       text: 'engine: cannot include shared.puml: not found @ 2',
       error: true,
@@ -373,7 +415,7 @@ describe('DiagramViewer', () => {
       0
     );
 
-    expect(panel.sent.at(-1)).toEqual({
+    expect(panel.sent.at(-1)).toMatchObject({
       type: 'status',
       text: 'formula <math> embedded image',
       error: false,
@@ -390,7 +432,7 @@ describe('DiagramViewer', () => {
 
     await new DiagramViewer(panel, deps, 'one', 'file:///one.puml').show('@startuml\nA -> B : <:smile:>\n@enduml', 0);
 
-    expect(panel.sent.at(-1)).toEqual({ type: 'status', text: 'emoji', error: true, clear: true, spoken: 'emoji' });
+    expect(panel.sent.at(-1)).toMatchObject({ type: 'status', text: 'emoji', error: true, clear: true, spoken: 'emoji' });
   });
 
   it('drops a drawing that finishes after a newer one was asked for', async () => {
@@ -404,13 +446,14 @@ describe('DiagramViewer', () => {
 
     const first = viewer.show('@startuml\nold\n@enduml', 0);
     await new Promise((resolve) => setTimeout(resolve, 0));
+    viewer.sync('@startuml\nnew\n@enduml', [{ rangeOffset: 10, rangeLength: 3, text: 'new' }]);
     await viewer.update('@startuml\nnew\n@enduml');
     finishFirst('<svg>old</svg>');
     await first;
 
-    expect(of(panel.sent, 'render')).toEqual([
+    expect(of(panel.sent, 'render')).toMatchObject([
       // The lone diagram of a file goes by the file's name.
-      { type: 'render', svg: '<svg>@startuml\nnew\n@enduml</svg>', backdrop: '#FFFFFF', key: 'one', label: 'one' },
+      { type: 'render', svg: '<svg>@startuml\nnew\n@enduml</svg>', backdrop: '#FFFFFF', key: expect.any(String), label: 'one' },
     ]);
   });
 });
@@ -433,7 +476,7 @@ describe('DiagramViewer and its context menu', () => {
       { type: 'act', action: 'centre' },
     ]);
     // Neither drawn nor listed again: the view moves, not the diagram.
-    expect(of(panel.sent, 'render')).toEqual([]);
+    expect(of(panel.sent, 'render')).toMatchObject([]);
   });
 });
 
@@ -455,14 +498,15 @@ describe('DiagramViewer not updated', () => {
 
     expect(of(panel.sent, 'render')).toHaveLength(1);
     // As it is told, and once the drawing lands, with it.
-    expect(of(panel.sent, 'status').slice(-2)).toEqual([
+    expect(of(panel.sent, 'status').slice(-2)).toMatchObject([
       { type: 'status', text: 'not updated', error: false, clear: false, spoken: 'not updated' },
       { type: 'status', text: 'not updated', error: false, clear: false, spoken: 'rendered one not updated' },
     ]);
 
     // Drawn again, as on a save: the note goes.
+    viewer.sync('@startuml\nnew\n@enduml', [{ rangeOffset: 10, rangeLength: 3, text: 'new' }]);
     await viewer.update('@startuml\nnew\n@enduml');
-    expect(of(panel.sent, 'status').at(-1)).toEqual({ type: 'status', text: '', error: false, clear: false, spoken: 'rendered one' });
+    expect(of(panel.sent, 'status').at(-1)).toMatchObject({ type: 'status', text: '', error: false, clear: false, spoken: 'rendered one' });
   });
 });
 
@@ -608,7 +652,7 @@ describe('DiagramViewer and the palette', () => {
     const panel = makePanel();
     const deps = makeDeps({ isDark: () => true, resolvePalette: () => Promise.resolve(false) });
     await new DiagramViewer(panel, deps, 'one', 'file:///one.puml').show('@startuml\n!theme plain\nA -> B\n@enduml', 0);
-    expect(panel.sent.at(-1)).toEqual({
+    expect(panel.sent.at(-1)).toMatchObject({
       type: 'status',
       text: 'other palette false',
       error: false,
@@ -621,7 +665,7 @@ describe('DiagramViewer and the palette', () => {
     const panel = makePanel();
     const deps = makeDeps({ isDark: () => true });
     await new DiagramViewer(panel, deps, 'one', 'file:///one.puml').show('@startuml\nA -> B\n@enduml', 0);
-    expect(panel.sent.at(-1)).toEqual({ type: 'status', text: '', error: false, clear: false, spoken: 'rendered one' });
+    expect(panel.sent.at(-1)).toMatchObject({ type: 'status', text: '', error: false, clear: false, spoken: 'rendered one' });
   });
 });
 
@@ -637,9 +681,9 @@ describe('DiagramViewer and screen readers', () => {
     const viewer = new DiagramViewer(titled, deps, 'flows', 'file:///flows.puml');
 
     await viewer.show(FLOWS, 0);
-    expect(of(titled.sent, 'render').at(-1)).toMatchObject({ key: 'orders', label: 'Order flow' });
-    await viewer.receive({ type: 'select', index: 1 }, FLOWS);
-    expect(of(titled.sent, 'render').at(-1)).toMatchObject({ key: '#1', label: 'Diagram 2 of flows' });
+    expect(of(titled.sent, 'render').at(-1)).toMatchObject({ key: expect.any(String), label: 'Order flow' });
+    await viewer.receive({ type: 'select', listRevision: last(titled, 'diagrams').listRevision, index: 1 }, FLOWS);
+    expect(of(titled.sent, 'render').at(-1)).toMatchObject({ key: expect.any(String), label: 'Diagram 2 of flows' });
 
     // An untitled diagram with a name goes by it, as a lone one goes by the file's.
     const named = makePanel();
@@ -664,7 +708,7 @@ describe('DiagramViewer and screen readers', () => {
     const deps = makeDeps({ render: () => Promise.resolve(TITLED) });
     await new DiagramViewer(panel, deps, 'one', 'file:///one.puml').show('@startuml\ntitle Order\\nflow\nA -> B\n@enduml', 0);
 
-    expect(of(panel.sent, 'status')).toEqual([
+    expect(of(panel.sent, 'status')).toMatchObject([
       { type: 'status', text: 'rendering', error: false, clear: false, spoken: null },
       { type: 'status', text: '', error: false, clear: false, spoken: 'rendered Order flow' },
     ]);

@@ -218,7 +218,7 @@ import { createPlantUmlPlugin, type PlantUmlPlugin, type UpdateMode } from './pr
 import { RendererClient, defaultWorkerPath } from './render/client';
 import { shareRenders, type SharedRender } from './render/memo';
 import { ThemePalettes } from './render/palette';
-import { DiagramViewer, viewerBody, type ToolbarLabels, type ViewAction, type ViewerDeps } from './viewer/viewer';
+import { DiagramViewer, parseRequest, viewerBody, type ViewerSnapshot, type ToolbarLabels, type ViewAction, type ViewerDeps } from './viewer/viewer';
 
 /**
  * Extension entry point: wires VS Code, the markdown-it plugin and the render
@@ -604,7 +604,7 @@ interface ViewerSet {
   /** Draws again what a viewer of `document` shows, after the file changed. */
   update(document: vscode.TextDocument): void;
   /** Says with `note`, in a viewer of `document`, that the file changed since it was drawn. */
-  stale(document: vscode.TextDocument, note: string): void;
+  changed(event: vscode.TextDocumentChangeEvent, note: string | null): boolean;
   /** Draws every viewer again, after the palette changed. */
   updateAll(): void;
   /**
@@ -3001,24 +3001,14 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
   });
 
   module.services.singleton(Viewers, {
-    inject: {
-      renders: Renders,
-      palettes: Palettes,
-      l10n: Localization,
-      settings: Settings.token,
-      commands: Commands,
-    },
-    create: ({ renders, palettes, l10n, settings, commands }): ViewerSet => {
-      const deps: ViewerDeps = {
+    inject: { renders: Renders, palettes: Palettes, l10n: Localization, settings: Settings.token,
+      operations: Operations, renderer: Renderer, exports: Exports, workspace: Workspace },
+    create: ({ renders, l10n, operations, ...services }): ViewerSet => {
+      const { settings, palettes } = services;
+      const deps: Omit<ViewerDeps, 'exportPng' | 'copySvgText'> = {
         render: renders,
         resolvePalette: (source, dark, included) => palettes.resolve(source, dark, included),
         isDark: () => isDark(settings.read().values[CONFIG.THEME]),
-        exportPng: async (uri, line): Promise<void> => {
-          await commands.invoke(ExportPng, { uri, line });
-        },
-        copySvgText: async (uri, line): Promise<void> => {
-          await commands.invoke(CopySvgText, { uri, line });
-        },
         // As the PNG button exports it, but with the previews' renders: the
         // diagram shown is often drawn in that palette already.
         copyPng: async (uri, diagram) => {
@@ -3033,7 +3023,7 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
           entry: (name, line) => l10n.t('{0} (line {1})', name, String(line)),
           rendering: l10n.t('Rendering diagram…'),
           rendered: (name) => l10n.t('Rendered {0}.', name),
-          gone: l10n.t('The selected diagram is no longer in this file. Select another diagram from the list.'),
+          gone: l10n.t('The selected diagram could not be identified. Select it again from the list.'),
           choose: l10n.t('Select a diagram from the list.'),
           empty: l10n.t('No diagrams found in this file.'),
           remoteReference: l10n.t(
@@ -3058,7 +3048,7 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
               : l10n.t('Using a light background to keep this diagram readable.'),
         },
       };
-      const open = new Map<string, { viewer: DiagramViewer; document: vscode.TextDocument; reveal(): void }>();
+      const open = new Map<string, { viewer: DiagramViewer; document: vscode.TextDocument; version: number; reveal(): void }>();
       // Which files have a viewer changes what the diagnostics check.
       const shown = new vscode.EventEmitter<vscode.Uri>();
       const media = vscode.Uri.joinPath(vscode.Uri.file(__dirname), '..', 'media', 'viewer');
@@ -3105,25 +3095,96 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
           nonce,
           body: viewerBody(toolbar, escapeHtml),
         });
-        const viewer = new DiagramViewer(
+        function capture(snapshot: ViewerSnapshot): ActiveDocument {
+          return { text: snapshot.text, path: key, line: snapshot.block.openLine, textDocument: entry.document, version: entry.version };
+        }
+        async function write(format: ExportFormat, context: OperationContext, doc: ActiveDocument, snapshot: ViewerSnapshot): Promise<void> {
+          if (!vscode.workspace.isTrusted) {
+            return refuseUntrusted(context);
+          }
+          if (doc.textDocument.isUntitled) {
+            await context.notify.warn(l10n.t('Save the file before exporting.'));
+            return;
+          }
+          await exportBlock(format, context, services, doc, snapshot.block, snapshot.blocks);
+        }
+        const viewer: DiagramViewer = new DiagramViewer(
           { post: (message): Promise<boolean> => Promise.resolve(panel.webview.postMessage(message)) },
-          deps,
+          {
+            ...deps,
+            exportPng: async (snapshot): Promise<void> => {
+              const doc = capture(snapshot);
+              await operations.run('plantumlLocal.viewer.exportPng', context => write('png', context, doc, snapshot));
+            },
+            copySvgText: async (snapshot): Promise<void> => {
+              const doc = capture(snapshot);
+              await operations.run('plantumlLocal.viewer.copySvg', context => copyBlock(context, services, doc, snapshot.block, async () => {
+                const live = await currentDocument();
+                if (live && live === available() && open.get(key) === entry) {
+                  synchronize(live);
+                  const now = viewer.snapshot(snapshot.targetToken);
+                  if (now) {
+                    return write('svg', context, capture(now), now);
+                  }
+                }
+                await context.notify.warn(l10n.t('The file has changed. Check the diagram again.'));
+              }));
+            },
+          },
           withoutExtension(name),
           key
         );
         const entry = {
           viewer,
           document,
+          version: document.version,
           reveal: (): void => {
             panel.reveal();
           },
         };
         open.set(key, entry);
         shown.fire(document.uri);
-        panel.webview.onDidReceiveMessage((message: unknown) => {
-          void viewer.receive(message, entry.document.getText());
+        function available(): vscode.TextDocument | undefined {
+          return vscode.workspace.textDocuments.find(d => d.uri.toString() === key && !d.isClosed && d.languageId === 'plantuml');
+        }
+        async function currentDocument(): Promise<vscode.TextDocument | undefined> {
+          const live = available();
+          if (live) {
+            return live;
+          }
+          try {
+            await vscode.workspace.openTextDocument(document.uri);
+            return available();
+          } catch {
+            return undefined;
+          }
+        }
+        function synchronize(doc: vscode.TextDocument): string {
+          const text = doc.getText();
+          if (doc !== entry.document || doc.version !== entry.version) {
+            viewer.reconcile(text);
+          }
+          entry.document = doc;
+          entry.version = doc.version;
+          return text;
+        }
+        panel.webview.onDidReceiveMessage(async (message: unknown) => {
+          const request = parseRequest(message);
+          if (!request) {
+            return;
+          }
+          const live = available() ?? await currentDocument();
+          if (open.get(key) !== entry) {
+            return;
+          }
+          if (!live || live !== available()) {
+            await viewer.receive(request, '');
+            return;
+          }
+          await viewer.receive(request, synchronize(live));
         });
         panel.onDidDispose(() => {
+          viewer.dispose();
           open.delete(key);
           shown.fire(document.uri);
         });
@@ -3134,6 +3195,8 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         open: (document, line, column): void => {
           const existing = open.get(document.uri.toString());
           if (existing !== undefined) {
+            existing.viewer.sync(document.getText(), undefined, document !== existing.document);
+            existing.version = document.version;
             existing.document = document;
             existing.reveal();
             void existing.viewer.show(document.getText(), line);
@@ -3149,11 +3212,10 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         },
         restore: async (panel, state): Promise<void> => {
           // What the page kept, which is no more trusted than the page.
-          const kept = (typeof state === 'object' && state !== null ? state : {}) as {
+          const kept = (typeof state === 'object' && state !== null && !Array.isArray(state) ? state : {}) as {
             uri?: unknown;
             name?: unknown;
           };
-          const name = typeof kept.name === 'string' ? kept.name : null;
           let document: vscode.TextDocument | undefined;
           if (typeof kept.uri === 'string') {
             try {
@@ -3163,25 +3225,32 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
             }
           }
           // A file that is gone, or already has its panel, gets none back.
-          if (document === undefined || open.has(document.uri.toString())) {
+          if (document?.languageId !== 'plantuml' || open.has(document.uri.toString())) {
             panel.dispose();
             return;
           }
-          attach(panel, document).restore(name);
+          attach(panel, document).restore(kept, document.getText());
         },
         update: (document): void => {
           const entry = open.get(document.uri.toString());
-          if (entry !== undefined) {
+          if (entry && !document.isClosed) {
+            const text = document.getText();
+            entry.viewer.sync(text, undefined, document !== entry.document || document.version !== entry.version);
             entry.document = document;
-            void entry.viewer.update(document.getText());
+            entry.version = document.version;
+            void entry.viewer.update(text);
           }
         },
-        stale: (document, note): void => {
-          const entry = open.get(document.uri.toString());
-          if (entry !== undefined) {
-            entry.document = document;
-            void entry.viewer.stale(note);
+        changed: (event, note): boolean => {
+          const doc = event.document;
+          const entry = open.get(doc.uri.toString());
+          if (!entry) {
+            return false;
           }
+          const replaced = doc !== entry.document || doc.version <= entry.version;
+          entry.document = doc;
+          entry.version = doc.version;
+          return entry.viewer.changed(doc.getText(), event.contentChanges, replaced, note);
         },
         updateAll: (): void => {
           for (const entry of open.values()) {
@@ -3314,8 +3383,7 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
             return;
           }
           const mode = updateModeOf(settings, event.document.uri);
-          if (mode !== 'onChange') {
-            viewers.stale(event.document, notUpdatedNote(l10n, mode));
+          if (!viewers.changed(event, mode === 'onChange' ? null : notUpdatedNote(l10n, mode))) {
             return;
           }
           const key = event.document.uri.toString();
@@ -3367,119 +3435,110 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
     },
   });
 
-  /** Exports the diagram under the cursor, or the only one, as `format`. */
-  const exportAtCursor =
-    (format: ExportFormat) =>
-    async (
-      context: OperationContext,
-      args: readonly unknown[],
-      {
-        renderer,
-        palettes,
-        settings,
-        exports,
-        workspace,
-      }: {
-        renderer: RendererClient;
-        palettes: ThemePalettes;
-        settings: SettingsReader;
-        exports: ExportLedger;
-        workspace: WorkspaceService;
-      }
-    ): Promise<void> => {
-      // The `.puml` preview names its file and the line of the diagram it shows.
-      const document = await activeDocument(context, workspace, true, exportTarget(args[0]));
-      if (document === null) {
+  interface ExportServices {
+    renderer: RendererClient;
+    palettes: ThemePalettes;
+    settings: SettingsReader;
+    exports: ExportLedger;
+    workspace: WorkspaceService;
+  }
+
+  const exportAtCursor = (format: ExportFormat) =>
+    async (context: OperationContext, args: readonly unknown[], services: ExportServices): Promise<void> => {
+      const document = await activeDocument(context, services.workspace, true, exportTarget(args[0]));
+      if (!document) {
         return;
       }
-
       const block = await diagramAtCursor(context, document);
-      if (block === null) {
-        return;
+      if (block) {
+        await exportBlock(format, context, services, document, block, diagramsOf(document.textDocument, document.text));
       }
-
-      // A name that cannot be a file name is treated as no name at all:
-      // the block says `../evil` or `my diagram`, and the prompt — which
-      // validates — is where a usable one comes from. The exporter
-      // refuses it regardless; this is what makes the refusal actionable.
-      const declared = block.name !== null && isValidBlockName(block.name) ? block.name : null;
-      const name = declared ?? (await askForName(context, format));
-      if (name === null) {
-        return;
-      }
-
-      const directory = exportDirectory(context, settings, document.textDocument.uri);
-      if (directory === null) {
-        return;
-      }
-
-      /** What an export of the diagram goes by, each export reading the files it includes afresh. */
-      const depsOf = (): ExporterDeps =>
-        exporterDeps(context, renderer, palettes, settings, exports, workspace, document.textDocument.uri, new ReadSnapshot(scanText));
-      const deps = depsOf();
-      // The document's other diagrams, any of which headed for the same file fails the export.
-      const blocks = diagramsOf(document.textDocument, document.text);
-      // How the export went; a failure comes with the way on that suits it.
-      const report = async (result: ExportResult | null, as: ExportFormat): Promise<void> => {
-        if (result === null) {
-          return;
-        }
-        if (result.error === null) {
-          // What the drawing was written without, if anything, is said with it.
-          const notes = result.notes ?? [];
-          // The file as the Explorer names it, rather than its encoded URI.
-          const written = workspace.relativePath(vscode.Uri.parse(String(result.path)));
-          if (result.untracked !== undefined) {
-            context.logger.warn(untrackedMessage(context.l10n, result));
-          }
-          const said = (file: string): string =>
-            result.unchanged === true
-              ? context.l10n.t('{0} already holds this diagram, so it was left as it is.', file)
-              : result.untracked !== undefined
-                ? context.l10n.t(
-                    "Exported to {0}, but not recorded as this diagram's export, so exporting it again asks before overwriting the file. See the Output panel for why.",
-                    file
-                  )
-                : context.l10n.t('Exported to {0}', file);
-          context.logger.info([said(String(result.path)), ...notes].join(' '));
-          await announceExport(
-            context,
-            [said(written), ...notes].join(' '),
-            notes.length > 0 || result.untracked !== undefined,
-            result.path ?? undefined,
-            result.untracked !== undefined
-          );
-          return;
-        }
-        const message = context.l10n.t('Could not export the diagram: {0}', result.error);
-        context.logger.warn(message);
-        const actions: NoticeAction[] = [];
-        if (result.cause === 'source') {
-          actions.push(problemsOrOutput(context, settings, document));
-        } else if (result.cause === 'png') {
-          if (result.fitsAt !== undefined) {
-            actions.push(settingsButton(context, CONFIG.EXPORT_PNG_SCALE));
-          }
-          actions.push({
-            title: context.l10n.t('Export as SVG'),
-            run: async () => report(await exportOne(depsOf(), document.path, directory, block, name, 'svg', blocks), 'svg'),
-          });
-        } else if (result.cause === 'file') {
-          actions.push(explorerButton(context, vscode.Uri.parse(deps.resolve(document.path, `${directory}/${name}.${as}`)), true));
-        } else {
-          actions.push(outputButton(context));
-        }
-        await notifyWith(context, 'error', message, actions);
-      };
-      await report(
-        format === 'svg'
-          ? await exportOne(deps, document.path, directory, block, name, 'svg', blocks)
-          : await context.progress.run({ title: context.l10n.t('Exporting PNG…') }, () =>
-              exportOne(deps, document.path, directory, block, name, 'png', blocks)
-            ),
-        format
-      );
     };
+
+  async function exportBlock(
+    format: ExportFormat, context: OperationContext, { renderer, palettes, settings, exports, workspace }: ExportServices,
+    document: ActiveDocument, block: PlantUmlBlock, blocks: PlantUmlBlock[]
+  ): Promise<void> {
+    // A name that cannot be a file name is treated as no name at all:
+    // the block says `../evil` or `my diagram`, and the prompt — which
+    // validates — is where a usable one comes from. The exporter
+    // refuses it regardless; this is what makes the refusal actionable.
+    const declared = block.name !== null && isValidBlockName(block.name) ? block.name : null;
+    const name = declared ?? (await askForName(context, format));
+    if (name === null) {
+      return;
+    }
+
+    const directory = exportDirectory(context, settings, document.textDocument.uri);
+    if (directory === null) {
+      return;
+    }
+
+    /** What an export of the diagram goes by, each export reading the files it includes afresh. */
+    const depsOf = (): ExporterDeps =>
+      exporterDeps(context, renderer, palettes, settings, exports, workspace, document.textDocument.uri, new ReadSnapshot(scanText));
+    const deps = depsOf();
+    // How the export went; a failure comes with the way on that suits it.
+    const report = async (result: ExportResult | null, as: ExportFormat): Promise<void> => {
+      if (result === null) {
+        return;
+      }
+      if (result.error === null) {
+        // What the drawing was written without, if anything, is said with it.
+        const notes = result.notes ?? [];
+        // The file as the Explorer names it, rather than its encoded URI.
+        const written = workspace.relativePath(vscode.Uri.parse(String(result.path)));
+        if (result.untracked !== undefined) {
+          context.logger.warn(untrackedMessage(context.l10n, result));
+        }
+        const said = (file: string): string =>
+          result.unchanged === true
+            ? context.l10n.t('{0} already holds this diagram, so it was left as it is.', file)
+            : result.untracked !== undefined
+              ? context.l10n.t(
+                  "Exported to {0}, but not recorded as this diagram's export, so exporting it again asks before overwriting the file. See the Output panel for why.",
+                  file
+                )
+              : context.l10n.t('Exported to {0}', file);
+        context.logger.info([said(String(result.path)), ...notes].join(' '));
+        await announceExport(
+          context,
+          [said(written), ...notes].join(' '),
+          notes.length > 0 || result.untracked !== undefined,
+          result.path ?? undefined,
+          result.untracked !== undefined
+        );
+        return;
+      }
+      const message = context.l10n.t('Could not export the diagram: {0}', result.error);
+      context.logger.warn(message);
+      const actions: NoticeAction[] = [];
+      if (result.cause === 'source') {
+        actions.push(problemsOrOutput(context, settings, document));
+      } else if (result.cause === 'png') {
+        if (result.fitsAt !== undefined) {
+          actions.push(settingsButton(context, CONFIG.EXPORT_PNG_SCALE));
+        }
+        actions.push({
+          title: context.l10n.t('Export as SVG'),
+          run: async () => report(await exportOne(depsOf(), document.path, directory, block, name, 'svg', blocks), 'svg'),
+        });
+      } else if (result.cause === 'file') {
+        actions.push(explorerButton(context, vscode.Uri.parse(deps.resolve(document.path, `${directory}/${name}.${as}`)), true));
+      } else {
+        actions.push(outputButton(context));
+      }
+      await notifyWith(context, 'error', message, actions);
+    };
+    await report(
+      format === 'svg'
+        ? await exportOne(deps, document.path, directory, block, name, 'svg', blocks)
+        : await context.progress.run({ title: context.l10n.t('Exporting PNG…') }, () =>
+            exportOne(deps, document.path, directory, block, name, 'png', blocks)
+          ),
+      format
+    );
+  }
 
   module.commands.handle(ExportSvg, {
     inject: {
@@ -3517,60 +3576,52 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
   };
 
   module.commands.handle(CopySvgText, {
-    inject: {
-      renderer: Renderer,
-      palettes: Palettes,
-      settings: Settings.token,
-      exports: Exports,
-      workspace: Workspace,
-    },
-    execute: async (
-      context: OperationContext,
-      args,
-      { renderer, palettes, settings, exports, workspace }
-    ): Promise<void> => {
-      // No file is written, so neither an untitled document nor a restricted
-      // workspace is refused: the diagram is drawn as far as it can be there,
-      // as the previews draw it.
-      const document = await pickDocument(context, workspace, true, exportTarget(args[0]));
-      if (document === null) {
+    inject: { renderer: Renderer, palettes: Palettes, settings: Settings.token, exports: Exports, workspace: Workspace },
+    execute: async (context: OperationContext, args, services): Promise<void> => {
+      const document = await pickDocument(context, services.workspace, true, exportTarget(args[0]));
+      if (!document) {
         return;
       }
       const block = await diagramAtCursor(context, document);
-      if (block === null) {
-        return;
-      }
-      const deps = exporterDeps(context, renderer, palettes, settings, exports, workspace, document.textDocument.uri);
-      const prepared = await prepareSvg(deps, block);
-      // The file the clipboard cannot take: the same diagram, the same drawing.
-      const exportInstead: NoticeAction = {
-        title: context.l10n.t('Export as SVG'),
-        run: (): Promise<unknown> => context.commands.execute(COMMANDS.EXPORT_SVG, { uri: document.path, line: block.openLine }),
-      };
-      if (!('svg' in prepared)) {
-        const message = context.l10n.t('Could not copy the diagram: {0}', prepared.error ?? '');
-        context.logger.warn(message);
-        await notifyWith(context, 'error', message, [prepared.cause === 'source' ? problemsOrOutput(context, settings, document) : exportInstead]);
-        return;
-      }
-      try {
-        await vscode.env.clipboard.writeText(prepared.svg);
-      } catch (error: unknown) {
-        const message = context.l10n.t(
-          'Could not copy the diagram: {0}',
-          context.l10n.t('The clipboard did not take the text. Try again, or export the diagram as SVG.')
-        );
-        const detail = `${message} ${error instanceof Error ? error.message : String(error)}`;
-        context.logger.warn(detail);
-        await notifyWith(context, 'error', message, [exportInstead]);
-        return;
-      }
-      // What the diagram was drawn without, if anything, is said with it.
-      const message = [context.l10n.t('Copied the diagram as SVG text.'), ...prepared.notes].join(' ');
-      context.logger.info(message);
-      await (prepared.notes.length > 0 ? context.notify.warn(message) : context.notify.info(message));
+      if (block) {await copyBlock(context, services, document, block, () =>
+        context.commands.execute(COMMANDS.EXPORT_SVG, { uri: document.path, line: block.openLine }));}
     },
   });
+
+  async function copyBlock(
+    context: OperationContext, { renderer, palettes, settings, exports, workspace }: ExportServices,
+    document: ActiveDocument, block: PlantUmlBlock, exportSvg: () => Promise<unknown>
+  ): Promise<void> {
+    const deps = exporterDeps(context, renderer, palettes, settings, exports, workspace, document.textDocument.uri);
+    const prepared = await prepareSvg(deps, block);
+    // The file the clipboard cannot take: the same diagram, the same drawing.
+    const exportInstead: NoticeAction = {
+      title: context.l10n.t('Export as SVG'),
+      run: exportSvg,
+    };
+    if (!('svg' in prepared)) {
+      const message = context.l10n.t('Could not copy the diagram: {0}', prepared.error ?? '');
+      context.logger.warn(message);
+      await notifyWith(context, 'error', message, [prepared.cause === 'source' ? problemsOrOutput(context, settings, document) : exportInstead]);
+      return;
+    }
+    try {
+      await vscode.env.clipboard.writeText(prepared.svg);
+    } catch (error: unknown) {
+      const message = context.l10n.t(
+        'Could not copy the diagram: {0}',
+        context.l10n.t('The clipboard did not take the text. Try again, or export the diagram as SVG.')
+      );
+      const detail = `${message} ${error instanceof Error ? error.message : String(error)}`;
+      context.logger.warn(detail);
+      await notifyWith(context, 'error', message, [exportInstead]);
+      return;
+    }
+    // What the diagram was drawn without, if anything, is said with it.
+    const message = [context.l10n.t('Copied the diagram as SVG text.'), ...prepared.notes].join(' ');
+    context.logger.info(message);
+    await (prepared.notes.length > 0 ? context.notify.warn(message) : context.notify.info(message));
+  }
 
   /**
    * A lens's action on its diagram. The target names a document open here
