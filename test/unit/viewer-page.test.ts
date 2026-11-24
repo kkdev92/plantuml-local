@@ -26,6 +26,7 @@ const labels = {
   zoomIn: 'Zoom In',
   fit: 'Fit to Window',
   actualSize: 'Actual Size',
+  minimap: { label: 'Minimap', help: 'Overview', fits: 'Fits', small: 'Small' },
   zoomToArea: 'Zoom to Area',
   zoomLevel: 'Zoom {0}',
   exportPng: 'Export Diagram as PNG',
@@ -109,6 +110,7 @@ function openPage(): Page {
     focused: () => document.activeElement?.id,
     stops: () => tools.map((button) => button.tabIndex),
     async show() {
+      window.dispatchEvent(new window.MessageEvent('message', { origin: ORIGIN, data: { type: 'minimapState', enabled: false } }));
       window.dispatchEvent(new window.MessageEvent('message', { origin: ORIGIN,
         data: { type: 'diagrams', items: ['Checkout'], selected: 0, keep: {}, listRevision: 1, targetToken: 1, generation: 1 },
       }));
@@ -188,6 +190,49 @@ describe('the viewer page', () => {
     await expect(second).rejects.toThrow('Not taken.');
   });
 
+  it('discards obsolete thumbnail decodes and retries a failed thumbnail only when requested', async () => {
+    const page = openPage();
+    const { window, byId } = page;
+    const thumbnail = byId('minimap-image') as HTMLImageElement;
+    const minimap = byId('minimap');
+    const toggle = byId('minimap-toggle');
+    Object.defineProperty(window.HTMLImageElement.prototype, 'naturalWidth', { configurable: true, get: () => 1200 });
+    Object.defineProperty(window.HTMLImageElement.prototype, 'naturalHeight', { configurable: true, get: () => 600 });
+    const attempts: Array<{ resolve(): void; reject(): void }> = [];
+    vi.spyOn(thumbnail, 'decode').mockImplementation(() => new Promise<void>((resolve, reject) => attempts.push({ resolve, reject })));
+    await page.show();
+    byId('actual').click();
+    // happy-dom has no layout engine to clamp the zoomed scroll offsets.
+    page.stage.scrollLeft = 0;
+    page.stage.scrollTop = 0;
+    expect(thumbnail.hasAttribute('src')).toBe(false);
+    toggle.click();
+    await vi.waitFor(() => expect(attempts).toHaveLength(1));
+    const main = byId('diagram').getAttribute('src');
+    expect(thumbnail.getAttribute('src')).toBe(main);
+    toggle.click();
+    expect(thumbnail.hasAttribute('src')).toBe(false);
+    toggle.click();
+    await vi.waitFor(() => expect(attempts).toHaveLength(2));
+    attempts[1]!.reject();
+    await vi.waitFor(() => expect(thumbnail.hasAttribute('src')).toBe(false));
+    attempts[0]!.resolve();
+    window.dispatchEvent(new window.Event('resize'));
+    await new Promise<void>(resolve => window.requestAnimationFrame(() => resolve()));
+    expect(attempts).toHaveLength(2);
+    expect(minimap.hidden).toBe(true);
+    expect(byId('diagram').getAttribute('src')).toBe(main);
+    expect(toggle.getAttribute('aria-pressed')).toBe('true');
+    toggle.click();
+    toggle.click();
+    await vi.waitFor(() => expect(attempts).toHaveLength(3));
+    attempts[2]!.resolve();
+    await vi.waitFor(() => expect(minimap.hidden).toBe(false));
+    window.dispatchEvent(new window.Event('pagehide'));
+    expect(thumbnail.hasAttribute('src')).toBe(false);
+    expect(minimap.hidden).toBe(true);
+  });
+
   it('keeps each row of its zoom buttons, and of PNG and Copy, to the right when a narrow panel wraps them', () => {
     const page = openPage();
     const style = (id: string) => page.window.getComputedStyle(page.byId(id));
@@ -204,11 +249,11 @@ describe('the viewer page', () => {
   it('makes its zoom buttons one stop for Tab: the first until one is used, then the one used last', async () => {
     const page = openPage();
 
-    expect(page.stops()).toEqual([0, -1, -1, -1, -1]);
+    expect(page.stops()).toEqual([0, -1, -1, -1, -1, -1]);
     await page.show();
     page.byId('actual').focus();
     expect(page.focused()).toBe('actual');
-    expect(page.stops()).toEqual([-1, -1, -1, 0, -1]);
+    expect(page.stops()).toEqual([-1, -1, -1, 0, -1, -1]);
   });
 
   it('moves between its zoom buttons with the left and right arrows, round from either end, without scrolling', async () => {
@@ -221,12 +266,12 @@ describe('the viewer page', () => {
     expect(page.press('ArrowRight')).toBe(true);
     expect(page.focused()).toBe('zoom-in');
     // The one moved to is the toolbar's stop for Tab.
-    expect(page.stops()).toEqual([-1, 0, -1, -1, -1]);
+    expect(page.stops()).toEqual([-1, 0, -1, -1, -1, -1]);
     expect(page.press('ArrowLeft')).toBe(true);
     expect(page.focused()).toBe('zoom-out');
     // Round from the first to the last, and back.
     expect(page.press('ArrowLeft')).toBe(true);
-    expect(page.focused()).toBe('area');
+    expect(page.focused()).toBe('minimap-toggle');
     expect(page.press('ArrowRight')).toBe(true);
     expect(page.focused()).toBe('zoom-out');
     expect({ left: stage.scrollLeft, top: stage.scrollTop }).toEqual(scroll);

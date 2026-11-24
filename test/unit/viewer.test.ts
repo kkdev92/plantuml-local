@@ -532,6 +532,7 @@ describe('viewerBody', () => {
         zoomIn: 'Zoom In',
         fit: 'Fit to Window',
         actualSize: 'Actual Size',
+        minimap: { label: 'Minimap', help: 'Overview', fits: 'Fits', small: 'Small' },
         zoomToArea: 'Zoom to Area',
         zoomLevel: 'Zoom {0}',
         exportPng: 'Export Diagram as PNG',
@@ -553,7 +554,7 @@ describe('viewerBody', () => {
     expect(body).toContain('<button id="actual" type="button" aria-label="Actual Size" title="Actual Size (1)">100%</button>');
     // Zoom to Area is a toggle too, pressed while a drag marks an area, the last of the zoom.
     expect(body).toContain(
-      '>100%</button><button id="area" type="button" aria-label="Zoom to Area" title="Zoom to Area (Z)" aria-pressed="false">Zoom to Area</button></div>'
+      '>100%</button><button id="area" type="button" aria-label="Zoom to Area" title="Zoom to Area (Z)" aria-pressed="false">Zoom to Area</button><button id="minimap-toggle"'
     );
     // Beside the zoom, not in it, and kept together: the PNG button, then
     // Copy, which carries what the page says of a copy, then Copy SVG.
@@ -580,6 +581,7 @@ describe('viewerBody', () => {
         zoomIn: 'Zoom In',
         fit: 'Fit to Window',
         actualSize: 'Actual Size',
+        minimap: { label: 'Minimap', help: 'Overview', fits: 'Fits', small: 'Small' },
         zoomToArea: 'Zoom to Area',
         zoomLevel: 'Zoom {0}',
         exportPng: 'Export Diagram as PNG',
@@ -595,7 +597,7 @@ describe('viewerBody', () => {
     expect(body).toContain('<header><select id="diagrams" aria-label="Select a diagram" hidden></select><span id="status"></span>');
     expect(body).not.toContain('aria-live');
     expect(body.match(/role="status"/g)).toHaveLength(2);
-    expect(body).toContain('</main><div id="announcer"><div role="status"></div><div role="status"></div></div>');
+    expect(body).toContain('<div id="announcer"><div role="status"></div><div role="status"></div></div>');
   });
 
   it('escapes the labels it is given', () => {
@@ -607,6 +609,7 @@ describe('viewerBody', () => {
         zoomIn: 'in',
         fit: '<b>',
         actualSize: 'x',
+        minimap: { label: 'Minimap', help: 'Overview', fits: 'Fits', small: 'Small' },
         zoomToArea: '<dfn>',
         zoomLevel: '<kbd>{0}',
         exportPng: '<i>',

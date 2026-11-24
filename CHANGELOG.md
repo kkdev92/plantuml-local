@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The PlantUML file preview has an optional minimap. Click it to move around a large diagram at the current zoom.
+
 - Insert a C4 system context, C4 container, or Azure Functions and Storage example from completion or *Insert Diagram Template*. The picker also searches completion prefixes and the descriptions of these examples.
 
 ### Fixed

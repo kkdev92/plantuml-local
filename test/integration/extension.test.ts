@@ -6816,6 +6816,26 @@ describe('viewer (dist)', () => {
     ]);
   });
 
+  it('keeps the minimap setting within its panel without reading or rendering a diagram', async () => {
+    const editor = makeEditor('file:///c/minimap/one.puml', FLOWS, 0, { languageId: 'plantuml' });
+    vscodeStub._test.setActiveEditor(editor);
+    const before = vscodeStub._test.webviewPanels.length;
+    await run('plantumlLocal.openPreview');
+    const panel = vscodeStub._test.webviewPanels[before]!;
+    panel.receive({ type: 'ready' });
+    await waitFor(() => posted(panel, 'render').length > 0);
+    expect(posted(panel, 'minimapState')).toEqual([{ type: 'minimapState', enabled: false }]);
+    const reads = vi.spyOn(editor.document, 'getText');
+    panel.receive({ type: 'setMinimap', enabled: true });
+    for (const value of ['false', 0, null]) panel.receive({ type: 'setMinimap', enabled: value });
+    expect(reads).not.toHaveBeenCalled();
+    expect(posted(panel, 'render')).toHaveLength(1);
+    reads.mockRestore();
+    panel.receive({ type: 'ready' });
+    expect(posted(panel, 'minimapState').at(-1)).toEqual({ type: 'minimapState', enabled: true });
+    panel.dispose();
+  });
+
   it('names the diagram by the title the engine draws', async () => {
     const source = ['@startuml', 'title <u>Order</u> flow', 'Alice -> Bob', '@enduml'].join('\n');
     vscodeStub._test.setActiveEditor(makeEditor('file:///c/viewtitle/orders.puml', source, 1, { languageId: 'plantuml' }));

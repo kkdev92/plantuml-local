@@ -237,6 +237,11 @@ the diagram shown as *Export Diagram as PNG* does, at its own size and scale
 rather than the zoom of the panel, and in the palette of exports: light,
 whatever the editor theme, unless `plantumlLocal.exportTheme` says otherwise.
 
+Turn on *Minimap* to see the whole diagram and an outline of the current
+view. Click the small image to centre the view there at the current zoom.
+It appears when the diagram extends beyond the view and the panel has room.
+The toggle starts off and lasts until the panel closes or VS Code restarts.
+
 The Copy button puts that same PNG on the clipboard instead of in a file, to
 paste into a chat, a slide or a document; so do Ctrl+C (Cmd+C on macOS) in the
 panel and *Copy* in its context menu. The panel says when the image is on the

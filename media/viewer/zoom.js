@@ -52,5 +52,23 @@ const viewerZoom = (() => {
     return clamp(Math.min(1, width / size.width, height / size.height));
   }
 
-  return { clamp, toArea, toFit };
+  /** Size of the overview and the visible rectangle relative to its actual image. */
+  function minimap(size, zoom, at, visible) {
+    const { width: sw, height: sh, left, top } = visible;
+    const width = size.width * zoom, height = size.height * zoom;
+    if (![sw, sh, width, height, zoom, size.width, size.height].every(n => Number.isFinite(n) && n > 0) ||
+        ![left, top, at.left, at.top].every(Number.isFinite) || sw < 240 || sh < 180 ||
+        (width <= sw + 1 && height <= sh + 1)) return null;
+
+    const boxWidth = Math.min(180, sw * 0.35), boxHeight = Math.min(120, sh * 0.30);
+    const scale = Math.min((boxWidth - 2) / size.width, (boxHeight - 2) / size.height);
+    const iw = size.width * scale, ih = size.height * scale;
+    const fraction = n => Math.min(1, Math.max(0, n));
+    const x = fraction((left - at.left) / width), y = fraction((top - at.top) / height);
+    const right = fraction((left + sw - at.left) / width), bottom = fraction((top + sh - at.top) / height);
+    if (!(iw > 0 && ih > 0 && x < right && y < bottom)) return null;
+    return { boxWidth, boxHeight, iw, ih, x: x * iw, y: y * ih, width: (right - x) * iw, height: (bottom - y) * ih };
+  }
+
+  return { clamp, toArea, toFit, minimap };
 })();

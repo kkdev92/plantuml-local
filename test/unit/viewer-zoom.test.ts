@@ -44,7 +44,10 @@ interface Fit {
 const viewerZoom = runInNewContext(
   `${readFileSync(join(__dirname, '../../media/viewer/zoom.js'), 'utf8')}\n;viewerZoom`,
   {}
-) as { clamp(value: number): number; toArea(area: Area): View | null; toFit(fit: Fit): number };
+) as { clamp(value: number): number; toArea(area: Area): View | null; toFit(fit: Fit): number;
+  minimap(size: Size, zoom: number, at: { left: number; top: number }, visible: Box):
+    { boxWidth: number; boxHeight: number; iw: number; ih: number; x: number; y: number; width: number; height: number } | null;
+};
 
 /**
  * A stage of 400 × 300 CSS pixels, scrolled to the top left, with a diagram
@@ -297,5 +300,26 @@ describe('viewerZoom.clamp', () => {
     expect(viewerZoom.clamp(1)).toBe(1);
     expect(viewerZoom.clamp(16)).toBe(16);
     expect(viewerZoom.clamp(100)).toBe(16);
+  });
+});
+
+describe('minimap geometry', () => {
+  const at = { left: 16, top: 16 };
+  const sight = { left: 0, top: 0, width: 400, height: 300 };
+  it('shows the actual intersection even when one image dimension fits', () => {
+    const box = viewerZoom.minimap({ width: 390, height: 1000 }, 1, at, sight)!;
+    expect(box).toMatchObject({ boxWidth: 140, boxHeight: 90, x: 0, y: 0 });
+    expect(box.width / box.iw).toBeCloseTo(384 / 390);
+    expect(box.height / box.ih).toBeCloseTo(284 / 1000);
+    const moved = viewerZoom.minimap({ width: 390, height: 1000 }, 1, at, { ...sight, top: 600 })!;
+    expect(moved.y / moved.ih).toBeCloseTo(584 / 1000);
+  });
+
+  it('ignores padding-only overflow, narrow stages, disjoint rectangles and invalid dimensions', () => {
+    expect(viewerZoom.minimap({ width: 401, height: 300 }, 1, at, sight)).toBeNull();
+    for (const width of [0, -1, NaN, Infinity]) expect(viewerZoom.minimap({ width, height: 500 }, 1, at, sight)).toBeNull();
+    for (const changed of [{ width: 239 }, { height: 179 }, { left: 1200 }, { top: NaN }]) {
+      expect(viewerZoom.minimap({ width: 1000, height: 500 }, 1, at, { ...sight, ...changed })).toBeNull();
+    }
   });
 });

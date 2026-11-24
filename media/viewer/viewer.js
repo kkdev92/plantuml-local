@@ -34,6 +34,17 @@
     area: document.getElementById('area'),
   };
 
+  const miniButton = document.getElementById('minimap-toggle');
+  const miniHelp = document.getElementById('minimap-help');
+  const mini = document.getElementById('minimap');
+  const miniImage = document.getElementById('minimap-image');
+  const miniView = document.getElementById('minimap-view');
+  let miniEnabled = null; // The panel answers ready, including after the page is recreated.
+  let miniLoad = null;
+  let miniFrame = null;
+  let failedMiniUrl = null;
+  let leftPage = false;
+
   /** Space between the diagram and the edges of the stage, in CSS pixels. */
   const MARGIN = 16;
   /** The factor of one step of the buttons and keys. */
@@ -228,6 +239,8 @@
     for (const button of Object.values(buttons)) {
       button.disabled = size === null;
     }
+    miniButton.disabled = size === null || miniEnabled === null;
+    scheduleMinimap();
     const disabled = selecting || imageToken === null || imageToken !== targetToken || size === null;
     for (const id of ['export-png', 'copy-svg', 'copy-png']) {
       document.getElementById(id).disabled = disabled;
@@ -236,6 +249,92 @@
     // (package.json), and is told which file it is.
     stage.dataset.vscodeContext = JSON.stringify(size === null ? {} : { 'plantumlLocal.viewerUri': keep.uri });
   }
+
+  function hideMinimap() {
+    mini.hidden = true;
+    miniLoad = null;
+    miniImage.removeAttribute('src');
+    if (miniFrame !== null) cancelAnimationFrame(miniFrame);
+    miniFrame = null;
+  }
+
+  function scheduleMinimap() {
+    if (!leftPage && miniFrame === null) {
+      miniFrame = requestAnimationFrame(updateMinimap);
+    }
+  }
+
+  function updateMinimap() {
+    miniFrame = null;
+    const small = stage.clientWidth < 240 || stage.clientHeight < 180;
+    const box = size && viewerZoom.minimap(size, zoom, at, visible());
+    const reason = small ? miniHelp.dataset.small : box ? '' : miniHelp.dataset.fits;
+    const help = [miniHelp.dataset.help, reason].filter(Boolean).join(' ');
+    if (miniHelp.textContent !== help) miniHelp.textContent = help;
+    miniButton.title = help;
+    if (!miniEnabled || leftPage || document.hidden || !shown || !box) {
+      hideMinimap();
+      return;
+    }
+    if (failedMiniUrl === shown) return;
+    if (miniLoad?.url !== shown) {
+      hideMinimap();
+      const load = { url: shown, decoded: false };
+      miniLoad = load;
+      miniImage.src = shown;
+      miniImage.decode().then(() => {
+        if (miniLoad === load) {
+          load.decoded = true;
+          scheduleMinimap();
+        }
+      }, () => {
+        if (miniLoad === load) {
+          failedMiniUrl = load.url;
+          miniImage.removeAttribute('src');
+        }
+      });
+    }
+    if (!miniLoad.decoded) return;
+    const rect = stage.getBoundingClientRect();
+    const px = n => n + 'px';
+    Object.assign(mini.style, {
+      width: px(box.boxWidth), height: px(box.boxHeight),
+      left: px(rect.left + stage.clientLeft + stage.clientWidth - box.boxWidth - 8),
+      top: px(rect.top + stage.clientTop + stage.clientHeight - box.boxHeight - 8),
+    });
+    Object.assign(miniImage.style, { width: px(box.iw), height: px(box.ih), background: image.style.background });
+    Object.assign(miniView.style, { left: px(box.x), top: px(box.y), width: px(box.width), height: px(box.height) });
+    mini.hidden = false;
+  }
+
+  miniButton.addEventListener('click', () => {
+    if (miniEnabled === null || size === null) return;
+    miniEnabled = !miniEnabled;
+    failedMiniUrl = null;
+    miniButton.setAttribute('aria-pressed', String(miniEnabled));
+    if (miniEnabled) scheduleMinimap();
+    else hideMinimap();
+    vscode.postMessage({ type: 'setMinimap', enabled: miniEnabled });
+  });
+
+  miniImage.addEventListener('click', event => {
+    if (event.button !== 0 || mini.hidden || !miniLoad?.decoded || miniLoad.url !== shown || !size) return;
+    const rect = miniImage.getBoundingClientRect();
+    const x = (event.clientX - rect.left) / rect.width, y = (event.clientY - rect.top) / rect.height;
+    if (!(x >= 0 && x <= 1 && y >= 0 && y <= 1)) return;
+    setMarking(false);
+    stopDrag();
+    view = { fit: false, zoom, x: x * size.width, y: y * size.height };
+    apply();
+    view = { fit: false, zoom, ...centre() };
+    remember();
+  });
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) hideMinimap();
+    else scheduleMinimap();
+  });
+  window.addEventListener('resize', scheduleMinimap);
 
   /** Turns marking an area to zoom to on or off, letting go of one being marked. */
   function setMarking(on) {
@@ -441,6 +540,7 @@
   // little each time. Those are left to the ResizeObserver, which keeps the
   // centre meant.
   stage.addEventListener('scroll', () => {
+    scheduleMinimap();
     if (size === null || view.fit === true) {
       return;
     }
@@ -672,6 +772,8 @@
   }
 
   function clearImage() {
+    hideMinimap();
+    failedMiniUrl = null;
     cancelCopies();
     discardPendingImage();
     latest = null;
@@ -688,7 +790,7 @@
     indicate();
   }
 
-  window.addEventListener('pagehide', clearImage);
+  window.addEventListener('pagehide', () => { leftPage = true; clearImage(); });
 
   window.addEventListener('message', (event) => {
     // VS Code's frame around the page posts the extension's messages with
@@ -697,7 +799,11 @@
       return;
     }
     const message = event.data;
-    if (message.type === 'diagrams') {
+    if (message.type === 'minimapState' && typeof message.enabled === 'boolean') {
+      miniEnabled = message.enabled;
+      miniButton.setAttribute('aria-pressed', String(miniEnabled));
+      indicate();
+    } else if (message.type === 'diagrams') {
       if (message.listRevision < listRevision || message.generation < generation) return;
       if (message.targetToken !== targetToken) {
         clearImage();
@@ -751,6 +857,8 @@
           if (url !== latest) {
             return;
           }
+          hideMinimap();
+          failedMiniUrl = null;
           if (shown !== null) {
             URL.revokeObjectURL(shown);
           }

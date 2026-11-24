@@ -3063,6 +3063,12 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         fit: l10n.t('Fit to Window'),
         actualSize: l10n.t('Actual Size'),
         zoomToArea: l10n.t('Zoom to Area'),
+        minimap: {
+          label: l10n.t('Minimap'),
+          help: l10n.t('Show the whole diagram and the current view. Click the image to move. Tab to the drawing area to pan with the arrow keys.'),
+          fits: l10n.t('Shown when the diagram extends beyond the view.'),
+          small: l10n.t('Hidden because the drawing area is too small.'),
+        },
         // The page puts the percentage in place of {0}.
         zoomLevel: l10n.t('Zoom {0}', '{0}'),
         exportPng: l10n.t('Export Diagram as PNG'),
@@ -3171,8 +3177,18 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
           entry.version = doc.version;
           return text;
         }
+        let minimapEnabled = false;
         panel.webview.onDidReceiveMessage(async (message: unknown) => {
+          if (typeof message === 'object' && message !== null && 'type' in message && message.type === 'setMinimap') {
+            if (!Array.isArray(message) && 'enabled' in message && typeof message.enabled === 'boolean') {
+              minimapEnabled = message.enabled;
+            }
+            return;
+          }
           const request = parseRequest(message);
+          if (request?.type === 'ready') {
+            void panel.webview.postMessage({ type: 'minimapState', enabled: minimapEnabled });
+          }
           if (!request) {
             return;
           }
