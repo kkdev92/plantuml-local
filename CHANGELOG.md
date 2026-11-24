@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Insert a C4 system context, C4 container, or Azure Functions and Storage example from completion or *Insert Diagram Template*. The picker also searches completion prefixes and the descriptions of these examples.
+
 ### Fixed
 
 - The PlantUML file preview follows the selected diagram when preceding diagrams move or share its ID. If editing makes the choice ambiguous, the list asks for a new selection. Copy and export use the current text of the diagram shown.

@@ -296,6 +296,47 @@ export const TEMPLATES: readonly { kind: string; diagram: string }[] = [
       '@endyaml',
     ].join('\n'),
   },
+  {
+    kind: 'c4-context',
+    diagram: [
+      '@startuml',
+      '!include <C4/C4_Context>',
+      'Person(customer, "${2:Customer}", "Buys products")',
+      'System(shop, "${3:Online shop}", "Accepts orders")',
+      'System_Ext(mail, "${4:Mail service}", "Sends email")',
+      'Rel(customer, shop, "Places orders", "HTTPS")',
+      'Rel(shop, mail, "Sends confirmations", "SMTP")',
+      '@enduml',
+    ].join('\n'),
+  },
+  {
+    kind: 'c4-container',
+    diagram: [
+      '@startuml',
+      '!include <C4/C4_Container>',
+      'Person(customer, "${2:Customer}")',
+      'System_Boundary(shop, "${3:Online shop}") {',
+      '  Container(web, "${4:Web app}", "${5:TypeScript}", "Serves the shop")',
+      '  ContainerDb(db, "${6:Database}", "${7:PostgreSQL}", "Stores orders")',
+      '}',
+      'Rel(customer, web, "Places orders", "HTTPS")',
+      'Rel(web, db, "Reads and writes", "SQL")',
+      '@enduml',
+    ].join('\n'),
+  },
+  {
+    kind: 'azure-functions-storage',
+    diagram: [
+      '@startuml',
+      '!include <azure/AzureCommon>',
+      '!include <azure/Compute/AzureFunction>',
+      '!include <azure/Storage/AzureStorage>',
+      'AzureFunction(processor, "${2:Image processor}", "Azure Functions")',
+      'AzureStorage(images, "${3:Images}", "Blob Storage")',
+      'processor --> images : stores images',
+      '@enduml',
+    ].join('\n'),
+  },
 ];
 
 /** One suggestion: what the list shows and what replaces the typed token. */

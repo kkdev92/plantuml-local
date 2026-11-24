@@ -953,7 +953,7 @@ describe('the style items the completion offers (dist, re-check on every engine 
 describe('diagram templates (dist)', () => {
   it.each(TEMPLATES.map((template) => [template.kind, template.diagram]))(
     'draws the %s template as it is, its placeholders at their defaults',
-    async (_kind, diagram) => {
+    async (kind, diagram) => {
       // `${n:default}` -> `default`, as accepting the template without edits leaves it.
       const source = diagram.replace(/\$\{\d+:([^}]*)\}/g, '$1');
       // The names the template puts in: drawn as text, in a diagram of its kind.
@@ -963,6 +963,12 @@ describe('diagram templates (dist)', () => {
       for (const dark of [false, true]) {
         const svg = await render(source, dark);
         expect(recognizeEngineError(svg)).toBeNull();
+        if (kind.startsWith('c4-') || kind === 'azure-functions-storage') {
+          const text = [...svg.matchAll(/<text\b[^>]*>([^<]*)<\/text>/g)].map(match => match[1]).join('');
+          for (const name of names) expect(text).toContain(name);
+          expect(text).toContain(kind === 'azure-functions-storage' ? 'stores images' : 'Places orders');
+          if (kind === 'azure-functions-storage') expect(svg).toContain('data:image/png;base64,');
+        }
         expect(names.some((name) => svg.includes(name)), `${source}\n${svg.slice(0, 400)}`).toBe(true);
       }
     }
