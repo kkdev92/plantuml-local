@@ -463,6 +463,9 @@ function templateNames(l10n: { t(message: string): string }): Record<string, str
     salt: l10n.t('Salt wireframe'),
     json: l10n.t('JSON data'),
     yaml: l10n.t('YAML data'),
+    'c4-context': l10n.t('C4 system context'),
+    'c4-container': l10n.t('C4 container diagram'),
+    'azure-functions-storage': l10n.t('Azure Functions and Storage'),
   };
 }
 
@@ -6408,13 +6411,19 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
       return;
     }
     const names = templateNames(context.l10n);
+    const details: Record<string, string> = {
+      'c4-context': context.l10n.t('People, a system, and external services using the bundled C4 library.'),
+      'c4-container': context.l10n.t('An application and database within a system boundary using the bundled C4 library.'),
+      'azure-functions-storage': context.l10n.t('An Azure Functions processor and Blob Storage using bundled Azure icons.'),
+    };
     const picked = await context.ask.one(
       TEMPLATES.map((template) => ({
         label: names[template.kind] ?? template.kind,
         description: `puml-${template.kind}`,
+        detail: details[template.kind],
         template,
       })),
-      { title: context.l10n.t('Insert Diagram Template') }
+      { title: context.l10n.t('Insert Diagram Template'), matchOnDescription: true, matchOnDetail: true }
     );
     if (picked === undefined) {
       return;

@@ -46,7 +46,7 @@ Your diagram source is processed locally and is not sent to a rendering service.
 - **C4 and Azure Libraries**: `!include <C4/C4_Container>` and the other C4 modules, and the Azure icons with `!include <azure/…>`, ship inside the extension and render offline
 - **Fault-Tolerant**: A syntax error shows up inline at the broken diagram; the rest of the page stays intact
 - **Problems Panel**: Errors, warnings and unsupported syntax in the diagrams of open Markdown and PlantUML files are listed with their line, preview or not
-- **Writing Help**: Completion for start lines, directives, themes and icons, the aliases and words of the diagram you are in, the procedures, functions and variables it and the files it includes define — with parameter hints for their calls — snippets of sequence and activity blocks, the properties of common `<style>` rules and a few `skinparam` names with their values, templates for sixteen kinds of diagram, and quick fixes that name a diagram for export and add a missing end line
+- **Writing Help**: Completion for start lines, directives, themes and icons, the aliases and words of the diagram you are in, the procedures, functions and variables it and the files it includes define — with parameter hints for their calls — snippets of sequence and activity blocks, the properties of common `<style>` rules and a few `skinparam` names with their values, nineteen diagram templates, and quick fixes that name a diagram for export and add a missing end line
 - **Go to Definition**: `F12`, Ctrl+Click and Peek on a call, a variable or a participant lead to where the diagram, a file it includes or a bundled library defines or declares it — never to another diagram — and a file of the C4 and Azure libraries opens read-only
 - **Find All References**: `Shift+Alt+F12`, `Shift+F12` and Peek list each call and use of a procedure, function or variable, and each line naming a participant, that leads to the same definition — in the diagram and the files it includes, never in another diagram
 - **Go to Symbol in Workspace**: `Ctrl+T` finds the named diagrams, the declared elements and the procedures, functions and macros of the Markdown and PlantUML files in the workspace folders, each with the diagram it is in, what declares it and its line — in a trusted workspace, without drawing anything
@@ -305,14 +305,15 @@ In a diagram — a ` ```plantuml ` block or a `.puml` file — suggestions open 
 - `!include ` and a `/` in its path: the folders and the files it can include
   (see [Including files](#including-files))
 
-Where a diagram can start, `puml-` offers a template of sixteen kinds of
-diagram — sequence, class, activity, state, component, use case, object,
+Where a diagram can start, `puml-` offers nineteen diagram templates. Choose from sequence, class, activity, state, component, use case, object,
 entity relationship, deployment, timing, Gantt, mind map, WBS, Salt, JSON and
-YAML — with its names to tab through, each drawn as it is by the bundled
-engine: a whole ` ```plantuml ` block in the text of a Markdown file, the bare
+YAML. Three architecture examples use the bundled libraries: `puml-c4-context`,
+`puml-c4-container` and `puml-azure-functions-storage`. Each template draws
+with its defaults and has editable names to tab through. Completion inserts a whole ` ```plantuml ` block in the text of a Markdown file, the bare
 diagram in an empty block or between the diagrams of a `.puml` file.
 *PlantUML Local: Insert Diagram Template* does the same from the command
-palette: pick the kind, and the template goes on lines of its own at the
+palette. Pick a template by name, completion prefix or purpose, such as
+“external services” or “database”. The template goes on lines of its own at the
 cursor, inside the block quote or list item the cursor is in, as one edit that
 one Undo takes back. In a block that already holds a
 diagram, it asks to add a new block after it; in a diagram, a comment or a block
@@ -731,6 +732,8 @@ it as one diagram. `plantumlLocal.diagnostics.enabled` turns the checks off.
 
 ### Including files
 
+For a two-file example that shares a sprite definition, see [Icons and sprites](#icons-and-sprites).
+
 `!include`, `!include_once` and `!include_many` read files of the workspace,
 as in PlantUML:
 
@@ -869,6 +872,46 @@ ships nothing but MIT / BSD / EPL; Azure-PlantUML has no such split. Other
 `!include <…>` libraries, apart from C4 (below), report that they are
 unavailable rather than being fetched — but their sprite definitions can be
 pasted into the diagram, which renders identically.
+
+You can also keep sprite definitions that you prepare in a local UTF-8
+`.iuml` file and include them from a diagram. If you use definitions from
+another source, check their usage terms. Save these two files in the same
+folder inside a workspace you trust:
+
+`local-icons.iuml`:
+
+```plantuml
+sprite $local_tile [8x8/16] {
+00000000
+0FFFFFF0
+0F0000F0
+0F0FF0F0
+0F0FF0F0
+0F0000F0
+0FFFFFF0
+00000000
+}
+```
+
+`diagram.puml`:
+
+```plantuml
+@startuml
+!include ./local-icons.iuml
+rectangle "<$local_tile>\nLocal component" as local_node
+@enduml
+```
+
+This example uses a small geometric sprite defined here. It needs no icon
+pack or download. Local includes follow the rules in
+[Including files](#including-files): use saved files inside the same
+workspace folder, and decide for yourself whether to trust that workspace.
+The bundled engine's include limits are listed in
+[Known Limitations](#known-limitations).
+
+An include such as `!include <awslib/…>` looks for a bundled standard library;
+creating a local folder with that name does not redirect it. Use a local
+path such as `!include ./local-icons.iuml` for definitions you prepare.
 
 An image is drawn only when it is a PNG written into the diagram
 (`<img:data:image/png;base64,…>`). One from a file or a URL, or inline data of

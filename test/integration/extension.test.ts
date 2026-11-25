@@ -2924,7 +2924,7 @@ describe('Insert Diagram Template (dist)', () => {
     }
   };
 
-  it('offers the sixteen kinds, and inserts the one picked as one edit where a diagram can start', async () => {
+  it('offers nineteen templates, and inserts the one picked as one edit where a diagram can start', async () => {
     const editor = makeEditor('file:///c/tpl/doc.md', '# Title\n\nText\n', 1);
     const shown = vscodeStub._test.quickPicksShown.length;
 
@@ -2950,6 +2950,9 @@ describe('Insert Diagram Template (dist)', () => {
           'Salt wireframe',
           'JSON data',
           'YAML data',
+          'C4 system context',
+          'C4 container diagram',
+          'Azure Functions and Storage',
         ],
       },
     ]);
@@ -4839,7 +4842,7 @@ describe('templates (dist)', () => {
     expect(text?.[0]?.label).toEqual({ label: 'puml-sequence', description: 'Sequence diagram' });
     expect(inserted(text?.[0])).toMatch(/^```plantuml \$\{1:sequence-diagram\}\n@startuml\n[\s\S]*\n@enduml\n```$/);
     expect(text?.[0]?.keepWhitespace).toBe(true);
-    expect(text).toHaveLength(16);
+    expect(text).toHaveLength(19);
     // Each kind under its own start line, as the engine wants it.
     expect(text?.map((item) => inserted(item).split('\n')[1])).toEqual([
       ...Array<string>(6).fill('@startuml'),
@@ -4853,6 +4856,9 @@ describe('templates (dist)', () => {
       '@startsalt',
       '@startjson',
       '@startyaml',
+      '@startuml',
+      '@startuml',
+      '@startuml',
     ]);
 
     expect(inserted((await complete(document, 5, 2))?.[0])).toMatch(/^@startuml\n[\s\S]*\n@enduml$/);
