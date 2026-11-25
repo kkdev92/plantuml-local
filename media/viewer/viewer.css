@@ -173,3 +173,29 @@ select:focus-visible {
 	background: var(--vscode-focusBorder);
 	opacity: 0.15;
 }
+
+/* A sibling of the scrollable stage, so neither input nor layout moves its canvas. */
+#minimap {
+	position: fixed;
+	z-index: 1;
+	display: grid;
+	place-items: center;
+	box-sizing: border-box;
+	border: 1px solid var(--vscode-contrastBorder, var(--vscode-focusBorder));
+	background: var(--vscode-editor-background);
+	overflow: hidden;
+	user-select: none;
+}
+
+#minimap[hidden] { display: none; }
+#minimap-content { position: relative; }
+#minimap-image { display: block; cursor: pointer; -webkit-user-drag: none; }
+#minimap-view {
+	position: absolute;
+	pointer-events: none;
+	box-shadow: inset 0 0 0 1px var(--vscode-focusBorder);
+	background: color-mix(in srgb, var(--vscode-focusBorder) 20%, transparent);
+}
+
+/* Keep the toggle's footprint steady when its pressed state changes. */
+#tools #minimap-toggle { font-weight: 600; }
