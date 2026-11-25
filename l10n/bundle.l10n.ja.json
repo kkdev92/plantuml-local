@@ -108,6 +108,7 @@
   "Templates cannot be inserted in comments or other code blocks.": "コメントや別の言語のコードブロック内には挿入できません。",
   "This code block already contains a diagram. Insert the template in a new code block below it?": "このコードブロックには図が書かれています。このブロックの下に新しいコードブロックを作り、テンプレートを挿入しますか？",
   "Insert Below": "下に挿入する",
+  "The document has changed. Insert the template again.": "文書が変わりました。もう一度テンプレートを挿入してください。",
   "Preview: {0}": "{0} のプレビュー",
   "Diagram {0}": "図 {0}",
   "Diagram {0} of {1}": "{1} の図 {0}",

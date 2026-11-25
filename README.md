@@ -323,6 +323,8 @@ cursor, inside the block quote or list item the cursor is in, as one edit that
 one Undo takes back. In a block that already holds a
 diagram, it asks to add a new block after it; in a diagram, a comment or a block
 of another language, it says why it does not.
+If the document changes before the template goes in, as when a key is typed
+while the picker closes, nothing is inserted and it asks you to try again.
 
 Elsewhere in a diagram, the list offers what that diagram holds, and nothing
 from other diagrams or from documents it does not include:
