@@ -3,8 +3,10 @@
 ' so the panel also lists them by id to pick from; its Copy button puts the
 ' one shown on the clipboard as a PNG, and Copy SVG as SVG text. Zoom to
 ' Area (Z) makes the next drag mark an area to zoom to, and Home, End and C
-' scroll to the top, the bottom and the centre of the diagram. The Outline
-' view lists the diagrams too, with what each declares, and each one folds
+' scroll to the top, the bottom and the centre of the diagram. Zoomed in
+' past the panel, turn on Minimap to see the whole diagram with the part in
+' view outlined; a click on it centres the view there. The Outline view
+' lists the diagrams too, with what each declares, and each one folds
 ' from its start line. Above that line, Preview, Export SVG and Export PNG
 ' act on that diagram, and an error in any of them is listed in the Problems
 ' panel. Export All Diagrams in File as SVG writes one file per diagram,

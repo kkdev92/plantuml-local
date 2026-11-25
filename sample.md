@@ -317,7 +317,7 @@ stop
 
 ## Writing a diagram
 
-In a block, suggestions open on `@` or `!` at the start of a line, on `$`, on `!theme ` and on `<&`. Outside a block, type `puml` and press `Ctrl+Space` for a whole block from one of sixteen templates, or run *PlantUML Local: Insert Diagram Template*.
+In a block, suggestions open on `@` or `!` at the start of a line, on `$`, on `!theme ` and on `<&`. Outside a block, type `puml` and press `Ctrl+Space` for a whole block from one of nineteen templates, or run *PlantUML Local: Insert Diagram Template*. Three of them are architecture examples that use the bundled libraries: `puml-c4-context`, `puml-c4-container` and `puml-azure-functions-storage`.
 
 Elsewhere in a block, `Ctrl+Space` lists what that diagram holds: its aliases with the names they show — `Shop` with `Web shop` in the block below — its words, and what it defines, as the next section shows. On a line of its own, a sequence diagram such as this one also offers snippets of `alt`, `opt`, `loop`, `par`, `ref` and `note`, and an activity diagram of `if`, `while`, `repeat` and `fork`, with their parts to tab through and, in the details of the list, what each draws.
 
