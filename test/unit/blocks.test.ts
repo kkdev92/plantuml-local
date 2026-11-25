@@ -283,6 +283,7 @@ describe('findFileDiagrams', () => {
     expect(diagrams).toEqual([
       {
         name: 'orders',
+        hasOpeningLine: true,
         nameBasis: 'single-file-name',
         source: '@startuml\nA -> B\n@enduml',
         raw: '@startuml\nA -> B\n@enduml\n',

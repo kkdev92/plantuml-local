@@ -47,9 +47,14 @@
 
   const saved = vscode.getState() || {};
   /** What the extension asks to be kept, for a restart. */
-  let keep = { uri: saved.uri, name: saved.name };
+  let keep = {};
+  let listRevision = 0;
+  let targetToken = null;
+  let imageToken = null;
+  let generation = 0;
+  let selecting = false;
   /** How each diagram was last shown: fitted, or a zoom and the point at the centre, at 100%. */
-  const views = new Map(Array.isArray(saved.views) ? saved.views.filter(isEntry) : []);
+  const views = new Map(saved.stateVersion === 2 && Array.isArray(saved.views) ? saved.views.slice(-KEPT).filter(isEntry) : []);
   let key = null;
   /** The diagram's size at 100%, or null while none is shown. */
   let size = null;
@@ -109,7 +114,8 @@
 
   function isEntry(entry) {
     return (
-      Array.isArray(entry) && typeof entry[0] === 'string' && typeof entry[1] === 'object' && entry[1] !== null
+      Array.isArray(entry) && typeof entry[0] === 'string' && entry[1] && !Array.isArray(entry[1]) &&
+      (entry[1].fit === true || (entry[1].fit === false && [entry[1].zoom, entry[1].x, entry[1].y].every(Number.isFinite)))
     );
   }
 
@@ -222,6 +228,10 @@
     for (const button of Object.values(buttons)) {
       button.disabled = size === null;
     }
+    const disabled = selecting || imageToken === null || imageToken !== targetToken || size === null;
+    for (const id of ['export-png', 'copy-svg', 'copy-png']) {
+      document.getElementById(id).disabled = disabled;
+    }
     // The panel's context menu acts on the file's diagram once one is shown
     // (package.json), and is told which file it is.
     stage.dataset.vscodeContext = JSON.stringify(size === null ? {} : { 'plantumlLocal.viewerUri': keep.uri });
@@ -319,7 +329,7 @@
         views.delete(views.keys().next().value);
       }
     }
-    vscode.setState({ ...keep, views: [...views] });
+    vscode.setState({ ...keep, currentView: imageToken === targetToken && key !== null ? view : undefined, views: [...views] });
   }
 
   buttons.out.addEventListener('click', () => zoomBy(1 / STEP));
@@ -520,17 +530,20 @@
   });
 
   select.addEventListener('change', () => {
-    vscode.postMessage({ type: 'select', index: Number(select.value) });
+    selecting = true;
+    cancelCopies();
+    indicate();
+    vscode.postMessage({ type: 'select', listRevision, index: Number(select.value) });
   });
 
   document.getElementById('export-png').addEventListener('click', () => {
-    vscode.postMessage({ type: 'exportPng' });
+    if (!selecting && imageToken !== null && imageToken === targetToken) vscode.postMessage({ type: 'exportPng', targetToken: imageToken });
   });
 
   // Copy SVG puts the SVG text on the clipboard, which the extension writes
   // itself: the text needs no drawing, so the page has nothing to add.
   document.getElementById('copy-svg').addEventListener('click', () => {
-    vscode.postMessage({ type: 'copySvg' });
+    if (!selecting && imageToken !== null && imageToken === targetToken) vscode.postMessage({ type: 'copySvg', targetToken: imageToken });
   });
 
   // Copy puts on the clipboard the PNG the PNG button would write. The
@@ -572,12 +585,12 @@
   }
 
   /** Draws the PNG of a copy, as media/png/png.js draws an exported one. */
-  async function toPng(drawing) {
+  async function toPng(drawing, cancelled) {
     const url = URL.createObjectURL(new Blob([drawing.svg], { type: 'image/svg+xml' }));
     try {
       const picture = new Image();
       picture.src = url;
-      await picture.decode();
+      await Promise.race([picture.decode(), cancelled]);
       const surface = document.createElement('canvas');
       surface.width = drawing.width;
       surface.height = drawing.height;
@@ -585,10 +598,10 @@
       context.fillStyle = drawing.background;
       context.fillRect(0, 0, surface.width, surface.height);
       context.drawImage(picture, 0, 0, surface.width, surface.height);
-      const png = await new Promise((resolve) => surface.toBlob(resolve, 'image/png'));
+      const png = await Promise.race([new Promise((resolve) => surface.toBlob(resolve, 'image/png')), cancelled]);
       // A canvas past what the browser can draw stops drawing without saying
       // so: the size in the PNG's header is checked, not assumed.
-      const header = png === null ? null : new DataView(await png.slice(0, 24).arrayBuffer());
+      const header = png === null ? null : new DataView(await Promise.race([png.slice(0, 24).arrayBuffer(), cancelled]));
       if (header === null || header.byteLength < 24 || header.getUint32(16) !== drawing.width || header.getUint32(20) !== drawing.height) {
         throw new Refusal(copyText.unmade);
       }
@@ -599,26 +612,36 @@
   }
 
   function copy() {
+    if (selecting || imageToken === null || imageToken !== targetToken) return;
+    const token = imageToken;
     const id = ++copied;
-    const png = new Promise((resolve, reject) => copies.set(id, { resolve, reject })).then(toPng);
+    let cancel;
+    const cancelled = new Promise((_, reject) => { cancel = reject; });
+    const drawing = new Promise((resolve, reject) => copies.set(id, { token, resolve, reject, cancel }));
+    const png = Promise.race([drawing.then(result => toPng(result, cancelled)), cancelled]);
+    png.catch(() => undefined);
     let written;
     try {
       written = navigator.clipboard.write([new ClipboardItem({ 'image/png': png })]);
     } catch (error) {
+      copies.get(id).reject(error);
       copies.delete(id);
       fail(error);
       return;
     }
-    vscode.postMessage({ type: 'copyPng', id });
+    vscode.postMessage({ type: 'copyPng', id, targetToken: token });
     say(copyText.copying, false, false);
     // One reason is given: the drawing's, or else the clipboard's.
-    written.catch(() => undefined);
-    png
-      .then(() => written)
+    Promise.all([written, png])
       .then(() => {
+        if (targetToken !== token) return;
         say(copyText.copied, false, true);
         announce(copyText.copied);
-      }, fail);
+      }, error => {
+        copies.get(id)?.reject(error);
+        cancel(error);
+        if (targetToken === token) fail(error);
+      }).finally(() => copies.delete(id));
   }
 
   copyButton.addEventListener('click', copy);
@@ -627,12 +650,45 @@
   // page as its copy command: they copy the diagram too, unless text is
   // selected.
   document.addEventListener('copy', (event) => {
-    if (size === null || document.getSelection()?.isCollapsed === false) {
+    if (selecting || imageToken === null || imageToken !== targetToken || size === null || document.getSelection()?.isCollapsed === false) {
       return;
     }
     event.preventDefault();
     copy();
   });
+
+  function cancelCopies() {
+    for (const item of copies.values()) {
+      const error = new Refusal(copyText.unwritten);
+      item.reject(error);
+      item.cancel(error);
+    }
+    copies.clear();
+  }
+
+  function discardPendingImage() {
+    if (latest !== null && latest !== shown) URL.revokeObjectURL(latest);
+    latest = shown;
+  }
+
+  function clearImage() {
+    cancelCopies();
+    discardPendingImage();
+    latest = null;
+    imageToken = null;
+    size = null;
+    setMarking(false);
+    image.hidden = true;
+    image.removeAttribute('src');
+    if (shown !== null) URL.revokeObjectURL(shown);
+    shown = null;
+    stage.removeAttribute('aria-label');
+    canvas.style.width = '0';
+    canvas.style.height = '0';
+    indicate();
+  }
+
+  window.addEventListener('pagehide', clearImage);
 
   window.addEventListener('message', (event) => {
     // VS Code's frame around the page posts the extension's messages with
@@ -642,6 +698,16 @@
     }
     const message = event.data;
     if (message.type === 'diagrams') {
+      if (message.listRevision < listRevision || message.generation < generation) return;
+      if (message.targetToken !== targetToken) {
+        clearImage();
+      } else if (message.generation > generation) {
+        discardPendingImage();
+      }
+      selecting = false;
+      generation = message.generation;
+      targetToken = message.targetToken;
+      listRevision = message.listRevision;
       select.replaceChildren(
         ...message.items.map((label, index) => {
           const option = document.createElement('option');
@@ -650,11 +716,30 @@
           return option;
         })
       );
+      if (message.selected < 0 && message.items.length) {
+        const placeholder = document.createElement('option');
+        placeholder.value = '-1';
+        placeholder.disabled = true;
+        placeholder.textContent = select.getAttribute('aria-label');
+        select.prepend(placeholder);
+      }
       select.value = String(message.selected);
-      select.hidden = message.items.length < 2 && message.selected === 0;
+      select.hidden = !message.items.length || (message.items.length === 1 && message.selected === 0);
+      if (message.resetViews) {
+        views.clear();
+        key = null;
+        const previous = saved.currentView;
+        if (message.keep.name && saved.stateVersion === 2 && saved.name === message.keep.name &&
+            saved.nameBasis === message.keep.nameBasis && typeof message.viewKey === 'string' && isEntry(['current', previous])) {
+          views.set(message.viewKey, previous);
+        }
+      }
       keep = message.keep;
+      indicate();
       remember();
     } else if (message.type === 'render') {
+      if (message.targetToken !== targetToken || message.generation !== generation) return;
+      discardPendingImage();
       const url = URL.createObjectURL(new Blob([message.svg], { type: 'image/svg+xml' }));
       latest = url;
       const next = new Image();
@@ -662,16 +747,15 @@
       // Its size is known once it is decoded; until then the last drawing stays.
       next
         .decode()
-        .catch(() => undefined)
         .then(() => {
           if (url !== latest) {
-            URL.revokeObjectURL(url);
             return;
           }
           if (shown !== null) {
             URL.revokeObjectURL(shown);
           }
           shown = url;
+          imageToken = message.targetToken;
           image.src = url;
           image.alt = message.label;
           stage.setAttribute('aria-label', message.label);
@@ -685,31 +769,26 @@
             view = views.get(key) || { fit: true };
           }
           apply();
+          remember();
+        }, () => {
+          if (latest === url) clearImage();
         });
     } else if (message.type === 'copy' || message.type === 'copyFailed') {
       const waiting = copies.get(message.id);
-      copies.delete(message.id);
+      if (!waiting || waiting.token !== message.targetToken) return;
       if (waiting !== undefined && message.type === 'copy') {
         waiting.resolve(message);
       } else if (waiting !== undefined) {
         waiting.reject(new Refusal(message.message));
       }
     } else if (message.type === 'status') {
+      if (message.targetToken !== targetToken || message.generation !== generation) return;
       clearTimeout(restoring);
       said = { text: message.text, error: message.error === true };
       status.textContent = message.text;
       status.classList.toggle('error', message.error === true);
       settle(message.spoken);
-      if (message.clear === true) {
-        latest = null;
-        size = null;
-        setMarking(false);
-        image.hidden = true;
-        stage.removeAttribute('aria-label');
-        canvas.style.width = '0';
-        canvas.style.height = '0';
-        indicate();
-      }
+      if (message.clear === true) clearImage();
     } else if (message.type === 'act') {
       // Chosen in the panel's context menu.
       if (message.action === 'zoomToArea') {

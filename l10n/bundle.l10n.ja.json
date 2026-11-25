@@ -107,7 +107,7 @@
   "Diagram {0} of {1}": "{1} の図 {0}",
   "Rendered {0}.": "{0} を描画しました。",
   "{0} (line {1})": "{0}（{1} 行目）",
-  "The selected diagram is no longer in this file. Select another diagram from the list.": "選択していた図がファイル内に見つかりません。一覧から別の図を選んでください。",
+  "The selected diagram could not be identified. Select it again from the list.": "対象の図を確認できません。図の一覧から選び直してください。",
   "Select a diagram from the list.": "一覧から表示する図を選んでください。",
   "No diagrams found in this file.": "このファイルには図がありません。",
   "Multi-page diagrams (newpage) are not supported. Split the pages into separate diagrams, each with its own start and end lines.": "newpage による複数ページの図には対応していません。ページごとに独立した図にし、それぞれに開始行と終了行を付けてください。",

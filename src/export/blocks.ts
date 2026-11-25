@@ -27,6 +27,8 @@ export type NameBasis = 'fence' | 'explicit-id' | 'single-file-name';
 
 /** A `plantuml` fenced block found in a document, or a diagram of a PlantUML file. */
 export interface PlantUmlBlock {
+  /** Whether a diagram in a PlantUML file starts with an explicit opening line. */
+  hasOpeningLine?: boolean;
   /**
    * The word after the language in the info string
    * (` ```plantuml orders-api `), or null when the block is unnamed.
@@ -256,11 +258,13 @@ export function findFileDiagrams(text: string, fileName: string): PlantUmlBlock[
       open = null;
     }
   });
-  if (found.length === 0 && code) {
+  const hasOpeningLine = found.length > 0;
+  if (!hasOpeningLine && code) {
     found.push({ start: 0, end: lines.length - 1, closed: false, id: null });
   }
 
   return found.map((diagram) => ({
+    hasOpeningLine,
     name: diagram.id ?? (found.length === 1 ? fileName : null),
     nameBasis: diagram.id !== null ? 'explicit-id' : found.length === 1 ? 'single-file-name' : null,
     source: lines.slice(diagram.start, diagram.end + 1).join('\n'),

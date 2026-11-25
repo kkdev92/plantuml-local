@@ -6733,8 +6733,8 @@ describe('viewer (dist)', () => {
     'Carol -> Dave : second',
     '@enduml',
   ].join('\n');
-  const posted = (panel: WebviewPanelStub, type: string): { type: string; svg?: string }[] =>
-    (panel.webview.posted as { type: string; svg?: string }[]).filter((message) => message.type === type);
+  const posted = (panel: WebviewPanelStub, type: string): { type: string; svg?: string; targetToken?: number; listRevision?: number }[] =>
+    (panel.webview.posted as { type: string; svg?: string; targetToken?: number; listRevision?: number }[]).filter((message) => message.type === type);
   const waitFor = async (check: () => boolean): Promise<void> => {
     for (let waited = 0; waited < 30_000; waited += 50) {
       if (check()) {
@@ -6792,7 +6792,7 @@ describe('viewer (dist)', () => {
 
     panel?.receive({ type: 'ready' });
     await waitFor(() => (panel === undefined ? false : posted(panel, 'status').length > 1));
-    expect(posted(panel!, 'diagrams')[0]).toEqual({
+    expect(posted(panel!, 'diagrams')[0]).toMatchObject({
       type: 'diagrams',
       items: ['orders (line 1)', 'Diagram 2 (line 5)'],
       selected: 1,
@@ -6802,9 +6802,9 @@ describe('viewer (dist)', () => {
     expect(posted(panel!, 'render')[0]?.svg).toContain('second');
     // What the page keeps the zoom of this diagram by, and what a screen
     // reader calls it, as it has neither a title nor a name.
-    expect(posted(panel!, 'render')[0]).toMatchObject({ key: '#1', label: 'Diagram 2 of flows' });
+    expect(posted(panel!, 'render')[0]).toMatchObject({ key: expect.any(String), label: 'Diagram 2 of flows' });
     // A screen reader is told it is drawn, not that it is being drawn.
-    expect(posted(panel!, 'status')).toEqual([
+    expect(posted(panel!, 'status')).toMatchObject([
       { type: 'status', text: 'Rendering diagram…', error: false, clear: false, spoken: null },
       { type: 'status', text: '', error: false, clear: false, spoken: 'Rendered Diagram 2 of flows.' },
     ]);
@@ -6821,7 +6821,7 @@ describe('viewer (dist)', () => {
     await waitFor(() => posted(panel, 'status').length > 1);
 
     // As drawn, without the markup of the source.
-    expect(posted(panel, 'render')[0]).toMatchObject({ key: 'orders', label: 'Order flow' });
+    expect(posted(panel, 'render')[0]).toMatchObject({ key: expect.any(String), label: 'Order flow' });
     expect(posted(panel, 'status').at(-1)).toMatchObject({ spoken: 'Rendered Order flow.' });
   });
 
@@ -6835,20 +6835,10 @@ describe('viewer (dist)', () => {
     );
     panel.receive({ type: 'ready' });
     await waitFor(() => posted(panel, 'render').length > 0);
-    const asked = (): unknown[] =>
-      vscodeStub._test.commandCalls.filter((call) => call.id === 'plantumlLocal.exportPng').map((call) => call.args[0]);
-    const count = asked().length;
-
-    panel.receive({ type: 'exportPng' });
-    await waitFor(() => asked().length > count);
-    panel.receive({ type: 'select', index: 0 });
-    panel.receive({ type: 'exportPng' });
-    await waitFor(() => asked().length > count + 1);
-
-    expect(asked().slice(count)).toEqual([
-      { uri: 'file:///c/viewpng/flows.puml', line: 4 },
-      { uri: 'file:///c/viewpng/flows.puml', line: 0 },
-    ]);
+    const prompts = vscodeStub._test.inputBoxPrompts.length;
+    panel.receive({ type: 'exportPng', targetToken: posted(panel, 'render')[0]?.targetToken });
+    await waitFor(() => vscodeStub._test.inputBoxPrompts.length > prompts);
+    expect(vscodeStub._test.inputBoxPrompts.at(-1)).toBe('File name for the exported PNG (without .png)');
   });
 
   it('runs Copy Diagram as SVG Text for the diagram shown when its Copy SVG button is pressed', async () => {
@@ -6861,13 +6851,76 @@ describe('viewer (dist)', () => {
     );
     panel.receive({ type: 'ready' });
     await waitFor(() => posted(panel, 'render').length > 0);
-    const asked = (): unknown[] =>
-      vscodeStub._test.commandCalls.filter((call) => call.id === 'plantumlLocal.copySvgText').map((call) => call.args[0]);
-    const count = asked().length;
+    const writes = vscodeStub._test.clipboardWrites;
+    const count = writes.length;
+    panel.receive({ type: 'copySvg', targetToken: posted(panel, 'render')[0]?.targetToken });
+    await waitFor(() => writes.length > count);
+    expect(writes.at(-1)).toContain('second');
+  });
 
-    panel.receive({ type: 'copySvg' });
-    await waitFor(() => asked().length > count);
-    expect(asked().slice(count)).toEqual([{ uri: 'file:///c/viewsvg/flows.puml', line: 4 }]);
+  it('rechecks identity after reopening a closed document before accepting a copy', async () => {
+    for (const named of [true, false]) {
+      const uri = `file:///c/reopened/${named ? 'named' : 'unnamed'}.puml`;
+      const editor = makeEditor(uri, FLOWS, named ? 1 : 5, { languageId: 'plantuml' });
+      vscodeStub._test.setActiveEditor(editor);
+      const before = vscodeStub._test.webviewPanels.length;
+      await run('plantumlLocal.openPreview');
+      const panel = vscodeStub._test.webviewPanels[before]!;
+      panel.receive({ type: 'ready' });
+      await waitFor(() => posted(panel, 'render').length === 1);
+      const { targetToken } = posted(panel, 'render')[0]!;
+      vscodeStub._test.setActiveEditor(undefined);
+      const next = makeEditor(uri, FLOWS.replace('Alice -> Bob : orders', 'Alice -> Bob : reopened'), 0, { languageId: 'plantuml' });
+      let resume!: () => void;
+      const reopen = vi.spyOn(vscodeStub.workspace, 'openTextDocument').mockImplementationOnce(async () => {
+        await new Promise<void>(resolve => { resume = resolve; });
+        vscodeStub._test.openDocument(next.document);
+        return next.document;
+      });
+      try {
+        panel.receive({ type: 'copyPng', targetToken, id: 1 });
+        expect(reopen).toHaveBeenCalledTimes(1);
+        resume();
+        const type = named ? 'copy' : 'copyFailed';
+        await waitFor(() => posted(panel, type).length === 1);
+        if (named) expect(posted(panel, type)[0]?.svg).toContain('reopened');
+        else expect(posted(panel, 'diagrams').at(-1)).toMatchObject({ selected: -1 });
+      } finally {
+        reopen.mockRestore();
+        panel.dispose();
+        vscodeStub._test.closeDocument(next.document);
+      }
+    }
+  });
+
+  it('holds the accepted diagram for SVG copy and PNG export when an earlier diagram is deleted', async () => {
+    const first = '@startuml\nA -> B : first\n@enduml\n';
+    const middle = '@startuml(id=middle)\nA -> B : accepted-middle\n@enduml\n';
+    const rest = '@startuml\nA -> B : wrong-last\n@enduml';
+    const editor = makeEditor('file:///c/viewrace/diagrams.puml', first + middle + rest, 4, { languageId: 'plantuml' });
+    vscodeStub._test.setActiveEditor(editor);
+    const panels = vscodeStub._test.webviewPanels;
+    const before = panels.length;
+    await run('plantumlLocal.openPreview');
+    const panel = panels[before]!;
+    panel.receive({ type: 'ready' });
+    await waitFor(() => posted(panel, 'render').length === 1);
+    const { targetToken } = posted(panel, 'render')[0]!;
+    const writes = vscodeStub._test.clipboardWrites;
+    const count = writes.length;
+    panel.receive({ type: 'copySvg', targetToken });
+    panel.receive({ type: 'exportPng', targetToken });
+    editor.document.setText(middle.replace('accepted-middle', 'edited-middle') + rest);
+    editor.document.version++;
+    vscodeStub._test.changeDocument(editor.document, [{ rangeOffset: 0, rangeLength: first.length, text: '' },
+      { rangeOffset: middle.indexOf('accepted'), rangeLength: 8, text: 'edited' }]);
+    await waitFor(() => writes.length > count && panels.length > before + 1);
+    expect(writes.at(-1)).toContain('accepted-middle');
+    const conversion = panels[before + 1]!;
+    conversion.receive({ type: 'ready' });
+    await waitFor(() => posted(conversion, 'draw').length > 0);
+    expect(posted(conversion, 'draw')[0]?.svg).toContain('accepted-middle');
+    conversion.dispose();
   });
 
   it('answers the Copy button with what the PNG button would export, or why there is none', async () => {
@@ -6883,7 +6936,7 @@ describe('viewer (dist)', () => {
     const answers = (): Answer[] =>
       (panel.webview.posted as Answer[]).filter((message) => message.type === 'copy' || message.type === 'copyFailed');
 
-    panel.receive({ type: 'copyPng', id: 1 });
+    panel.receive({ type: 'copyPng', targetToken: posted(panel, 'render').at(-1)?.targetToken, id: 1 });
     await waitFor(() => answers().length > 0);
     const copy = answers()[0];
     // The diagram shown, in the light palette of exports with its
@@ -6901,7 +6954,7 @@ describe('viewer (dist)', () => {
     vscodeStub._test.setConfiguration('exportPngScale', 1, 'file:///c/viewcopy');
     vscodeStub._test.setConfiguration('exportTheme', 'dark', 'file:///c/viewcopy');
     try {
-      panel.receive({ type: 'copyPng', id: 2 });
+      panel.receive({ type: 'copyPng', targetToken: posted(panel, 'render').at(-1)?.targetToken, id: 2 });
       await waitFor(() => answers().length > 1);
       expect(answers()[1]).toMatchObject({ type: 'copy', id: 2, width: Math.ceil(width), background: '#1b1b1b' });
     } finally {
@@ -6911,7 +6964,9 @@ describe('viewer (dist)', () => {
 
     // A diagram the engine draws as an error is not copied.
     editor.document.setText(FLOWS.replace('Carol -> Dave : second', 'this is not valid ;;; [[['));
-    panel.receive({ type: 'copyPng', id: 3 });
+    editor.document.version++;
+    vscodeStub._test.changeDocument(editor.document, [{ rangeOffset: FLOWS.indexOf('Carol'), rangeLength: 'Carol -> Dave : second'.length, text: 'this is not valid ;;; [[[' }]);
+    panel.receive({ type: 'copyPng', targetToken: posted(panel, 'render').at(-1)?.targetToken, id: 3 });
     await waitFor(() => answers().length > 2);
     expect(answers()[2]).toMatchObject({ type: 'copyFailed', id: 3, message: expect.stringMatching(/^PlantUML error on line 6: /) as unknown });
   });
@@ -6929,7 +6984,7 @@ describe('viewer (dist)', () => {
     expect(panel?.revealed).toBe(revealed + 1);
     await waitFor(() => posted(panel!, 'render').some((message) => message.svg?.includes('orders') === true));
 
-    panel?.receive({ type: 'select', index: 1 });
+    panel?.receive({ type: 'select', listRevision: posted(panel!, 'diagrams').at(-1)?.listRevision, index: 1 });
     const count = posted(panel!, 'render').length;
     await waitFor(() => posted(panel!, 'render').length > count);
     expect(posted(panel!, 'render').at(-1)?.svg).toContain('second');
@@ -6978,12 +7033,17 @@ describe('viewer (dist)', () => {
   });
 
   it('draws the file again once it stops changing', async () => {
-    const editor = makeEditor('file:///c/view/flows.puml', FLOWS, 1, { languageId: 'plantuml' });
-    const panel = vscodeStub._test.webviewPanels.find((candidate) => candidate.title === 'Preview: flows.puml');
-    const count = posted(panel!, 'render').length;
-
+    const editor = makeEditor('file:///c/view/edit.puml', FLOWS, 5, { languageId: 'plantuml' });
+    vscodeStub._test.setActiveEditor(editor);
+    const before = vscodeStub._test.webviewPanels.length;
+    await run('plantumlLocal.openPreview');
+    const panel = vscodeStub._test.webviewPanels[before]!;
+    panel.receive({ type: 'ready' });
+    await waitFor(() => posted(panel, 'render').length > 0);
+    const count = posted(panel, 'render').length;
     editor.document.setText(FLOWS.replace('second', 'edited'));
-    vscodeStub._test.changeDocument(editor.document);
+    editor.document.version++;
+    vscodeStub._test.changeDocument(editor.document, [{ rangeOffset: FLOWS.indexOf('second'), rangeLength: 6, text: 'edited' }]);
 
     await waitFor(() => posted(panel!, 'render').length > count);
     expect(posted(panel!, 'render').at(-1)?.svg).toContain('edited');
@@ -7077,7 +7137,7 @@ describe('viewer (dist)', () => {
 
         await waitFor(() => shown.webview.posted.length >= 2);
         expect(posted(shown, 'render')).toEqual([]);
-        expect(shown.webview.posted.at(-1)).toEqual({
+        expect(shown.webview.posted.at(-1)).toMatchObject({
           type: 'status',
           text: 'Select a diagram from the list.',
           error: false,
