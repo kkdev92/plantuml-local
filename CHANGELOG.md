@@ -17,6 +17,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - The PlantUML file preview follows the selected diagram when preceding diagrams move or share its ID. If editing makes the choice ambiguous, the list asks for a new selection. Copy and export use the current text of the diagram shown.
 
+- **Insert Diagram Template says when the template was not inserted.** If the
+  document changed after the command read it — a key typed as the picker
+  closed, say — VS Code inserted nothing, and the command ended without a
+  word. It now asks you to insert the template again.
+
 ## [0.21.0] - 2026-11-03
 
 ### Added

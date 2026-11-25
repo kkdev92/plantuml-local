@@ -6470,11 +6470,16 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
       }
     }
     // One edit, which one Undo takes back, with the lines as they are.
-    await editor.insertSnippet(new vscode.SnippetString(place.text), new vscode.Position(place.line, place.character), {
+    const inserted = await editor.insertSnippet(new vscode.SnippetString(place.text), new vscode.Position(place.line, place.character), {
       undoStopBefore: true,
       undoStopAfter: true,
       keepWhitespace: true,
     });
+    if (!inserted) {
+      // VS Code inserts nothing when the document changed after it was read above, as when
+      // a key is typed while the picker closes, and says so only with this value.
+      void context.notify.warn(context.l10n.t('The document has changed. Insert the template again.'));
+    }
   });
 
   module.services.singleton(Dependencies, {

@@ -2994,6 +2994,27 @@ describe('Insert Diagram Template (dist)', () => {
     expect(flows.inserted).toEqual([]);
     expect(vscodeStub._test.notifications.warn.at(-1)).toBe('Templates cannot be inserted inside an existing diagram.');
   });
+
+  it('says so when VS Code does not insert the template, as when the document changed first', async () => {
+    const editor = makeEditor('file:///c/tpl/typed.md', '# Title\n\nText\n', 1);
+    // VS Code answers false, having inserted nothing, when the document changed after the
+    // command read it (a key typed as the picker closed); then true, the next time.
+    const answers = [false, true];
+    editor.insertSnippet = (snippet, location, options) => {
+      editor.inserted?.push({ value: snippet.value, line: location.line, character: location.character, options });
+      return Promise.resolve(answers.shift() ?? true);
+    };
+    const warnings = vscodeStub._test.notifications.warn.length;
+
+    await insert(editor, 'Sequence diagram');
+    await insert(editor, 'Sequence diagram');
+
+    expect(editor.inserted).toHaveLength(2);
+    // Once, for the template VS Code did not insert.
+    expect(vscodeStub._test.notifications.warn.slice(warnings)).toEqual([
+      'The document has changed. Insert the template again.',
+    ]);
+  });
 });
 
 describe('completion (dist)', () => {
