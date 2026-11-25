@@ -7,16 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-11-25
+
 ### Added
 
-- The PlantUML file preview has an optional minimap. Click it to move around a large diagram at the current zoom.
-
-- Insert a C4 system context, C4 container, or Azure Functions and Storage example from completion or *Insert Diagram Template*. The picker also searches completion prefixes and the descriptions of these examples.
+- **The PlantUML file preview has an optional minimap.** Click it to move
+  around a large diagram at the current zoom.
+- **Insert a C4 system context, C4 container, or Azure Functions and Storage
+  example** from completion or *Insert Diagram Template*. The picker also
+  searches completion prefixes and the descriptions of these examples.
 
 ### Fixed
 
-- The PlantUML file preview follows the selected diagram when preceding diagrams move or share its ID. If editing makes the choice ambiguous, the list asks for a new selection. Copy and export use the current text of the diagram shown.
-
+- **The PlantUML file preview follows the selected diagram** when preceding
+  diagrams move or share its ID. If editing makes the choice ambiguous, the
+  list asks for a new selection. Copy and export use the current text of the
+  diagram shown.
 - **Insert Diagram Template says when the template was not inserted.** If the
   document changed after the command read it — a key typed as the picker
   closed, say — VS Code inserted nothing, and the command ended without a
@@ -1364,7 +1370,8 @@ First public release.
 - happy-dom's bundled self-signed TLS certificate (unused fetch machinery) is
   stripped from the worker bundle at build time.
 
-[Unreleased]: https://github.com/kkdev92/plantuml-local/compare/v0.21.0...HEAD
+[Unreleased]: https://github.com/kkdev92/plantuml-local/compare/v0.22.0...HEAD
+[0.22.0]: https://github.com/kkdev92/plantuml-local/compare/v0.21.0...v0.22.0
 [0.21.0]: https://github.com/kkdev92/plantuml-local/compare/v0.20.0...v0.21.0
 [0.20.0]: https://github.com/kkdev92/plantuml-local/compare/v0.19.0...v0.20.0
 [0.19.0]: https://github.com/kkdev92/plantuml-local/compare/v0.18.0...v0.19.0
