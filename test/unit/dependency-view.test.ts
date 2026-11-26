@@ -625,7 +625,7 @@ describe('DependencyView', () => {
       ['Diagram at line 1', [['Bundled libraries · 2', ['azure/networking/azureapplicationgateway.puml', 'azure/nope.puml · not in the library']]]],
     ];
     let document: FakeDocument;
-    let fired: ReturnType<typeof vi.fn>;
+    let fired: ReturnType<typeof vi.fn<() => void>>;
 
     beforeEach(async () => {
       vi.useFakeTimers();

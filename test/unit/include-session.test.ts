@@ -22,6 +22,9 @@ describe('IncludeSession', () => {
   let root: string;
   let access: IncludeAccess;
   const closed = (): undefined => undefined;
+  /** A session with the limits `fewer` lowers. */
+  const sessionWith = (fewer: Partial<Record<keyof typeof INCLUDE_LIMITS, number>>): IncludeSession =>
+    new IncludeSession(access, closed, { ...INCLUDE_LIMITS, ...fewer } as typeof INCLUDE_LIMITS);
 
   beforeEach(async () => {
     temp = await realpath(await mkdtemp(join(tmpdir(), 'plantuml-local-session-')));
@@ -214,17 +217,17 @@ describe('IncludeSession', () => {
   });
 
   it('stops at the depth, the number of files and the bytes allowed', async () => {
-    const shallow = new IncludeSession(access, closed, { ...INCLUDE_LIMITS, depth: 1 });
+    const shallow = sessionWith({ depth: 1 });
     const outer = await shallow.load('nested.puml', null);
     await expect(shallow.load('common.puml', outer.id)).rejects.toThrow();
     expect(shallow.failures.at(-1)?.reason).toEqual({ kind: 'limit', limit: 'depth' });
 
-    const few = new IncludeSession(access, closed, { ...INCLUDE_LIMITS, files: 1 });
+    const few = sessionWith({ files: 1 });
     await few.load('common.puml', null);
     await expect(few.load('common.puml', null)).rejects.toThrow();
     expect(few.failures.at(-1)?.reason).toEqual({ kind: 'limit', limit: 'files' });
 
-    const small = new IncludeSession(access, closed, { ...INCLUDE_LIMITS, bytes: 20 });
+    const small = sessionWith({ bytes: 20 });
     await small.load('common.puml', null);
     await expect(small.load('common.puml', null)).rejects.toThrow();
     expect(small.failures.at(-1)?.reason).toEqual({ kind: 'limit', limit: 'bytes' });
