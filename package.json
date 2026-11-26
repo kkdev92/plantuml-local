@@ -582,7 +582,7 @@
     "bundle:prod": "node scripts/build.mjs --production",
     "bundle:watch": "node scripts/build.mjs --watch",
     "generate:stdlib": "node scripts/generate-stdlib.mjs",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p test",
     "lint": "eslint src --max-warnings 0",
     "lint:fix": "eslint src --fix",
     "test": "npm run test:unit && npm run test:integration",

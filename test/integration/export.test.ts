@@ -64,6 +64,7 @@ const deps: ExporterDeps = {
     line === null ? `PlantUML reported an error: ${message}` : `PlantUML reported an error at line ${String(line)}: ${message}`,
   pngTooLargeMessage: (width, height) => `The PNG would be ${String(width)}×${String(height)} pixels.`,
   pngFailedMessage: 'Could not create a valid PNG image. Try exporting as SVG.',
+  svgTooLargeMessage: (bytes) => `The SVG text is ${String(bytes)} bytes, over what can be copied.`,
   sameFileMessage: 'Multiple diagrams would be saved to the same file. Give each diagram a unique name or use separate export folders.',
   changedMessage: 'The destination file changed during export and was not overwritten. Check its contents before exporting again.',
   dirtyMessage: 'The image file is open with unsaved changes, so it was not overwritten.',

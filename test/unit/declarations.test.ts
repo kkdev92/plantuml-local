@@ -203,7 +203,7 @@ describe('declarationsOf', () => {
       '!endif',
       '!$done = 1',
     ]);
-    expect(declared.map((d) => [d.name, d.conditional])).toEqual([
+    expect(declared.map((d) => [label(d), d.conditional])).toEqual([
       ['$a', true],
       ['$v', true],
       ['$w', false],

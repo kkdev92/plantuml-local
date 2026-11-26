@@ -107,7 +107,7 @@ Two architectural constraints worth knowing before you change things:
 
 ```bash
 npm run lint          # eslint (type-checked rules)
-npm run typecheck     # tsc --noEmit
+npm run typecheck     # tsc --noEmit, for the source and for the tests
 npm run test:unit     # fast, no build required
 npm test              # bundle + unit + integration (renders real diagrams)
 npm run package       # build the VSIX
