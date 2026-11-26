@@ -118,6 +118,7 @@ import { splitLines } from './core/lines';
 import { documentColumnOf, documentLineOf } from './core/positions';
 import { hasStartLine } from './core/shape';
 import { errorMessage, libraryNotBundled } from './core/messages';
+import { configuredMaxSvgSize } from './core/render-settings';
 import { lineAfterEdits, planReferenceEdits, type ReferenceEdit } from './export/references';
 import { replaceFile } from './export/rename';
 import { scanText, type ReplayReason } from './export/replay';
@@ -2901,10 +2902,7 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         undefined,
         l10n,
         () => {
-          const value = settings.read().values[CONFIG.MAX_SVG_SIZE];
-          return typeof value === 'number' && Number.isSafeInteger(value) && value > 0
-            ? value
-            : DEFAULT_MAX_SVG_SIZE;
+          return configuredMaxSvgSize(settings.read().values[CONFIG.MAX_SVG_SIZE]);
         }
       ),
   });

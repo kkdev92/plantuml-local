@@ -194,6 +194,26 @@ describe('extension (dist)', () => {
     expect(done).toContain('Hello');
   });
 
+  it('applies a changed maxSvgSize setting to the next render without a reload', async () => {
+    const md = makeMd();
+    api.extendMarkdownIt(md);
+    const source = '@startuml\nAlice -> Bob : configurable size\n@enduml';
+
+    try {
+      vscodeStub._test.setConfiguration('maxSvgSize', 1);
+      const limited = await waitForRender(md, 'plantuml', source);
+      expect(limited).toContain('The diagram is');
+      expect(limited).toContain('maximum width or height is 1 pixels');
+
+      vscodeStub._test.setConfiguration('maxSvgSize', 8192);
+      const rendered = await waitForRender(md, 'plantuml', source);
+      expect(rendered).toContain('plantuml-diagram--light');
+      expect(rendered).toContain('configurable size');
+    } finally {
+      vscodeStub._test.setConfiguration('maxSvgSize', undefined);
+    }
+  });
+
   it('requests a preview refresh after rendering', async () => {
     const fired = await waitFor(() =>
       vscodeStub._test.executedCommands.includes('markdown.preview.refresh')
