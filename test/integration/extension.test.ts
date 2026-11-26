@@ -8022,10 +8022,11 @@ describe('allowing SVG auto export (dist)', () => {
 
       // By name, whichever ended first.
       expect(warnedSince(warns)).toEqual(['SVG auto export stopped for 2 diagrams: billing, orders. See the Output panel for why.']);
-      expect(syncLogsSince(logs)).toEqual([
-        'warn: SVG auto export skipped orders. sync-many-1/images/orders.svg changed after it was exported, so it is not overwritten. ' +
-          'Export the diagram as SVG to overwrite it, which asks first.',
+      // Logged as each stopped, which can be in either order.
+      expect(syncLogsSince(logs).sort()).toEqual([
         'warn: SVG auto export skipped billing. sync-many-2/images/billing.svg changed after it was exported, so it is not overwritten. ' +
+          'Export the diagram as SVG to overwrite it, which asks first.',
+        'warn: SVG auto export skipped orders. sync-many-1/images/orders.svg changed after it was exported, so it is not overwritten. ' +
           'Export the diagram as SVG to overwrite it, which asks first.',
       ]);
     });
