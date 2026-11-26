@@ -1298,8 +1298,8 @@ written cannot be recorded as the diagram's export. A notification says so;
   writes shows as an error under *Window* in the Output panel, not in the
   *PlantUML Local* output
 - Hyperlinks (`[[https://…]]`) are drawn as text, not as links
-- A diagram wider or taller than 8192 pixels is not drawn; an error is shown
-  instead
+- A diagram wider or taller than `plantumlLocal.maxSvgSize` pixels is not
+  drawn; the setting defaults to PlantUML's 8192-pixel limit
 - Only the first error in a diagram is reported
 - Start and end lines must begin with a lowercase `@start` or `@end`:
   `@StartUml`, `@EndUml` and `\startuml` fail, while the name after it may
@@ -1352,6 +1352,7 @@ written cannot be recorded as the diagram's export. A notification says so;
 | --- | --- | --- |
 | `plantumlLocal.theme` | `auto` | Diagram palette. `auto` follows the VS Code theme; `light` / `dark` pin it |
 | `plantumlLocal.logLevel` | `info` | Floor for the rendering entries in the *PlantUML Local* output channel: the render worker and the diagrams of the Markdown preview. Commands such as export log regardless. VS Code's own channel level applies first — see [Troubleshooting](#troubleshooting) |
+| `plantumlLocal.maxSvgSize` | `8192` | Maximum width or height of a rendered diagram, in pixels. Defaults to the PlantUML engine's limit; set a larger value to allow larger diagrams |
 | `plantumlLocal.exportDirectory` | `images` | Where exported SVGs and PNGs are written, relative to the Markdown file. `.` for the same folder; absolute paths and `..` are rejected. Can be set per folder |
 | `plantumlLocal.exportTheme` | `light` | Palette for exported SVGs and PNGs, and for diagrams copied from the `.puml` preview. `preview` follows the palette the preview currently uses. Can be set per folder |
 | `plantumlLocal.exportPngScale` | `2` | Scale of an exported PNG, and of a diagram copied from the `.puml` preview: 1, 2 or 4 times the diagram's own size. Can be set per folder |

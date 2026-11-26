@@ -472,6 +472,12 @@
           "default": "info",
           "description": "%config.logLevel.description%"
         },
+        "plantumlLocal.maxSvgSize": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 8192,
+          "description": "%config.maxSvgSize.description%"
+        },
         "plantumlLocal.exportDirectory": {
           "type": "string",
           "default": "images",

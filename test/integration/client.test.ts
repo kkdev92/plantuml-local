@@ -79,6 +79,16 @@ describe('RendererClient', () => {
     expect(svg).toContain('Hello');
   });
 
+  it('passes the configured SVG edge limit to the engine on each render', async () => {
+    let maxSvgSize = 1;
+    client = new RendererClient(realWorkerPath, log, undefined, undefined, undefined, () => maxSvgSize);
+
+    await expect(client.render('@startuml\nAlice -> Bob : Hello\n@enduml', false)).rejects.toThrow('max 1');
+
+    maxSvgSize = 8192;
+    await expect(client.render('@startuml\nAlice -> Bob : Hello\n@enduml', false)).resolves.toContain('Hello');
+  });
+
   describe('after Graphviz crashes', () => {
     // The bundled Graphviz (WebAssembly) runs out of bounds of its memory
     // laying out 100 nested packages, and then fails every later layout in

@@ -36,6 +36,7 @@ import {
   COMMANDS,
   CONFIG,
   CONTEXT_KEYS,
+  DEFAULT_MAX_SVG_SIZE,
   DEFAULT_EXPORT_DIRECTORY,
   DIAGNOSTICS_DEBOUNCE_MS,
   EXTENSION_ID,
@@ -239,6 +240,7 @@ export const Settings = defineSettings({
       values: ['trace', 'debug', 'info', 'warn', 'error'],
       default: 'info',
     }),
+    [CONFIG.MAX_SVG_SIZE]: setting.integer({ default: DEFAULT_MAX_SVG_SIZE, minimum: 1 }),
     // Resource-scoped, so a folder can set its own: read for the document.
     [CONFIG.EXPORT_DIRECTORY]: setting.string({
       default: DEFAULT_EXPORT_DIRECTORY,
@@ -2897,7 +2899,13 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
         filterLogger(logger, () => settings.read().values[CONFIG.LOG_LEVEL]),
         undefined,
         undefined,
-        l10n
+        l10n,
+        () => {
+          const value = settings.read().values[CONFIG.MAX_SVG_SIZE];
+          return typeof value === 'number' && Number.isSafeInteger(value) && value > 0
+            ? value
+            : DEFAULT_MAX_SVG_SIZE;
+        }
       ),
   });
 
@@ -4732,8 +4740,15 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
 
   module.raw.register({
     id: 'plantuml.preview',
-    inject: { plugin: Plugin, requestRefresh: RequestRefresh, settings: Settings.token, l10n: Localization },
-    bind: ({ registrations, logger }, { plugin, requestRefresh, settings, l10n }): undefined => {
+    inject: {
+      plugin: Plugin,
+      renders: Renders,
+      viewers: Viewers,
+      requestRefresh: RequestRefresh,
+      settings: Settings.token,
+      l10n: Localization,
+    },
+    bind: ({ registrations, logger }, { plugin, renders, viewers, requestRefresh, settings, l10n }): undefined => {
       // A colour-theme flip and a `theme` change both invalidate every cached
       // SVG: the palette is baked into the rendered output rather than applied
       // by CSS afterwards.
@@ -4767,6 +4782,12 @@ export const plantuml = defineModule('plantuml', (module): undefined => {
       registrations.own(
         vscode.workspace.onDidChangeConfiguration((event) => {
           if (event.affectsConfiguration(`${EXTENSION_ID}.${CONFIG.PREVIEW_UPDATE_MODE}`)) {
+            requestRefresh();
+          }
+          if (event.affectsConfiguration(`${EXTENSION_ID}.${CONFIG.MAX_SVG_SIZE}`)) {
+            renders.clear();
+            plugin.clearCache();
+            viewers.updateAll();
             requestRefresh();
           }
         })
