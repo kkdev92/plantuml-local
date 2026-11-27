@@ -7,6 +7,8 @@ export interface RenderRequestMessage {
   id: number;
   source: string;
   dark: boolean;
+  /** Maximum width or height accepted by the engine, in pixels. */
+  maxSvgSize?: number;
   /** Whether the host answers the local includes of this render (src/includes/). */
   includes: boolean;
 }
@@ -217,6 +219,6 @@ export interface PlantUmlEngine {
     lines: string[],
     onSuccess: (svg: string) => void,
     onError: (message: string) => void,
-    options?: { dark: boolean }
+    options?: { dark: boolean; maxSvgSize?: number }
   ) => void;
 }

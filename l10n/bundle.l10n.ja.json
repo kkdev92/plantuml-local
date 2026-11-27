@@ -17,7 +17,7 @@
   "Use a bundled theme or a theme file in your workspace.": "同梱のテーマ、またはワークスペース内のテーマファイルを指定してください。",
   "The {0} standard library is not included with this extension. The bundled standard libraries are {1}.": "標準ライブラリ {0} はこの拡張機能に含まれていません。同梱している標準ライブラリは {1} です。",
   "The {0} library bundled with this extension does not include {1}. It includes {2}.": "この拡張機能に同梱の {0} ライブラリに {1} はありません。同梱しているのは {2} です。",
-  "The diagram exceeds the maximum size of 8192 pixels in width or height.": "図の幅または高さが上限の 8192 ピクセルを超えています。",
+  "The diagram exceeds the maximum width or height allowed by the PlantUML engine.": "図の幅または高さが PlantUML エンジンの上限を超えています。",
   "PlantUML render cache cleared.": "PlantUML の描画キャッシュをクリアしました。",
   "Export is unavailable in Restricted Mode. Trust this workspace to export diagrams. You can still use the preview.": "制限モードでは図を書き出せません。書き出すには、このワークスペースを信頼する必要があります。プレビューはそのまま利用できます。",
   "Manage Workspace Trust": "ワークスペースの信頼を管理",

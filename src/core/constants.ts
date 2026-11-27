@@ -64,6 +64,9 @@ export const VIEWER_URI_CONTEXT = `${EXTENSION_ID}.viewerUri`;
 /** The view type of the panel a PNG is drawn in. */
 export const PNG_PANEL_TYPE = `${EXTENSION_ID}.png`;
 
+/** Default one-edge limit documented by @plantuml/core. */
+export const DEFAULT_MAX_SVG_SIZE = 8192;
+
 /**
  * Context keys behind the editor context-menu entries, set with the
  * `setContext` command. They gate the menu items so that an ordinary
@@ -84,6 +87,7 @@ export const CONFIG = {
   EXPORT_DIRECTORY: 'exportDirectory',
   EXPORT_THEME: 'exportTheme',
   EXPORT_PNG_SCALE: 'exportPngScale',
+  MAX_SVG_SIZE: 'maxSvgSize',
   HIDE_EXPORTED_IMAGES: 'hideExportedImages',
   PREVIEW_UPDATE_MODE: 'preview.updateMode',
   DIAGNOSTICS_ENABLED: 'diagnostics.enabled',

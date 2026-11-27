@@ -2,6 +2,7 @@ import { join } from 'node:path';
 import { parentPort } from 'node:worker_threads';
 
 import { splitLines } from '../core/lines';
+import { DEFAULT_MAX_SVG_SIZE } from '../core/constants';
 import type { IncludeResponseMessage, LibraryRead, RenderRequestMessage, RenderResponseMessage } from '../core/types';
 import { loadEngine } from './engine';
 import { installFileLoader } from './file-loader';
@@ -83,7 +84,7 @@ function renderOnce(request: RenderRequestMessage): Promise<Drawn> {
           (message) => {
             reject(new Error(message !== '' ? String(message) : 'PlantUML rendering failed'));
           },
-          { dark: request.dark }
+          { dark: request.dark, maxSvgSize: request.maxSvgSize ?? DEFAULT_MAX_SVG_SIZE }
         );
       });
       return { svg: sanitize(svg), libraries: [...libraries.values()] };
@@ -103,7 +104,10 @@ function renderOnce(request: RenderRequestMessage): Promise<Drawn> {
 async function forgetPreviousRender(): Promise<void> {
   const { engine } = await loadEngine(engineDir, stdlibDir);
   await new Promise<void>((resolve) => {
-    engine.renderToString(RESET_SOURCE, () => resolve(), () => resolve(), { dark: false });
+    engine.renderToString(RESET_SOURCE, () => resolve(), () => resolve(), {
+      dark: false,
+      maxSvgSize: DEFAULT_MAX_SVG_SIZE,
+    });
   });
 }
 

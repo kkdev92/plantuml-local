@@ -101,7 +101,7 @@ function translateDetail(detail: string, l10n: MessageLocalizer): string {
   if (detail.startsWith('Diagram too large for browser rendering')) {
     const size = /(\d+)x(\d+) \(max (\d+)/.exec(detail);
     return size === null
-      ? l10n.t('The diagram exceeds the maximum size of 8192 pixels in width or height.')
+      ? l10n.t('The diagram exceeds the maximum width or height allowed by the PlantUML engine.')
       : l10n.t('The diagram is {0} × {1} pixels. The maximum width or height is {2} pixels. Reduce the diagram size.', size[1] ?? '', size[2] ?? '', size[3] ?? '');
   }
   if (/^Empty description(?: \(Assumed diagram type: .+\))?$/.test(detail)) {
