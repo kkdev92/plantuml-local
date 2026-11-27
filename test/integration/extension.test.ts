@@ -3042,11 +3042,16 @@ describe('completion (dist)', () => {
     document: TextEditorStub['document'],
     line: number,
     character: number
-  ): Promise<CompletionItemStub[] | undefined> =>
-    vscodeStub._test.completionProviders[0]?.provider.provideCompletionItems(
+  ): Promise<CompletionItemStub[] | undefined> => {
+    const registration = vscodeStub._test.completionProviders[0];
+    if (registration === undefined) {
+      throw new Error('no completion provider registered');
+    }
+    return registration.provider.provideCompletionItems(
       document,
       new vscodeStub.Position(line, character)
     );
+  };
 
   it('is registered for Markdown and PlantUML files, opening on the characters suggestions follow', () => {
     expect(vscodeStub._test.completionProviders).toHaveLength(2);
@@ -3129,13 +3134,18 @@ describe('completion (dist)', () => {
 
   describe('aliases, words and snippets', () => {
     /** As VS Code asks while a word is typed, or on Ctrl+Space. */
-    const invoke = (document: TextEditorStub['document'], line: number, character: number): Promise<CompletionItemStub[] | undefined> =>
-      vscodeStub._test.completionProviders[0]?.provider.provideCompletionItems(
+    const invoke = (document: TextEditorStub['document'], line: number, character: number): Promise<CompletionItemStub[] | undefined> => {
+      const registration = vscodeStub._test.completionProviders[0];
+      if (registration === undefined) {
+        throw new Error('no completion provider registered');
+      }
+      return registration.provider.provideCompletionItems(
         document,
         new vscodeStub.Position(line, character),
         undefined,
         { triggerKind: vscodeStub.CompletionTriggerKind.Invoke }
       );
+    };
     const labelOf = (item: CompletionItemStub): string => (typeof item.label === 'string' ? item.label : item.label.label);
     const inserted = (item: CompletionItemStub | undefined): string =>
       typeof item?.insertText === 'object' ? item.insertText.value : String(item?.insertText);
@@ -4864,11 +4874,16 @@ describe('templates (dist)', () => {
     document: TextEditorStub['document'],
     line: number,
     character: number
-  ): Promise<CompletionItemStub[] | undefined> =>
-    vscodeStub._test.completionProviders[0]?.provider.provideCompletionItems(
+  ): Promise<CompletionItemStub[] | undefined> => {
+    const registration = vscodeStub._test.completionProviders[0];
+    if (registration === undefined) {
+      throw new Error('no completion provider registered');
+    }
+    return registration.provider.provideCompletionItems(
       document,
       new vscodeStub.Position(line, character)
     );
+  };
   const inserted = (item: CompletionItemStub | undefined): string =>
     typeof item?.insertText === 'object' ? item.insertText.value : String(item?.insertText);
 
@@ -8042,10 +8057,11 @@ describe('allowing SVG auto export (dist)', () => {
 
       // By name, whichever ended first.
       expect(warnedSince(warns)).toEqual(['SVG auto export stopped for 2 diagrams: billing, orders. See the Output panel for why.']);
-      expect(syncLogsSince(logs)).toEqual([
-        'warn: SVG auto export skipped orders. sync-many-1/images/orders.svg changed after it was exported, so it is not overwritten. ' +
-          'Export the diagram as SVG to overwrite it, which asks first.',
+      // Logged as each stopped, which can be in either order.
+      expect(syncLogsSince(logs).sort()).toEqual([
         'warn: SVG auto export skipped billing. sync-many-2/images/billing.svg changed after it was exported, so it is not overwritten. ' +
+          'Export the diagram as SVG to overwrite it, which asks first.',
+        'warn: SVG auto export skipped orders. sync-many-1/images/orders.svg changed after it was exported, so it is not overwritten. ' +
           'Export the diagram as SVG to overwrite it, which asks first.',
       ]);
     });

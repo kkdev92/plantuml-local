@@ -70,21 +70,21 @@ describe('installStdlib', () => {
     installStdlib(fixtureDir());
     const azure = (globals.PLANTUML_STDLIB as Record<string, Record<string, string[] | null>>).azure;
 
-    expect(azure['azurecommon']).toEqual(['!define AZURE_COLOR #0072C6', 'skinparam shadowing false']);
+    expect(azure?.['azurecommon']).toEqual(['!define AZURE_COLOR #0072C6', 'skinparam shadowing false']);
   });
 
   it('resolves nested include paths lower-cased and without the extension', () => {
     installStdlib(fixtureDir());
     const azure = (globals.PLANTUML_STDLIB as Record<string, Record<string, string[] | null>>).azure;
 
-    expect(azure['compute/azurefunction']?.[0]).toContain('sprite $AzureFunction');
+    expect(azure?.['compute/azurefunction']?.[0]).toContain('sprite $AzureFunction');
   });
 
   it('returns null for a file the library does not have', () => {
     installStdlib(fixtureDir());
     const azure = (globals.PLANTUML_STDLIB as Record<string, Record<string, string[] | null>>).azure;
 
-    expect(azure['compute/nosuchthing']).toBeNull();
+    expect(azure?.['compute/nosuchthing']).toBeNull();
   });
 
   it('tells whoever watches of each file looked up, whether the library has it, until told to stop', () => {
@@ -95,13 +95,13 @@ describe('installStdlib', () => {
       reads.push([library, key, found]);
     });
     try {
-      void azure['azurecommon'];
-      void azure['compute/nosuchthing'];
-      void azure['azurecommon'];
+      void azure?.['azurecommon'];
+      void azure?.['compute/nosuchthing'];
+      void azure?.['azurecommon'];
     } finally {
       watchLibraryReads(null);
     }
-    void azure['compute/azurefunction'];
+    void azure?.['compute/azurefunction'];
 
     expect(reads).toEqual([
       ['azure', 'azurecommon', true],

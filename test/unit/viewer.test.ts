@@ -6,7 +6,7 @@ import type { DiagramRender } from '../../src/core/types';
 import { DiagramViewer, parseRequest, viewerBody, type ViewerDeps } from '../../src/viewer/viewer';
 
 /** A panel that keeps what it is sent. */
-function makePanel(): { post: ReturnType<typeof vi.fn>; sent: unknown[] } {
+function makePanel(): { post: ReturnType<typeof vi.fn<(message: unknown) => Promise<boolean>>>; sent: unknown[] } {
   const sent: unknown[] = [];
   return {
     sent,
